@@ -1,3 +1,9 @@
+## v0.6.0 (2026-11-06)
+
+### Feat
+
+- **dagster**: Parse op-based jobs, schedules and sensors
+
 ## v0.5.1 (2026-11-06)
 
 ### Fix

@@ -19,6 +19,7 @@ jobs:
   lint:
     name: Lint and type check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -44,6 +45,7 @@ jobs:
     name: Commit messages
     if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -67,6 +69,7 @@ jobs:
   test:
     name: Tests (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -116,11 +119,26 @@ jobs:
           echo "The Iceberg REST catalog did not start"
           exit 1
 
+      # Chromium and its system libraries take minutes to install, so the browser tests run once,
+      # on the Python version the project develops against.
+      - name: Cache Playwright's Chromium
+        if: matrix.python == '3.12'
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+
       - name: Install Chromium for the browser tests
+        if: matrix.python == '3.12'
         run: uv run playwright install --with-deps chromium
 
       - name: Run tests with coverage
+        if: matrix.python == '3.12'
         run: uv run pytest --cov --cov-report=term --cov-report=xml
+
+      - name: Run tests
+        if: matrix.python != '3.12'
+        run: uv run pytest -m "not browser"
 
       - name: Upload the coverage report
         if: matrix.python == '3.12'
@@ -132,6 +150,7 @@ jobs:
   real-world:
     name: Real-world dbt project (dbt-labs/jaffle-shop)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -152,6 +171,7 @@ jobs:
   airflow-parity:
     name: Airflow parser against Apache Airflow
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -170,6 +190,7 @@ jobs:
   end-to-end:
     name: End to end (jaffle_shop)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -212,6 +233,7 @@ jobs:
   package:
     name: Package
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v7

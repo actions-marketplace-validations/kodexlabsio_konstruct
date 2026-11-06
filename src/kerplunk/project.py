@@ -23,6 +23,7 @@ from kerplunk.graph import Graph
 if TYPE_CHECKING:
     from kerplunk.build import BuildResult
     from kerplunk.config import Config
+    from kerplunk.diff import Diff
     from kerplunk.verify import Verification
 
 OUT_DIR = "kerplunk-out"
@@ -193,6 +194,13 @@ class Project:
             "verification needs a local DuckDB warehouse with the models built in it; none was found "
             "(pass --warehouse PATH)"
         )
+
+    def diff(self, base: str | None = None, head: str | None = None) -> Diff:
+        """Column-level changes between ``base`` (default: the merge base with main) and ``head``
+        (default: the working tree), with what each change breaks or affects downstream."""
+        from kerplunk.diff import diff
+
+        return diff(self.graph, self.root, base=base, head=head)
 
     def query(self, question: str, depth: int = 1) -> query.QueryResult:
         return query.query(self.graph, question, depth=depth)

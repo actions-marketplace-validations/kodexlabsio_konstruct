@@ -231,7 +231,7 @@ def candidates(graph: Graph, root: Path) -> list[Candidate]:
             continue
         if node.kind != "table" or not node.relation:
             continue
-        sql_file = _defining_sql_file(graph, node, root)
+        sql_file = defining_sql_file(graph, node, root)
         if sql_file is None:
             continue
         query = _query_for(sql_file.read_text(encoding="utf-8"), node.relation, graph)
@@ -252,7 +252,7 @@ def _defaults(graph: Graph) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _defining_sql_file(graph: Graph, node: Node, root: Path) -> Path | None:
+def defining_sql_file(graph: Graph, node: Node, root: Path) -> Path | None:
     for edge in graph.in_edges(node.id, "feeds"):
         source = graph.nodes.get(edge.source)
         if source is not None and source.kind == "task" and source.attrs.get("sql_path"):

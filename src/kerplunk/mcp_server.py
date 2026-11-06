@@ -70,6 +70,19 @@ def build_server(root: Path) -> MCPServer:
         return run(project.path_between, start, end)
 
     @server.tool()
+    def diff(base: str | None = None, head: str | None = None) -> dict[str, Any]:
+        """What the current branch changes, column by column, compared with `base` (default: the
+        merge base with main): columns added, removed or changed with their expressions before and
+        after, changed join and filter conditions, removed columns still read downstream (breaking),
+        changed DAG tasks, and the downstream impact of each change. Use before proposing a merge."""
+        from kerplunk.diff import DiffError
+
+        try:
+            return run(project.diff, base, head)
+        except DiffError as error:
+            raise ToolError(str(error)) from error
+
+    @server.tool()
     def query(question: str) -> dict[str, Any]:
         """A free-text question: the best-matching nodes and their connections, plus impact or
         lineage when the question asks for it. Prefer the specific tools when you know the name."""

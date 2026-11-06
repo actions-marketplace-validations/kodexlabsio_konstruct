@@ -277,6 +277,24 @@ def cmd_verify(args: argparse.Namespace, console: Console) -> int:
     return 1 if args.strict and result.totals()["unexplained"] else 0
 
 
+def cmd_diff(args: argparse.Namespace, console: Console) -> int:
+    from kerplunk.diff import DiffError
+
+    project = _ready(_project(args), args, console)
+    try:
+        result = project.diff(base=args.base, head=args.head)
+    except DiffError as error:
+        console.error(str(error))
+        return 1
+    if args.format == "json":
+        console.print(json.dumps(result.to_dict(), indent=2))
+    elif args.format == "markdown":
+        console.print(result.markdown().rstrip())
+    else:
+        console.print(str(result))
+    return 1 if args.fail_on_breaking and result.breaking else 0
+
+
 def cmd_open(args: argparse.Namespace, console: Console) -> int:
     project = _ready(_project(args), args, console)
     page = project.out_dir / "graph.html"
@@ -360,6 +378,7 @@ examples:
   kerplunk path raw_payments customer_dashboard
   kerplunk search lifetime value
   kerplunk list models
+  kerplunk diff --base origin/main        what this branch changes and breaks, column by column
   kerplunk verify                         check the lineage against the data (DuckDB)
   kerplunk install                        add /kerplunk to Claude Code and Cursor
 
@@ -454,6 +473,25 @@ def parser() -> argparse.ArgumentParser:
     query.add_argument("--depth", type=int, default=1, metavar="N", help="neighbourhood depth around matches")
     _query_options(query)
     query.set_defaults(func=cmd_query)
+
+    diff = add("diff", "what a change does, column by column, compared with a base commit (git)")
+    diff.add_argument(
+        "--base", metavar="REF", help="commit to compare with (default: the merge base with main)"
+    )
+    diff.add_argument("--head", metavar="REF", help="commit to compare (default: the working tree)")
+    diff.add_argument(
+        "--format",
+        choices=["text", "markdown", "json"],
+        default="text",
+        help="markdown suits a pull request comment",
+    )
+    diff.add_argument(
+        "--fail-on-breaking", action="store_true", help="exit with status 1 on a breaking change"
+    )
+    diff.add_argument("--graph", metavar="FILE", help="use this graph.json instead of finding kerplunk-out")
+    diff.add_argument("--refresh", action="store_true", help="update the graph first if its inputs changed")
+    diff.add_argument("--no-build", action="store_true", help="fail rather than build a missing graph")
+    diff.set_defaults(func=cmd_diff, json=False)
 
     verify = add("verify", "test the column lineage against the data by perturbing inputs (DuckDB)")
     verify.add_argument("-m", "--model", action="append", metavar="NAME", help="only this model (repeatable)")

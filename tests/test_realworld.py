@@ -80,3 +80,33 @@ def test_names_resolve_to_the_source(project: Project) -> None:
     assert project.describe("seed.jaffle_shop.raw_orders").node.kind == "seed"
     impact = project.impact("raw_orders.order_total")
     assert "orders.order_total" in {c.label for c in impact.columns}
+
+
+def test_rendering_without_dbt_matches_compiled_lineage(
+    jaffle_shop: Path, project: Project, tmp_path: Path
+) -> None:
+    """kerplunk's own Jinja rendering (used when there is no compiled SQL, and by diff) must give
+    the same lineage as dbt's compiled SQL."""
+    import json
+    import shutil
+
+    copy = tmp_path / "uncompiled"
+    shutil.copytree(jaffle_shop, copy, ignore=shutil.ignore_patterns("kerplunk-out"))
+    manifest_path = copy / "target" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    for node in manifest["nodes"].values():
+        node.pop("compiled_code", None)
+    manifest_path.write_text(json.dumps(manifest))
+    rendered = Project(copy)
+    rendered.build(run_dbt=False)
+
+    def edges(graph: object) -> tuple[set[tuple[str, str, str]], set[tuple[str, str]]]:
+        all_edges = graph.edges  # type: ignore[attr-defined]
+        columns = {
+            (e.source, e.target, e.attrs.get("transform")) for e in all_edges if e.kind == "derived_from"
+        }
+        references = {(e.source, e.target) for e in all_edges if e.attrs.get("role") == "reference"}
+        return columns, references
+
+    assert edges(rendered.graph) == edges(project.graph)
+    assert rendered.graph.warnings == []

@@ -677,6 +677,11 @@ def parse_dbt_commands(command: str) -> list[DbtInvocation]:
     return invocations
 
 
+def parse_source(path: Path, source: str) -> list[DagInfo]:
+    """Parse DAG source as if it were the file at ``path`` (for other versions of a file)."""
+    return _Parser(path, source).parse()
+
+
 def parse_file(path: Path) -> list[DagInfo]:
     """Parse one DAG file. Raises SyntaxError if the file is not valid Python."""
     source = path.read_text(encoding="utf-8")

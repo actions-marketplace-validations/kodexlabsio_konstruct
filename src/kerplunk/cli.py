@@ -260,6 +260,23 @@ def cmd_query(args: argparse.Namespace, console: Console) -> int:
     return 0
 
 
+def cmd_verify(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    if not args.json:
+        console.info(
+            "perturbing inputs and rerunning models; this reads the warehouse but never writes to it"
+        )
+    result = project.verify(warehouse=args.warehouse, seed=args.seed, max_rows=args.rows, models=args.model)
+    _emit(console, result, args.json)
+    if not args.json:
+        console.print(
+            f"\nWrote VERIFY.md and verify.json to {_relative(project.out_dir)}; graph.json now marks confirmed edges."
+        )
+    if not result.checked:
+        return 1
+    return 1 if args.strict and result.totals()["unexplained"] else 0
+
+
 def cmd_open(args: argparse.Namespace, console: Console) -> int:
     project = _ready(_project(args), args, console)
     page = project.out_dir / "graph.html"
@@ -343,6 +360,7 @@ examples:
   kerplunk path raw_payments customer_dashboard
   kerplunk search lifetime value
   kerplunk list models
+  kerplunk verify                         check the lineage against the data (DuckDB)
   kerplunk install                        add /kerplunk to Claude Code and Cursor
 
 Names can be a table (orders, main.orders), a column (orders.amount), a dbt unique id or a
@@ -436,6 +454,23 @@ def parser() -> argparse.ArgumentParser:
     query.add_argument("--depth", type=int, default=1, metavar="N", help="neighbourhood depth around matches")
     _query_options(query)
     query.set_defaults(func=cmd_query)
+
+    verify = add("verify", "test the column lineage against the data by perturbing inputs (DuckDB)")
+    verify.add_argument("-m", "--model", action="append", metavar="NAME", help="only this model (repeatable)")
+    verify.add_argument(
+        "--seed", type=int, default=1729, help="random seed, for reproducible runs (default 1729)"
+    )
+    verify.add_argument(
+        "--rows", type=int, default=10000, metavar="N", help="rows copied per input (default 10000)"
+    )
+    verify.add_argument(
+        "--warehouse", metavar="FILE", help="DuckDB file with the built models (default: discovered)"
+    )
+    verify.add_argument(
+        "--strict", action="store_true", help="exit with status 1 if any influence is unexplained"
+    )
+    _query_options(verify)
+    verify.set_defaults(func=cmd_verify)
 
     open_ = add("open", "open graph.html in a browser")
     open_.add_argument("--print-only", action="store_true", help="print the file URL without opening it")

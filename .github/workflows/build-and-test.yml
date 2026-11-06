@@ -224,6 +224,9 @@ jobs:
           uv run kerplunk trace orders.amount
           uv run kerplunk query "which models use payments"
 
+      - name: Verify the lineage against the data
+        run: uv run kerplunk verify -C examples/jaffle_shop --strict
+
       - name: Upload the graph
         uses: actions/upload-artifact@v7
         with:

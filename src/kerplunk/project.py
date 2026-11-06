@@ -12,6 +12,8 @@ for column in walk.columns:
 
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,6 +23,7 @@ from kerplunk.graph import Graph
 if TYPE_CHECKING:
     from kerplunk.build import BuildResult
     from kerplunk.config import Config
+    from kerplunk.verify import Verification
 
 OUT_DIR = "kerplunk-out"
 
@@ -147,6 +150,49 @@ class Project:
 
     def list(self, kinds: list[str] | None = None) -> query.Listing:
         return query.list_nodes(self.graph, kinds)
+
+    def verify(
+        self,
+        *,
+        warehouse: str | Path | None = None,
+        seed: int = 1729,
+        max_rows: int = 10000,
+        models: Sequence[str] | None = None,
+        write: bool = True,
+    ) -> Verification:
+        """Check the graph's column lineage against the data by perturbation (see kerplunk.verify).
+
+        Needs the models built in a local DuckDB warehouse; by default the one the build read.
+        With ``write``, saves VERIFY.md and verify.json and marks verified edges in graph.json.
+        """
+        from kerplunk.verify import annotate, verify
+
+        graph = self.graph
+        path = Path(warehouse) if warehouse else self._duckdb_warehouse()
+        result = verify(
+            graph, self.root, path, seed=seed, max_rows=max_rows, only=list(models) if models else None
+        )
+        if path.resolve().is_relative_to(self.root.resolve()):
+            result.warehouse = str(path.resolve().relative_to(self.root.resolve()))
+        if write:
+            annotate(graph, result)
+            graph.write(self.graph_path)
+            self._stamp = self._file_stamp()
+            (self.out_dir / "VERIFY.md").write_text(result.markdown(), encoding="utf-8")
+            (self.out_dir / "verify.json").write_text(
+                json.dumps(result.to_dict(), indent=1) + "\n", encoding="utf-8"
+            )
+        return result
+
+    def _duckdb_warehouse(self) -> Path:
+        for source in self.graph.meta.get("sources", []):
+            if source.get("input") == "duckdb" and source.get("status") != "failed":
+                path = Path(str(source["name"]).removeprefix("duckdb ").strip())
+                return path if path.is_absolute() else self.root / path
+        raise query.QueryError(
+            "verification needs a local DuckDB warehouse with the models built in it; none was found "
+            "(pass --warehouse PATH)"
+        )
 
     def query(self, question: str, depth: int = 1) -> query.QueryResult:
         return query.query(self.graph, question, depth=depth)

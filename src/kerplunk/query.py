@@ -58,6 +58,7 @@ class Item:
     depth: int | None = None
     via: str | None = None
     transform: str | None = None
+    verified: str | None = None
     role: str | None = None
     command: str | None = None
     through: str | None = None
@@ -69,7 +70,9 @@ class Item:
 
     def __str__(self) -> str:
         meta = [self.relation_kind or self.kind]
-        meta += [str(v) for v in (self.data_type, self.transform, self.role, self.command) if v]
+        meta += [
+            str(v) for v in (self.data_type, self.transform, self.verified, self.role, self.command) if v
+        ]
         if self.through:
             meta.append(f"via {self.through}")
         parts = [self.label, f"[{', '.join(meta)}]"]
@@ -95,7 +98,7 @@ def item(graph: Graph, node: Node, step: Step | None = None, **extra: Any) -> It
         data["depth"] = step.depth
         if step.via is not None:
             data["via"] = step.via.kind
-            for key in ("transform", "role", "command"):
+            for key in ("transform", "verified", "role", "command"):
                 data[key] = step.via.attrs.get(key)
             through = step.via.attrs.get("via")
             if through:

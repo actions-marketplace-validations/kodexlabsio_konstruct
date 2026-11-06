@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from kerplunk import __version__
 from kerplunk.cli import main
 
 GOLDEN = Path(__file__).parent / "golden"
@@ -24,6 +25,7 @@ def normalise(text: str, root: Path) -> str:
     text = text.replace(str(root), "<root>").replace(str(root.resolve()), "<root>")
     text = re.sub(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+\-]\d\d:\d\d", "<time>", text)
     text = re.sub(r"in \d+(\.\d+)?s", "in <seconds>s", text)
+    text = text.replace(f"kerplunk {__version__}", "kerplunk <version>")
     return text
 
 
@@ -64,3 +66,14 @@ def test_report(jaffle_built_graph: Path) -> None:
 def test_build_summary(jaffle_built_graph: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--no-color", "build", str(jaffle_built_graph), "--update"]) == 0
     check("build.txt", normalise(capsys.readouterr().out, jaffle_built_graph))
+
+
+def test_verify(jaffle_built_graph: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import shutil
+
+    copy = tmp_path / "jaffle_shop"
+    shutil.copytree(jaffle_built_graph, copy)
+    assert main(["--no-color", "-q", "verify", "-C", str(copy), "--strict"]) == 0
+    check("verify.txt", normalise(capsys.readouterr().out, copy))
+    assert (copy / "kerplunk-out" / "VERIFY.md").is_file()
+    assert (copy / "kerplunk-out" / "verify.json").is_file()

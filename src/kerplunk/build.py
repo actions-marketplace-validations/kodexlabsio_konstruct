@@ -245,6 +245,8 @@ class Builder:
         used_sql = self.load_airflow(schema_key)
         self.load_sql_files(projects, used_sql, schema_key)
         self.graph.meta["dialect"] = self.dialect
+        self.graph.meta["default_catalog"] = self.default_catalog
+        self.graph.meta["default_schema"] = self.default_schema
         self.graph.meta["inputs"] = self.inputs
         self.graph.meta["sources"] = self.sources
         if self.config.config_file:

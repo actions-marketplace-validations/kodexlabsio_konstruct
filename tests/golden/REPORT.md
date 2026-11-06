@@ -1,6 +1,6 @@
 # kerplunk report
 
-Built <time> from `<root>` by kerplunk 0.1.0 in <seconds>s. SQL dialect: duckdb.
+Built <time> from `<root>` by kerplunk <version> in <seconds>s. SQL dialect: duckdb.
 
 ## Summary
 

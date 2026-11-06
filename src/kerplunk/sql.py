@@ -153,7 +153,7 @@ def _safe_type(dtype: str | None, dialect: str | None) -> str:
     return dtype
 
 
-def _table_key(table: exp.Table, default_catalog: str | None, default_db: str | None) -> str:
+def table_key(table: exp.Table, default_catalog: str | None, default_db: str | None) -> str:
     return relation_key(
         table.catalog or (default_catalog if table.db or default_db else None),
         table.db or default_db,
@@ -237,7 +237,7 @@ def _analyse_statement(
     else:
         return None
 
-    write_key = _table_key(write, default_catalog, default_db) if isinstance(write, exp.Table) else target
+    write_key = table_key(write, default_catalog, default_db) if isinstance(write, exp.Table) else target
     result = StatementLineage(kind=kind, target=write_key)
 
     ctes = {cte.alias_or_name.lower() for cte in statement.find_all(exp.CTE)}
@@ -245,7 +245,7 @@ def _analyse_statement(
     for table in statement.find_all(exp.Table):
         if table is write or (not table.db and table.name.lower() in ctes) or not table.name:
             continue
-        key = _table_key(table, default_catalog, default_db)
+        key = table_key(table, default_catalog, default_db)
         if key != write_key and key not in reads:
             reads.append(key)
     result.reads = reads
@@ -291,7 +291,7 @@ def _column_lineage(
         result.errors.append("INSERT column list does not match the SELECT list")
         out_names = None
 
-    star_tables = [_table_key(t, default_catalog, default_db) for t in _unexpanded_star_tables(scope)]
+    star_tables = [table_key(t, default_catalog, default_db) for t in _unexpanded_star_tables(scope)]
     for index, (name, node) in enumerate(nodes.items()):
         if name == "*":
             continue
@@ -346,7 +346,7 @@ def _leaf_source(
     table = leaf.expression
     if not isinstance(table, exp.Table):
         return None
-    relation = _table_key(table, default_catalog, default_db)
+    relation = table_key(table, default_catalog, default_db)
     column = leaf.name.rsplit(".", 1)[-1].strip('"`[]').lower()
     if column == "*":
         # A relation whose columns sqlglot could not expand: the column is the one the query
@@ -397,7 +397,7 @@ def _references(
         for column in columns:
             source = scope.sources.get(column.table)
             if isinstance(source, exp.Table):
-                add(_table_key(source, default_catalog, default_db), column.name)
+                add(table_key(source, default_catalog, default_db), column.name)
             elif isinstance(source, Scope):
                 try:
                     traced = to_node(column.name, scope=source, dialect=dialect, schema=schema)

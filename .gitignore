@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node (commit tooling only)
+/node_modules
+
+# kerplunk output
+kerplunk-out/
+
+# dbt
+target/
+dbt_packages/
+logs/
+.user.yml
+
+# Local databases
+*.duckdb
+*.duckdb.wal
+
+# misc
+.DS_Store
+.env*
+!.env.example
+
+.kodex/backups
+
+# Claude Code local settings
+.claude/settings.local.json
+.claude/worktrees/

@@ -24,7 +24,8 @@ def structured(result: Any) -> dict[str, Any]:
 
 async def _exercise(client: Client) -> None:
     tools = await client.list_tools()
-    assert {t.name for t in tools.tools} == {"impact", "trace", "search", "describe", "path"}
+    assert {t.name for t in tools.tools} == {"impact", "trace", "search", "describe", "path", "query"}
+    assert all(t.description and t.input_schema for t in tools.tools)
     impact = structured(await client.call_tool("impact", {"ref": "stg_payments.amount"}))
     assert impact["exposures"][0]["label"] == "customer_dashboard"
     trace = structured(await client.call_tool("trace", {"ref": "orders.amount", "max_depth": 1}))
@@ -37,6 +38,10 @@ async def _exercise(client: Client) -> None:
     assert describe["kind"] == "model"
     path = structured(await client.call_tool("path", {"start": "raw_orders", "end": "orders"}))
     assert path["found"] is True
+    answer = structured(
+        await client.call_tool("query", {"question": "what breaks if stg_payments.amount changes"})
+    )
+    assert answer["impact"]["summary"].endswith("downstream.")
     missing = await client.call_tool("impact", {"ref": "nope"})
     assert missing.is_error
     assert "nothing in the graph matches" in str(missing.content)

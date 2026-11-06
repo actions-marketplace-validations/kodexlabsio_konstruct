@@ -1,71 +1,67 @@
-"""The kerplunk command line."""
+"""The kerplunk command line.
+
+Exit status: 0 on success, 1 on an error (or, with ``build --strict``, on warnings), 2 on a usage
+error, 3 when ``path`` finds no connection.
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import os
 import sys
+import webbrowser
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from kerplunk import __version__
+from kerplunk.console import Console
+from kerplunk.project import OUT_DIR, Project, find_out_dir
 
-OUT_DIR = "kerplunk-out"
+__all__ = ["OUT_DIR", "find_out_dir", "main", "parser"]
 
-
-def find_out_dir(start: Path) -> Path:
-    """The nearest kerplunk-out directory with a graph, looking up from ``start``."""
-    start = start.resolve()
-    for directory in (start, *start.parents):
-        if (directory / OUT_DIR / "graph.json").is_file():
-            return directory / OUT_DIR
-        if (directory / "graph.json").is_file() and directory.name == OUT_DIR:
-            return directory
-    return start / OUT_DIR
+NODE_KINDS = ("source", "table", "column", "model", "seed", "snapshot", "dag", "task", "test", "exposure")
 
 
-def _print(data: Any, as_json: bool, text: str) -> None:
+def _project(args: argparse.Namespace) -> Project:
+    if getattr(args, "graph", None):
+        graph = Path(args.graph).resolve()
+        return Project(graph.parent.parent, out_dir=graph.parent)
+    return Project(args.project)
+
+
+def _ready(project: Project, args: argparse.Namespace, console: Console) -> Project:
+    """Make sure a query command has a graph: build one if there is none, and refresh or warn
+    when inputs changed since the last build."""
+    if not project.has_graph():
+        if args.no_build:
+            from kerplunk.query import QueryError
+
+            raise QueryError(f"no graph at {project.graph_path}; run `kerplunk build` first")
+        console.info(f"no graph yet; building {project.path}")
+        project.build()
+        return project
+    changed = project.changed_inputs()
+    if changed:
+        shown = ", ".join(changed[:3]) + (f" and {len(changed) - 3} more" if len(changed) > 3 else "")
+        if args.refresh:
+            console.info(f"{len(changed)} input(s) changed ({shown}); updating the graph")
+            project.build(update=True)
+        else:
+            console.warn(
+                f"the graph is older than {len(changed)} changed input(s) ({shown}); "
+                "results may be out of date. Add --refresh or run `kerplunk build --update`"
+            )
+    return project
+
+
+def _emit(console: Console, result: Any, as_json: bool) -> None:
     if as_json:
-        print(json.dumps(data, indent=2))
+        console.print(json.dumps(result.to_dict(), indent=2))
     else:
-        print(text)
-
-
-def cmd_build(args: argparse.Namespace) -> int:
-    from kerplunk.build import build
-    from kerplunk.config import load_config
-
-    root = Path(args.path)
-    if not root.is_dir():
-        print(f"kerplunk: {root} is not a directory", file=sys.stderr)
-        return 1
-    config = load_config(root, Path(args.out) if args.out else None)
-    if args.no_dbt:
-        config.run_dbt = False
-    if args.no_warehouse:
-        config.warehouses = []
-    if args.dialect:
-        config.dialect = args.dialect
-    result = build(config, update=args.update)
-    graph = result.graph
-    stats = graph.stats()
-    kinds = ", ".join(
-        f"{count} {kind}{'s' if count != 1 else ''}"
-        for kind, count in sorted(stats.items())
-        if not kind.startswith("edge:")
-    )
-    lineage = stats.get("edge:derived_from", 0)
-    print(f"kerplunk: {kinds}")
-    print(f"kerplunk: {lineage} column lineage edges, {len(graph.edges)} edges in all")
-    if args.update:
-        total = result.cache_hits + result.cache_misses
-        print(f"kerplunk: reused {result.cache_hits} of {total} cached analyses")
-    if graph.warnings:
-        print(f"kerplunk: {len(graph.warnings)} warning(s); see {_relative(result.outputs[1])}")
-    print(f"kerplunk: wrote {', '.join(_relative(p) for p in result.outputs)} in {result.seconds:.1f}s")
-    return 0
+        console.print(str(result))
 
 
 def _relative(path: Path) -> str:
@@ -75,153 +71,387 @@ def _relative(path: Path) -> str:
         return str(path)
 
 
-def _graph(args: argparse.Namespace) -> Any:
-    from kerplunk.query import load_graph
-
-    out = Path(args.graph).parent if args.graph else find_out_dir(Path(args.path))
-    return load_graph(out)
+# build
 
 
-def cmd_impact(args: argparse.Namespace) -> int:
-    from kerplunk.query import impact, render_walk
+def cmd_build(args: argparse.Namespace, console: Console) -> int:
+    from kerplunk.build import build
+    from kerplunk.config import load_config
+    from kerplunk.report import analyse
 
-    result = impact(_graph(args), args.ref, args.depth)
-    _print(result, args.json, render_walk(result))
+    root = Path(args.path or args.project)
+    if not root.is_dir():
+        console.error(f"{root} is not a directory")
+        return 1
+    config = load_config(root, Path(args.out) if args.out else None)
+    if args.no_dbt:
+        config.run_dbt = False
+    if args.no_warehouse:
+        config.warehouses = []
+    if args.dialect:
+        config.dialect = args.dialect
+    if not args.json:
+        console.info(f"building {config.root}")
+    result = build(config, update=args.update)
+    graph = result.graph
+    findings = analyse(graph)
+    stats = graph.stats()
+    outputs = [_relative(p) for p in result.outputs]
+    if args.json:
+        summary = {
+            "root": str(config.root),
+            "outputs": outputs,
+            "seconds": round(result.seconds, 2),
+            "inputs": graph.meta.get("sources", []),
+            "nodes": {k: v for k, v in stats.items() if not k.startswith("edge:")},
+            "edges": {k[5:]: v for k, v in stats.items() if k.startswith("edge:")},
+            "lineage": {"covered": findings.lineage_covered, "columns": findings.lineage_total},
+            "cache": {"hits": result.cache_hits, "misses": result.cache_misses},
+            "warnings": graph.warnings,
+        }
+        console.print(json.dumps(summary, indent=2))
+    else:
+        _print_build(console, config.root, result, findings, outputs, args.update)
+    return 1 if args.strict and graph.warnings else 0
+
+
+def _print_build(
+    console: Console, root: Path, result: Any, findings: Any, outputs: list[str], update: bool
+) -> None:
+    graph = result.graph
+    sources: list[dict[str, str]] = graph.meta.get("sources", [])
+    console.print(f"{console.style('kerplunk', 'bold')}  {root}")
+    console.print()
+    if not sources:
+        console.row("inputs", "none found: no dbt project, DAG, SQL file or warehouse", style=("yellow",))
+    for source in sources:
+        name = source.get("name") or source.get("path", "")
+        if source.get("input") == "dbt":
+            name = f"{source['name']} ({source['path']})"
+        text = "  ".join(part for part in (name, source.get("detail", "")) if part)
+        note = source.get("note")
+        if note:
+            text += "  " + console.style(f"({note})", "dim")
+        failed = source.get("status") == "failed"
+        console.row(source.get("input", ""), text, style=("red",) if failed else ())
+    console.print()
+    stats = graph.stats()
+    counts = ", ".join(
+        f"{count} {kind}{'s' if count != 1 else ''}"
+        for kind, count in sorted(stats.items())
+        if not kind.startswith("edge:") and kind != "column"
+    )
+    console.row("graph", f"{counts or 'empty'}; {stats.get('column', 0)} columns")
+    if findings.lineage_total:
+        share = 100 * findings.lineage_covered / findings.lineage_total
+        console.row(
+            "lineage",
+            f"{findings.lineage_covered} of {findings.lineage_total} columns of models and built tables ({share:.0f}%)",
+        )
+    if update:
+        total = result.cache_hits + result.cache_misses
+        console.row("reused", f"{result.cache_hits} of {total} cached analyses")
+    if graph.warnings:
+        console.row("warnings", str(len(graph.warnings)), style=("yellow",))
+        for warning in graph.warnings[:5]:
+            console.print(f"    {console.style('-', 'yellow')} {warning}")
+        if len(graph.warnings) > 5:
+            console.print(f"    and {len(graph.warnings) - 5} more in {outputs[1]}")
+    else:
+        console.row("warnings", "none", style=("green",))
+    console.row("wrote", f"{', '.join(outputs)} in {result.seconds:.1f}s")
+
+
+# status and init
+
+
+def cmd_status(args: argparse.Namespace, console: Console) -> int:
+    from kerplunk.status import inspect
+
+    status = inspect(Path(args.project))
+    if args.json:
+        console.print(json.dumps(status.to_dict(), indent=2))
+        return 0
+    console.print(f"{console.style('kerplunk', 'bold')}  {status.root}")
+    console.print()
+    for key, value in status.lines():
+        attention = (
+            key == "graph" and ("changed" in value or "not built" in value)
+        ) or "not installed" in value
+        console.row(key, value, width=13, style=("yellow",) if attention else ())
     return 0
 
 
-def cmd_trace(args: argparse.Namespace) -> int:
-    from kerplunk.query import render_walk, trace
+def cmd_init(args: argparse.Namespace, console: Console) -> int:
+    from kerplunk import dbt
+    from kerplunk.config import discover_warehouses, load_config
+    from kerplunk.status import inspect, render_config
 
-    result = trace(_graph(args), args.ref, args.depth)
-    _print(result, args.json, render_walk(result))
+    root = Path(args.project).resolve()
+    target = root / "kerplunk.toml"
+    if target.exists() and not args.force and not args.stdout:
+        console.error(f"{_relative(target)} already exists; add --force to replace it")
+        return 1
+    config = load_config(root)
+    text = render_config(config, inspect(root), discover_warehouses(config, dbt.find_projects(root)))
+    if args.stdout:
+        console.print(text.rstrip())
+        return 0
+    target.write_text(text, encoding="utf-8")
+    console.print(f"kerplunk: wrote {_relative(target)}; edit it if needed, then run `kerplunk build`")
     return 0
 
 
-def cmd_path(args: argparse.Namespace) -> int:
-    from kerplunk.query import path, render_path
-
-    result = path(_graph(args), args.start, args.end)
-    _print(result, args.json, render_path(result))
-    return 0 if result["found"] else 1
+# Questions
 
 
-def cmd_search(args: argparse.Namespace) -> int:
-    from kerplunk.query import render_search, search
-
-    result = search(_graph(args), " ".join(args.text), args.limit, args.kind)
-    _print(result, args.json, render_search(result))
+def cmd_impact(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    _emit(console, project.impact(args.ref, args.depth), args.json)
     return 0
 
 
-def cmd_describe(args: argparse.Namespace) -> int:
-    from kerplunk.query import describe, render_describe
-
-    result = describe(_graph(args), args.ref)
-    _print(result, args.json, render_describe(result))
+def cmd_trace(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    _emit(console, project.trace(args.ref, args.depth), args.json)
     return 0
 
 
-def cmd_query(args: argparse.Namespace) -> int:
-    from kerplunk.query import query, render_query
+def cmd_path(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    result = project.path_between(args.start, args.end)
+    _emit(console, result, args.json)
+    return 0 if result.found else 3
 
-    graph = _graph(args)
-    result = query(graph, " ".join(args.question), depth=args.depth)
-    _print(result, args.json, render_query(graph, result))
+
+def cmd_search(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    _emit(console, project.search(" ".join(args.text), args.limit, args.kind), args.json)
     return 0
 
 
-def cmd_install(args: argparse.Namespace) -> int:
+def cmd_describe(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    _emit(console, project.describe(args.ref), args.json)
+    return 0
+
+
+def _singular(kind: str) -> str:
+    kind = kind.lower()
+    return kind[:-1] if kind.endswith("s") and kind[:-1] in NODE_KINDS else kind
+
+
+def cmd_list(args: argparse.Namespace, console: Console) -> int:
+    kinds = [_singular(k) for k in args.kinds]
+    unknown = [k for k in kinds if k not in NODE_KINDS]
+    if unknown:
+        console.error(f"unknown kind {unknown[0]!r}; choose from {', '.join(NODE_KINDS)}")
+        return 2
+    project = _ready(_project(args), args, console)
+    _emit(console, project.list(kinds or None), args.json)
+    return 0
+
+
+def cmd_query(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    _emit(console, project.query(" ".join(args.question), depth=args.depth), args.json)
+    return 0
+
+
+def cmd_open(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    page = project.out_dir / "graph.html"
+    if not page.is_file():
+        console.error(f"no viewer at {page}; run `kerplunk build`")
+        return 1
+    console.print(page.as_uri())
+    if not args.print_only:
+        webbrowser.open(page.as_uri())
+    return 0
+
+
+# Agents
+
+
+def cmd_install(args: argparse.Namespace, console: Console) -> int:
     from kerplunk.skill import install
 
-    for line in install(
-        agents=args.agent,
-        project=Path(args.project).resolve() if args.project else None,
-        mcp=args.mcp,
-        force=args.force,
-    ):
-        print(f"kerplunk: {line}")
+    target = Path(args.target).resolve() if args.target else None
+    for line in install(agents=args.agent, project=target, mcp=args.mcp, force=args.force):
+        console.print(f"kerplunk: {line}")
     return 0
 
 
-def cmd_mcp(args: argparse.Namespace) -> int:
+def cmd_mcp(args: argparse.Namespace, console: Console) -> int:
     from kerplunk.mcp_server import serve
 
-    serve(Path(args.path))
+    serve(Path(args.project))
     return 0
 
 
-def _add_graph_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--path", default=".", help="project directory; the graph is found in kerplunk-out here or above"
+# Parser
+
+
+def _common() -> argparse.ArgumentParser:
+    """Options every command accepts, before or after its name."""
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "-C",
+        "--project",
+        "--path",
+        dest="project",
+        default=argparse.SUPPRESS,
+        metavar="DIR",
+        help="project directory (default: the current directory)",
     )
-    parser.add_argument("--graph", help="path to a graph.json, instead of looking for kerplunk-out")
-    parser.add_argument("--json", action="store_true", help="print JSON instead of text")
+    common.add_argument(
+        "--no-color",
+        "--no-colour",
+        dest="no_color",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="never colour the output (NO_COLOR is also respected)",
+    )
+    common.add_argument(
+        "-v", "--verbose", action="store_true", default=argparse.SUPPRESS, help="log progress to stderr"
+    )
+    common.add_argument(
+        "-q", "--quiet", action="store_true", default=argparse.SUPPRESS, help="no progress messages on stderr"
+    )
+    return common
+
+
+def _query_options(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--json", action="store_true", help="print JSON instead of text")
+    command.add_argument(
+        "--graph", metavar="FILE", help="use this graph.json instead of finding kerplunk-out"
+    )
+    command.add_argument(
+        "--refresh", action="store_true", help="update the graph first if its inputs changed"
+    )
+    command.add_argument("--no-build", action="store_true", help="fail rather than build a missing graph")
+
+
+EPILOG = """\
+examples:
+  kerplunk build                          build the graph for the current directory
+  kerplunk status                         what kerplunk finds here; is the graph current?
+  kerplunk impact orders.amount           what breaks if orders.amount changes
+  kerplunk trace customers.lifetime_value where a value comes from
+  kerplunk path raw_payments customer_dashboard
+  kerplunk search lifetime value
+  kerplunk list models
+  kerplunk install                        add /kerplunk to Claude Code and Cursor
+
+Names can be a table (orders, main.orders), a column (orders.amount), a dbt unique id or a
+DAG task (dag_id.task_id). Query commands build the graph first if it does not exist yet.
+Run `kerplunk <command> --help` for a command's options.
+"""
 
 
 def parser() -> argparse.ArgumentParser:
+    common = _common()
     root = argparse.ArgumentParser(
         prog="kerplunk",
-        description="Turn a data stack into a queryable graph with column-level lineage.",
+        description="Turn a data stack (dbt, SQL, Airflow, warehouse and Iceberg metadata) into a "
+        "queryable graph with column-level lineage, for people and coding agents.",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        parents=[common],
     )
     root.add_argument("--version", action="version", version=f"kerplunk {__version__}")
-    root.add_argument("-v", "--verbose", action="store_true", help="log progress to stderr")
-    commands = root.add_subparsers(dest="command", required=True, metavar="command")
+    commands = root.add_subparsers(dest="command", metavar="<command>", title="commands")
 
-    build = commands.add_parser("build", help="build kerplunk-out/graph.json, REPORT.md and graph.html")
-    build.add_argument("path", nargs="?", default=".", help="project directory (default: .)")
-    build.add_argument("--update", action="store_true", help="reuse cached analyses of unchanged inputs")
-    build.add_argument("--out", help="output directory (default: <path>/kerplunk-out)")
-    build.add_argument("--no-dbt", action="store_true", help="never run dbt; use existing artefacts")
+    def add(name: str, help_text: str) -> argparse.ArgumentParser:
+        description = help_text[:1].upper() + help_text[1:] + "."
+        return commands.add_parser(name, help=help_text, description=description, parents=[common])
+
+    build = add("build", "build kerplunk-out/graph.json, REPORT.md and graph.html")
+    build.add_argument("path", nargs="?", help="project directory (default: -C or the current directory)")
+    build.add_argument(
+        "-u", "--update", action="store_true", help="reuse cached analyses of unchanged inputs"
+    )
+    build.add_argument("--out", metavar="DIR", help="output directory (default: <project>/kerplunk-out)")
+    build.add_argument("--no-dbt", action="store_true", help="never run dbt; use the artefacts in target/")
     build.add_argument("--no-warehouse", action="store_true", help="do not connect to any warehouse")
-    build.add_argument("--dialect", help="SQL dialect for sqlglot (default: from the dbt adapter)")
+    build.add_argument(
+        "--dialect", help="SQL dialect for sqlglot (default: from the dbt adapter or warehouse)"
+    )
+    build.add_argument("--strict", action="store_true", help="exit with status 1 if there are warnings")
+    build.add_argument("--json", action="store_true", help="print a JSON summary instead of text")
     build.set_defaults(func=cmd_build)
 
-    query = commands.add_parser("query", help="answer a free-text question from the graph")
-    query.add_argument("question", nargs="+")
-    query.add_argument("--depth", type=int, default=1, help="neighbourhood depth around matches")
-    _add_graph_args(query)
-    query.set_defaults(func=cmd_query)
+    status = add("status", "show what kerplunk finds here and whether the graph is up to date")
+    status.add_argument("--json", action="store_true", help="print JSON instead of text")
+    status.set_defaults(func=cmd_status)
+
+    init = add("init", "write a kerplunk.toml that records what discovery found")
+    init.add_argument("--force", action="store_true", help="replace an existing kerplunk.toml")
+    init.add_argument("--stdout", action="store_true", help="print the configuration instead of writing it")
+    init.set_defaults(func=cmd_init)
 
     for name, func, text in (
-        ("impact", cmd_impact, "everything downstream of a table or table.column"),
-        ("trace", cmd_trace, "everything upstream of a table or table.column"),
+        ("impact", cmd_impact, "everything downstream of a table, model or column"),
+        ("trace", cmd_trace, "everything upstream of a table, model or column"),
     ):
-        command = commands.add_parser(name, help=text)
-        command.add_argument("ref", help="table, model or column, e.g. orders or orders.amount")
-        command.add_argument("--depth", type=int, help="stop after this many hops")
-        _add_graph_args(command)
+        command = add(name, text)
+        command.add_argument("ref", metavar="NAME", help="e.g. orders, main.orders or orders.amount")
+        command.add_argument("--depth", type=int, metavar="N", help="stop after N hops")
+        _query_options(command)
         command.set_defaults(func=func)
 
-    path = commands.add_parser("path", help="shortest connection between two nodes")
-    path.add_argument("start")
-    path.add_argument("end")
-    _add_graph_args(path)
+    path = add("path", "the shortest connection between two tables or columns")
+    path.add_argument("start", metavar="FROM")
+    path.add_argument("end", metavar="TO")
+    _query_options(path)
     path.set_defaults(func=cmd_path)
 
-    search = commands.add_parser("search", help="find nodes by name or description")
-    search.add_argument("text", nargs="+")
-    search.add_argument("--kind", action="append", help="limit to a node kind (repeatable)")
-    search.add_argument("--limit", type=int, default=20)
-    _add_graph_args(search)
+    search = add("search", "find tables, columns, tasks and tests by name or description")
+    search.add_argument("text", nargs="+", metavar="WORDS")
+    search.add_argument(
+        "-k", "--kind", action="append", choices=NODE_KINDS, help="only this kind (repeatable)"
+    )
+    search.add_argument(
+        "-n", "--limit", type=int, default=20, metavar="N", help="at most N results (default 20)"
+    )
+    _query_options(search)
     search.set_defaults(func=cmd_search)
 
-    describe = commands.add_parser("describe", help="details, columns, tests and neighbours of a node")
-    describe.add_argument("ref")
-    _add_graph_args(describe)
+    describe = add("describe", "columns, types, descriptions, tests and neighbours of one node")
+    describe.add_argument("ref", metavar="NAME")
+    _query_options(describe)
     describe.set_defaults(func=cmd_describe)
 
-    install = commands.add_parser("install", help="register the /kerplunk skill for Claude Code and Cursor")
-    install.add_argument(
-        "--agent", choices=["claude", "cursor", "both"], default="both", help="which agent to install for"
+    listing = add("list", "list nodes by kind (default: tables, models, sources, seeds and snapshots)")
+    listing.add_argument(
+        "kinds", nargs="*", metavar="KIND", help=f"any of {', '.join(NODE_KINDS)} (plurals work)"
     )
-    install.add_argument("--project", help="install into this project instead of your home directory")
-    install.add_argument("--mcp", action="store_true", help="also register the MCP server (needs --project)")
-    install.add_argument("--force", action="store_true", help="overwrite a skill that was edited by hand")
+    _query_options(listing)
+    listing.set_defaults(func=cmd_list)
+
+    query = add("query", "answer a free-text question from the graph")
+    query.add_argument("question", nargs="+", metavar="QUESTION")
+    query.add_argument("--depth", type=int, default=1, metavar="N", help="neighbourhood depth around matches")
+    _query_options(query)
+    query.set_defaults(func=cmd_query)
+
+    open_ = add("open", "open graph.html in a browser")
+    open_.add_argument("--print-only", action="store_true", help="print the file URL without opening it")
+    _query_options(open_)
+    open_.set_defaults(func=cmd_open)
+
+    install = add("install", "add the /kerplunk skill to Claude Code and Cursor")
+    install.add_argument(
+        "--agent", choices=["claude", "cursor", "both"], default="both", help="which agent (default: both)"
+    )
+    install.add_argument(
+        "--target", metavar="DIR", help="install into this repository, not your home directory"
+    )
+    install.add_argument("--mcp", action="store_true", help="also register the MCP server (with --target)")
+    install.add_argument("--force", action="store_true", help="replace a skill that was edited by hand")
     install.set_defaults(func=cmd_install)
 
-    mcp = commands.add_parser("mcp", help="run the MCP server on stdio")
-    mcp.add_argument("--path", default=".", help="project directory with kerplunk-out")
+    mcp = add("mcp", "run the MCP server on stdio (for agent configuration, not interactive use)")
     mcp.set_defaults(func=cmd_mcp)
     return root
 
@@ -231,19 +461,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     from kerplunk.query import QueryError
     from kerplunk.skill import InstallError
 
-    args = parser().parse_args(argv)
+    arguments = parser()
+    args = arguments.parse_args(argv)
+    for name, default in (("project", "."), ("no_color", False), ("verbose", False), ("quiet", False)):
+        if not hasattr(args, name):
+            setattr(args, name, default)
+    console = Console(colour=False if args.no_color else None, quiet=args.quiet)
+    if not getattr(args, "func", None):
+        arguments.print_help()
+        return 2
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
         format="kerplunk: %(message)s",
         stream=sys.stderr,
     )
     try:
-        code: int = args.func(args)
+        code: int = args.func(args, console)
     except (QueryError, ConfigError, InstallError) as error:
-        print(f"kerplunk: {error}", file=sys.stderr)
+        console.error(str(error))
         return 1
     except KeyboardInterrupt:
         return 130
+    except BrokenPipeError:
+        # The reader went away (`kerplunk list | head`); stop quietly, as other tools do.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 0
     return code
 
 

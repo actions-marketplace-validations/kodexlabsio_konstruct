@@ -2,56 +2,122 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from kerplunk import __version__
 from kerplunk.cli import find_out_dir, main
+from kerplunk.console import Console, colour_enabled
 
 
 def run(capsys: pytest.CaptureFixture[str], *args: str) -> tuple[int, str, str]:
-    code = main(list(args))
+    code = main(["--no-color", *args])
     captured = capsys.readouterr()
     return code, captured.out, captured.err
 
 
 @pytest.mark.dbt
-def test_build_and_query_commands(
+def test_build_prints_what_it_found(
     jaffle: Path, dbt_on_path: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code, out, _ = run(capsys, "build", str(jaffle))
+    code, out, err = run(capsys, "build", str(jaffle))
     assert code == 0
-    assert "kerplunk: 44 columns, 1 dag, 1 exposure, 5 models, 3 seeds, 1 table, 6 tasks, 20 tests" in out
-    assert "graph.json" in out and "REPORT.md" in out and "graph.html" in out
+    assert "building" in err
+    lines = out.splitlines()
+    assert lines[0] == f"kerplunk  {jaffle}"
+    assert (
+        "  dbt        jaffle_shop (.)  5 models, 3 seeds, 20 tests, 1 exposure  (ran dbt docs generate)"
+        in lines
+    )
+    assert "  duckdb     duckdb jaffle_shop.duckdb  9 relations  (dbt profile jaffle_shop)" in lines
+    assert "  airflow    dags/jaffle_shop_daily.py  1 DAG, 6 tasks" in lines
+    assert "  lineage    32 of 32 columns of models and built tables (100%)" in lines
+    assert "  warnings   none" in lines
+    assert any(line.startswith("  wrote      ") and "graph.html" in line for line in lines)
 
     code, out, _ = run(capsys, "build", str(jaffle), "--update")
     assert code == 0
-    assert "reused 7 of 7 cached analyses" in out
+    assert "  reused     7 of 7 cached analyses" in out.splitlines()
 
-    path = str(jaffle)
-    code, out, _ = run(capsys, "impact", "stg_payments.amount", "--path", path)
-    assert code == 0 and out.startswith("Downstream of stg_payments.amount")
-    code, out, _ = run(capsys, "trace", "orders.amount", "--path", path, "--json")
+    code, out, _ = run(capsys, "build", "-C", str(jaffle), "--json", "-u")
+    data = json.loads(out)
+    assert data["nodes"]["model"] == 5
+    assert data["lineage"] == {"covered": 32, "columns": 32}
+    assert data["cache"] == {"hits": 7, "misses": 0}
+    assert {i["input"] for i in data["inputs"]} == {"dbt", "duckdb", "airflow"}
+
+
+@pytest.mark.dbt
+def test_query_commands(jaffle_built_graph: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    project = str(jaffle_built_graph)
+    code, out, _ = run(capsys, "impact", "stg_payments.amount", "-C", project)
+    assert code == 0
+    assert out.splitlines()[:2] == [
+        "Downstream of stg_payments.amount (model)",
+        "7 columns, 3 relations, 5 tests, 1 exposure and 2 tasks downstream.",
+    ]
+    code, out, _ = run(capsys, "-C", project, "trace", "orders.amount", "--json")
     assert code == 0 and json.loads(out)["direction"] == "upstream"
-    code, out, _ = run(capsys, "path", "raw_orders", "orders", "--path", path)
+    code, out, _ = run(capsys, "path", "raw_orders", "orders", "--project", project)
     assert code == 0 and "-feeds-> orders (model)" in out
-    code, out, _ = run(capsys, "search", "lifetime", "value", "--path", path, "--limit", "1")
+    code, out, _ = run(capsys, "search", "lifetime", "value", "-C", project, "-n", "1")
     assert code == 0 and out.startswith("customers.customer_lifetime_value")
-    code, out, _ = run(
-        capsys, "describe", "customers", "--graph", str(jaffle / "kerplunk-out" / "graph.json")
-    )
+    graph_file = str(jaffle_built_graph / "kerplunk-out" / "graph.json")
+    code, out, _ = run(capsys, "describe", "customers", "--graph", graph_file)
     assert code == 0 and out.startswith("customers (model)")
-    code, out, _ = run(capsys, "query", "which", "models", "use", "payments", "--path", path)
+    code, out, _ = run(capsys, "list", "models", "-C", project)
+    assert code == 0 and out.splitlines()[0].startswith("customers")
+    code, out, _ = run(capsys, "list", "tasks", "dags", "-C", project, "--json")
+    assert {i["kind"] for i in json.loads(out)["items"]} == {"task", "dag"}
+    code, _, err = run(capsys, "list", "widgets", "-C", project)
+    assert code == 2 and "unknown kind 'widgets'" in err
+    code, out, _ = run(capsys, "query", "which", "models", "use", "payments", "-C", project)
     assert code == 0 and "stg_payments" in out
-    code, _, err = run(capsys, "impact", "nope", "--path", path)
+    code, out, _ = run(capsys, "open", "--print-only", "-C", project)
+    assert code == 0 and out.strip().endswith("kerplunk-out/graph.html")
+    code, _, err = run(capsys, "impact", "nope", "-C", project)
     assert code == 1 and "nothing in the graph matches 'nope'" in err
+
+
+def test_path_without_a_connection_exits_3(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (tmp_path / "a.sql").write_text("create table b as select x from a; create table d as select y from c")
+    code, out, _ = run(capsys, "path", "b", "d", "-C", str(tmp_path))
+    assert code == 3 and out.startswith("No path between b and d")
+
+
+def test_query_commands_build_a_missing_graph(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (tmp_path / "x.sql").write_text("create table t2 as select a + 1 as b from t1")
+    code, _, err = run(capsys, "impact", "x", "-C", str(tmp_path), "--no-build")
+    assert code == 1 and "run `kerplunk build` first" in err
+    code, out, err = run(capsys, "trace", "t2.b", "-C", str(tmp_path))
+    assert code == 0
+    assert "no graph yet; building" in err
+    assert "t1.a  [table, transformed" in out
+
+
+def test_stale_graphs_are_reported_and_refreshed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    sql = tmp_path / "x.sql"
+    sql.write_text("create table t2 as select a from t1")
+    assert run(capsys, "build", str(tmp_path))[0] == 0
+    sql.write_text("create table t2 as select a, c from t1")
+    later = time.time() + 5
+    os.utime(sql, (later, later))
+    code, out, err = run(capsys, "describe", "t2", "-C", str(tmp_path))
+    assert code == 0 and "older than 1 changed input(s) (x.sql)" in err
+    assert "Columns (1)" in out
+    code, out, err = run(capsys, "describe", "t2", "-C", str(tmp_path), "--refresh")
+    assert "updating the graph" in err
+    assert "Columns (2)" in out
 
 
 def test_build_options_and_errors(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (tmp_path / "x.sql").write_text("create table t2 as select a from t1")
+    out_dir = tmp_path / "o"
     code, _, _ = run(
         capsys,
         "build",
@@ -61,14 +127,15 @@ def test_build_options_and_errors(tmp_path: Path, capsys: pytest.CaptureFixture[
         "--dialect",
         "postgres",
         "--out",
-        str(tmp_path / "o"),
+        str(out_dir),
     )
     assert code == 0
-    assert (tmp_path / "o" / "graph.json").is_file()
-    graph = json.loads((tmp_path / "o" / "graph.json").read_text())
-    assert graph["meta"]["dialect"] == "postgres"
+    assert json.loads((out_dir / "graph.json").read_text())["meta"]["dialect"] == "postgres"
     code, _, err = run(capsys, "build", str(tmp_path / "missing"))
     assert code == 1 and "is not a directory" in err
+    (tmp_path / "bad.sql").write_text("select from where (")
+    code, out, _ = run(capsys, "build", str(tmp_path), "--strict")
+    assert code == 1 and "  warnings   1" in out
     (tmp_path / "kerplunk.toml").write_text("[[warehouse]]\ntype = 'oracle'\n")
     code, _, err = run(capsys, "build", str(tmp_path))
     assert code == 1 and "unknown warehouse type 'oracle'" in err
@@ -77,9 +144,44 @@ def test_build_options_and_errors(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert code == 1 and "cannot read" in err
 
 
-def test_query_without_a_graph(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    code, _, err = run(capsys, "impact", "x", "--path", str(tmp_path))
-    assert code == 1 and "run `kerplunk build` first" in err
+def test_empty_project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    code, out, _ = run(capsys, "build", str(tmp_path))
+    assert code == 0
+    assert "  inputs     none found: no dbt project, DAG, SQL file or warehouse" in out
+
+
+@pytest.mark.dbt
+def test_status_and_init(
+    built_jaffle: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    jaffle = tmp_path / "jaffle_shop"
+    shutil.copytree(built_jaffle, jaffle)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    code, out, _ = run(capsys, "status", "-C", str(jaffle))
+    assert code == 0
+    assert "  dbt          jaffle_shop (.): no target/manifest.json yet" in out
+    assert "  warehouse    duckdb jaffle_shop.duckdb (dbt profile jaffle_shop)" in out
+    assert "  sql          no SQL files found" in out
+    assert "  graph        not built yet; run `kerplunk build`" in out
+    assert "  skill        not installed; run `kerplunk install`" in out
+    code, out, _ = run(capsys, "status", "-C", str(jaffle), "--json")
+    assert json.loads(out)["dag_files"] == ["dags/jaffle_shop_daily.py"]
+
+    code, out, _ = run(capsys, "init", "-C", str(jaffle))
+    assert code == 0 and "wrote" in out
+    text = (jaffle / "kerplunk.toml").read_text()
+    assert 'projects = ["."]' in text and 'dags = ["dags"]' in text and 'path = "jaffle_shop.duckdb"' in text
+    code, _, err = run(capsys, "init", "-C", str(jaffle))
+    assert code == 1 and "already exists" in err
+    assert run(capsys, "init", "-C", str(jaffle), "--force")[0] == 0
+    code, out, _ = run(capsys, "init", "-C", str(jaffle), "--stdout")
+    assert out.startswith("# kerplunk configuration")
+    code, out, _ = run(capsys, "status", "-C", str(jaffle))
+    assert "  config       kerplunk.toml" in out
+    run(capsys, "install", "--target", str(jaffle))
+    code, out, _ = run(capsys, "status", "-C", str(jaffle))
+    assert "  skill        project (Claude Code and Cursor)" in out
 
 
 def test_find_out_dir_looks_upwards(tmp_path: Path) -> None:
@@ -91,18 +193,47 @@ def test_find_out_dir_looks_upwards(tmp_path: Path) -> None:
     assert find_out_dir(tmp_path / "kerplunk-out") == tmp_path / "kerplunk-out"
 
 
+def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
+    code, out, _ = run(capsys)
+    assert code == 2 and "usage: kerplunk" in out and "examples:" in out
+
+
+def test_colour(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    assert Console().style("x", "bold") == "\x1b[1mx\x1b[0m"
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert not colour_enabled(sys.stdout)
+    assert Console(colour=False).style("x", "red") == "x"
+    Console(quiet=True).info("hidden")
+    Console(colour=False).warn("shown")
+    assert capsys.readouterr().err == "kerplunk: shown\n"
+
+
 def test_version_and_help() -> None:
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
-    result = subprocess.run(
-        [sys.executable, "-m", "kerplunk.cli", "--version"],
-        capture_output=True,
-        text=True,
-        env=env,
-        check=True,
-    )
-    assert result.stdout.strip() == f"kerplunk {__version__}"
-    result = subprocess.run(
-        [sys.executable, "-m", "kerplunk.cli", "--help"], capture_output=True, text=True, env=env, check=True
-    )
-    for command in ("build", "query", "impact", "trace", "path", "search", "describe", "install", "mcp"):
-        assert command in result.stdout
+
+    def cli(*args: str) -> str:
+        return subprocess.run(
+            [sys.executable, "-m", "kerplunk.cli", *args], capture_output=True, text=True, env=env, check=True
+        ).stdout
+
+    assert cli("--version").strip() == f"kerplunk {__version__}"
+    help_text = cli("--help")
+    for command in (
+        "build",
+        "status",
+        "init",
+        "query",
+        "impact",
+        "trace",
+        "path",
+        "search",
+        "describe",
+        "list",
+        "open",
+        "install",
+        "mcp",
+    ):
+        assert f"    {command}" in help_text
+    assert "--refresh" in cli("impact", "--help") and "-C DIR" in cli("impact", "--help")

@@ -1,0 +1,231 @@
+"""`kerplunk status` and `kerplunk init`: what kerplunk finds in a project, without building."""
+
+from __future__ import annotations
+
+import shutil
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from kerplunk import dbt
+from kerplunk.config import (
+    Config,
+    WarehouseConfig,
+    discover_dag_files,
+    discover_sql_files,
+    discover_warehouses,
+    load_config,
+)
+from kerplunk.graph import Graph
+
+
+@dataclass
+class Status:
+    root: Path
+    config_file: str | None
+    dbt_projects: list[dict[str, str]] = field(default_factory=list)
+    dbt_on_path: bool = False
+    warehouses: list[dict[str, str]] = field(default_factory=list)
+    dag_files: list[str] = field(default_factory=list)
+    sql_files: list[str] = field(default_factory=list)
+    graph: dict[str, Any] = field(default_factory=dict)
+    skills: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "root": str(self.root),
+            "config_file": self.config_file,
+            "dbt_projects": self.dbt_projects,
+            "dbt_on_path": self.dbt_on_path,
+            "warehouses": self.warehouses,
+            "dag_files": self.dag_files,
+            "sql_files": self.sql_files,
+            "graph": self.graph,
+            "skills": self.skills,
+        }
+
+    def lines(self) -> list[tuple[str, str]]:
+        rows: list[tuple[str, str]] = [("config", self.config_file or "none; inputs are discovered")]
+        if self.dbt_projects:
+            for project in self.dbt_projects:
+                rows.append(("dbt", f"{project['name']} ({project['path']}): {project['artefacts']}"))
+        else:
+            rows.append(("dbt", "no dbt projects found"))
+        rows.append(
+            ("dbt on PATH", "yes" if self.dbt_on_path else "no (kerplunk uses existing target/ artefacts)")
+        )
+        for warehouse in self.warehouses or [{"name": "none found", "source": ""}]:
+            source = f" ({warehouse['source']})" if warehouse.get("source") else ""
+            rows.append(("warehouse", f"{warehouse['name']}{source}"))
+        rows.append(("airflow", _files(self.dag_files, "DAG file")))
+        rows.append(("sql", _files(self.sql_files, "SQL file")))
+        graph = self.graph
+        if graph.get("exists"):
+            state = (
+                "up to date"
+                if not graph["changed"]
+                else f"{len(graph['changed'])} input(s) changed since: " + ", ".join(graph["changed"][:5])
+            )
+            rows.append(("graph", f"{graph['path']}, built {graph['age']}; {state}"))
+        else:
+            rows.append(("graph", "not built yet; run `kerplunk build`"))
+        rows.append(
+            ("skill", ", ".join(self.skills) if self.skills else "not installed; run `kerplunk install`")
+        )
+        return rows
+
+    def __str__(self) -> str:
+        return "\n".join(f"{key:<12}{value}" for key, value in self.lines())
+
+
+def _files(files: list[str], noun: str) -> str:
+    if not files:
+        return f"no {noun}s found"
+    shown = ", ".join(files[:4]) + (f" and {len(files) - 4} more" if len(files) > 4 else "")
+    return f"{len(files)} {noun}{'s' if len(files) != 1 else ''}: {shown}"
+
+
+def _age(timestamp: float) -> str:
+    seconds = max(0, int(time.time() - timestamp))
+    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
+        if seconds >= size:
+            count = seconds // size
+            return f"{count} {unit}{'s' if count != 1 else ''} ago"
+    return "just now"
+
+
+def _relative(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def _sql_used_by(dag_files: list[Path]) -> set[Path]:
+    """SQL files that DAG tasks run, which are analysed with their task rather than on their own."""
+    from kerplunk.airflow import parse_file
+
+    used: set[Path] = set()
+    for path in dag_files:
+        try:
+            dags = parse_file(path)
+        except (SyntaxError, OSError, UnicodeDecodeError):
+            continue
+        used |= {Path(t.sql_path).resolve() for d in dags for t in d.tasks.values() if t.sql_path}
+    return used
+
+
+def inspect(path: Path, out_dir: Path | None = None, home: Path | None = None) -> Status:
+    from kerplunk.build import changed_inputs
+    from kerplunk.project import find_out_dir
+
+    config = load_config(path, out_dir)
+    root = config.root
+    status = Status(
+        root=root, config_file=_relative(config.config_file, root) if config.config_file else None
+    )
+    projects = (
+        [p for r in config.dbt_projects if (p := dbt.read_project(r))]
+        if config.dbt_projects is not None
+        else dbt.find_projects(root)
+    )
+    for project in projects:
+        if not project.manifest_path.is_file():
+            artefacts = "no target/manifest.json yet"
+        elif dbt.artefacts_stale(project):
+            artefacts = "target/manifest.json is older than the project files"
+        else:
+            artefacts = "artefacts up to date" + (
+                "" if project.catalog_path.is_file() else " (no catalog.json)"
+            )
+        status.dbt_projects.append(
+            {"name": project.name, "path": _relative(project.root, root), "artefacts": artefacts}
+        )
+    status.dbt_on_path = shutil.which("dbt") is not None
+    status.warehouses = [
+        {"type": w.type, "name": w.describe(root), "source": w.source}
+        for w in discover_warehouses(config, projects)
+    ]
+    dags = discover_dag_files(config)
+    status.dag_files = [_relative(p, root) for p in dags]
+    status.sql_files = [_relative(p, root) for p in discover_sql_files(config, projects, _sql_used_by(dags))]
+
+    out = out_dir or find_out_dir(root)
+    graph_path = out / "graph.json"
+    if graph_path.is_file():
+        graph = Graph.read(graph_path)
+        status.graph = {
+            "exists": True,
+            "path": _relative(graph_path, root),
+            "built_at": datetime.fromtimestamp(graph_path.stat().st_mtime).isoformat(timespec="seconds"),
+            "age": _age(graph_path.stat().st_mtime),
+            "changed": changed_inputs(graph_path, graph),
+            "nodes": len(graph.nodes),
+            "warnings": len(graph.warnings),
+        }
+    else:
+        status.graph = {"exists": False, "path": _relative(graph_path, root)}
+
+    home = home or Path.home()
+    for base, agent in (
+        (root / ".claude" / "skills", "project (Claude Code and Cursor)"),
+        (root / ".cursor" / "skills", "project (Cursor)"),
+        (home / ".claude" / "skills", "user (Claude Code and Cursor)"),
+        (home / ".cursor" / "skills", "user (Cursor)"),
+    ):
+        if (base / "kerplunk" / "SKILL.md").is_file():
+            status.skills.append(agent)
+    return status
+
+
+def render_config(config: Config, status: Status, warehouses: list[WarehouseConfig]) -> str:
+    """A commented kerplunk.toml that spells out what discovery found, ready to edit."""
+    lines = [
+        "# kerplunk configuration. Everything is optional: without this file kerplunk discovers its",
+        "# inputs, and this file records what it found so you can pin or change it.",
+        "# See https://github.com/kodexlabsio/kerplunk#configuration",
+        "",
+        '# dialect = "duckdb"              # SQL dialect; default: the dbt adapter, then the warehouse',
+        '# default_catalog = "analytics"   # for unqualified tables in Airflow and SQL files',
+        '# default_schema = "public"',
+        '# exclude = ["scratch/**"]',
+        "",
+        "[dbt]",
+    ]
+    projects = [p["path"] for p in status.dbt_projects]
+    lines.append(f"projects = {_toml_list(projects)}" if projects else "# projects = []")
+    lines += ["run = true                        # run `dbt docs generate` when artefacts are stale", ""]
+    lines += ["[airflow]"]
+    dag_dirs = sorted({str(Path(f).parent) if str(Path(f).parent) != "." else f for f in status.dag_files})
+    lines.append(f"dags = {_toml_list(dag_dirs)}" if dag_dirs else "# dags = []")
+    lines += ["", "[sql]"]
+    lines.append(
+        f"paths = {_toml_list(status.sql_files)}" if status.sql_files else '# paths = ["sql/**/*.sql"]'
+    )
+    lines.append("")
+    if warehouses:
+        lines.append("# Listing any warehouse here turns warehouse discovery off.")
+    for warehouse in warehouses:
+        lines += ["[[warehouse]]", f'type = "{warehouse.type}"']
+        if warehouse.type == "duckdb":
+            lines.append(f'path = "{_relative(Path(str(warehouse.options["path"])), config.root)}"')
+        elif warehouse.type in ("postgres", "postgresql"):
+            lines.append(
+                'dsn = "${WAREHOUSE_DSN}"           # read from the environment; never commit secrets'
+            )
+            lines.append(f"# found in {warehouse.source}")
+        lines.append("")
+    if not warehouses:
+        lines += [
+            "# [[warehouse]]",
+            '# type = "postgres"                # duckdb, postgres or iceberg',
+            '# dsn = "${WAREHOUSE_DSN}"',
+            "",
+        ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _toml_list(values: list[str]) -> str:
+    return "[" + ", ".join(f'"{v}"' for v in values) + "]"

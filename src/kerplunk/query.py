@@ -1,8 +1,7 @@
 """Questions over a built graph: impact, trace, path, search, describe and free-text query.
 
-Every function returns plain data (dicts and lists) so the CLI can print it as text or JSON
-and the MCP server can return it as is. `render_*` functions turn results into compact text
-written for coding agents to read.
+Each function returns a typed result. ``str(result)`` is compact text written for coding agents
+and people; ``result.to_dict()`` is the same content as plain data, for JSON and MCP.
 """
 
 from __future__ import annotations
@@ -10,14 +9,15 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from kerplunk.graph import RELATION_KINDS, Graph, Node, Step
 
 
 class QueryError(Exception):
-    pass
+    """A reference that matches nothing or several things, or a missing graph."""
 
 
 def load_graph(out_dir: Path) -> Graph:
@@ -39,112 +39,249 @@ def resolve_one(graph: Graph, ref: str) -> Node:
     return found[0]
 
 
-def summary(graph: Graph, node: Node) -> dict[str, Any]:
-    data: dict[str, Any] = {"id": node.id, "kind": node.kind, "label": graph.label(node)}
+def _drop_empty(data: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in data.items() if v is not None}
+
+
+@dataclass(frozen=True)
+class Item:
+    """One node in a result, with how it was reached when it came from a walk."""
+
+    id: str
+    kind: str
+    label: str
+    name: str
+    relation_kind: str | None = None
+    path: str | None = None
+    data_type: str | None = None
+    description: str | None = None
+    depth: int | None = None
+    via: str | None = None
+    transform: str | None = None
+    role: str | None = None
+    command: str | None = None
+    through: str | None = None
+    direction: str | None = None
+    score: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _drop_empty({f.name: getattr(self, f.name) for f in fields(self)})
+
+    def __str__(self) -> str:
+        meta = [self.relation_kind or self.kind]
+        meta += [str(v) for v in (self.data_type, self.transform, self.role, self.command) if v]
+        if self.through:
+            meta.append(f"via {self.through}")
+        parts = [self.label, f"[{', '.join(meta)}]"]
+        if self.path:
+            parts.append(self.path)
+        if self.depth is not None:
+            parts.insert(0, f"{self.depth:>2}")
+        return "  ".join(parts)
+
+
+def item(graph: Graph, node: Node, step: Step | None = None, **extra: Any) -> Item:
+    data: dict[str, Any] = {"id": node.id, "kind": node.kind, "label": graph.label(node), "name": node.name}
     if node.kind == "column":
         parent = graph.parent_of(node)
         if parent is not None:
             data["relation_kind"] = parent.kind
-            if parent.path:
-                data["path"] = parent.path
-    elif node.path:
+            data["path"] = parent.path
+    else:
         data["path"] = node.path
-    if node.data_type:
-        data["data_type"] = node.data_type
-    if node.description:
-        data["description"] = node.description
-    return data
+    data["data_type"] = node.data_type
+    data["description"] = node.description
+    if step is not None:
+        data["depth"] = step.depth
+        if step.via is not None:
+            data["via"] = step.via.kind
+            for key in ("transform", "role", "command"):
+                data[key] = step.via.attrs.get(key)
+            through = step.via.attrs.get("via")
+            if through:
+                data["through"] = graph.label(graph.nodes[through]) if through in graph.nodes else through
+    data.update(extra)
+    return Item(**data)
 
 
-def _step(graph: Graph, step: Step) -> dict[str, Any]:
-    data = summary(graph, step.node)
-    data["depth"] = step.depth
-    if step.via is not None:
-        data["via"] = step.via.kind
-        for key in ("transform", "role", "command"):
-            if key in step.via.attrs:
-                data[key] = step.via.attrs[key]
-        if "via" in step.via.attrs:
-            through = step.via.attrs["via"]
-            data["through"] = graph.label(graph.nodes[through]) if through in graph.nodes else through
-    return data
+def _shorten(text: str, width: int = 140) -> str:
+    flat = " ".join(text.split())
+    return flat if len(flat) <= width else flat[: width - 3] + "..."
 
 
-def _categorise(graph: Graph, start: Node, steps: list[Step]) -> dict[str, Any]:
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+# Impact and trace
+
+
+@dataclass
+class Walk:
+    """Everything downstream (impact) or upstream (trace) of one node, grouped by what it is."""
+
+    direction: Literal["downstream", "upstream"]
+    target: Item
+    columns: list[Item] = field(default_factory=list)
+    relations: list[Item] = field(default_factory=list)
+    joins_and_filters: list[Item] = field(default_factory=list)
+    filtered_by: list[Item] = field(default_factory=list)
+    tests: list[Item] = field(default_factory=list)
+    exposures: list[Item] = field(default_factory=list)
+    tasks: list[Item] = field(default_factory=list)
+
+    SECTIONS = (
+        ("columns", "Columns"),
+        ("relations", "Relations"),
+        ("joins_and_filters", "Relations that join, filter or group on it"),
+        ("filtered_by", "Columns that filter or join its relation"),
+        ("tests", "Tests"),
+        ("exposures", "Exposures"),
+        ("tasks", "Orchestration"),
+    )
+
+    @property
+    def total(self) -> int:
+        return sum(len(getattr(self, key)) for key, _ in self.SECTIONS)
+
+    def summary(self) -> str:
+        counts = [
+            _plural(count, noun)
+            for count, noun in (
+                (len(self.columns), "column"),
+                (len(self.relations) + len(self.joins_and_filters), "relation"),
+                (len(self.tests), "test"),
+                (len(self.exposures), "exposure"),
+                (len(self.tasks), "task"),
+            )
+            if count
+        ]
+        where = "downstream" if self.direction == "downstream" else "upstream"
+        if not counts:
+            return f"Nothing {where}."
+        listed = counts[0] if len(counts) == 1 else f"{', '.join(counts[:-1])} and {counts[-1]}"
+        return f"{listed} {where}."
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {"direction": self.direction, "target": self.target.to_dict()}
+        for key, _ in self.SECTIONS:
+            data[key] = [i.to_dict() for i in getattr(self, key)]
+        data["total"] = self.total
+        data["summary"] = self.summary()
+        return data
+
+    def __str__(self) -> str:
+        title = "Downstream of" if self.direction == "downstream" else "Upstream of"
+        lines = [f"{title} {self.target.label} ({self.target.relation_kind or self.target.kind})"]
+        if self.target.description:
+            lines.append(f"  {_shorten(self.target.description)}")
+        lines.append(self.summary())
+        for key, heading in self.SECTIONS:
+            items: list[Item] = getattr(self, key)
+            if items:
+                lines += ["", f"{heading} ({len(items)})", *(f"  {i}" for i in items)]
+        return "\n".join(lines)
+
+
+def _walk(graph: Graph, start: Node, steps: list[Step], direction: Literal["downstream", "upstream"]) -> Walk:
     start_ids = set(graph.expand(start))
-    result: dict[str, Any] = {
-        "target": summary(graph, start),
-        "columns": [],
-        "relations": [],
-        "joins_and_filters": [],
-        "tests": [],
-        "exposures": [],
-        "tasks": [],
-    }
+    walk = Walk(direction=direction, target=item(graph, start))
     relation_ids: set[str] = set()
+    listed: set[str] = set()
     for step in sorted(steps, key=lambda s: (s.depth, s.node.id)):
         node = step.node
         if node.id in start_ids:
             continue
-        entry = _step(graph, step)
+        entry = item(graph, node, step)
         if node.kind == "column":
-            result["columns"].append(entry)
+            walk.columns.append(entry)
             if node.parent and node.parent not in start_ids:
                 relation_ids.add(node.parent)
         elif node.kind == "test":
-            result["tests"].append(entry)
+            walk.tests.append(entry)
         elif node.kind == "exposure":
-            result["exposures"].append(entry)
+            walk.exposures.append(entry)
         elif node.kind in ("task", "dag"):
-            result["tasks"].append(entry)
+            walk.tasks.append(entry)
         elif step.via is not None and step.via.attrs.get("role") == "reference":
-            result["joins_and_filters"].append(entry)
-            relation_ids.discard(node.id)
+            walk.joins_and_filters.append(entry)
+            listed.add(node.id)
         else:
-            result["relations"].append(entry)
-            relation_ids.discard(node.id)
-    listed = {r["id"] for r in result["relations"]} | {r["id"] for r in result["joins_and_filters"]}
+            walk.relations.append(entry)
+            listed.add(node.id)
     for relation_id in sorted(relation_ids - listed):
-        result["relations"].append(summary(graph, graph.nodes[relation_id]))
-    result["total"] = sum(len(v) for k, v in result.items() if isinstance(v, list))
-    return result
+        walk.relations.append(item(graph, graph.nodes[relation_id]))
+    return walk
 
 
-def impact(graph: Graph, ref: str, max_depth: int | None = None) -> dict[str, Any]:
+def impact(graph: Graph, ref: str, max_depth: int | None = None) -> Walk:
     """Everything downstream of a relation or column."""
     node = resolve_one(graph, ref)
-    return {"direction": "downstream", **_categorise(graph, node, graph.impact(node, max_depth))}
+    return _walk(graph, node, graph.impact(node, max_depth), "downstream")
 
 
-def trace(graph: Graph, ref: str, max_depth: int | None = None) -> dict[str, Any]:
+def trace(graph: Graph, ref: str, max_depth: int | None = None) -> Walk:
     """Everything upstream of a relation or column."""
     node = resolve_one(graph, ref)
-    result = {"direction": "upstream", **_categorise(graph, node, graph.trace(node, max_depth))}
+    walk = _walk(graph, node, graph.trace(node, max_depth), "upstream")
     if node.kind == "column" and node.parent:
-        result["filtered_by"] = [
-            summary(graph, graph.nodes[e.source])
+        walk.filtered_by = [
+            item(graph, graph.nodes[e.source])
             for e in graph.in_edges(node.parent, "feeds")
             if e.attrs.get("role") == "reference" and e.source in graph.nodes
         ]
-        result["total"] += len(result["filtered_by"])
-    return result
+    return walk
 
 
-def path(graph: Graph, start_ref: str, end_ref: str) -> dict[str, Any]:
+# Path
+
+
+@dataclass
+class PathResult:
+    start: Item
+    end: Item
+    steps: list[Item]
+
+    @property
+    def found(self) -> bool:
+        return bool(self.steps)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "from": self.start.to_dict(),
+            "to": self.end.to_dict(),
+            "found": self.found,
+            "steps": [s.to_dict() for s in self.steps],
+        }
+
+    def __str__(self) -> str:
+        if not self.found:
+            return f"No path between {self.start.label} and {self.end.label}."
+        lines = [
+            f"Path from {self.start.label} to {self.end.label} ({_plural(len(self.steps) - 1, 'step')}):"
+        ]
+        for step in self.steps:
+            arrow = ""
+            if step.via:
+                arrow = f"-{step.via}-> " if step.direction == "forward" else f"<-{step.via}- "
+            lines.append(f"  {arrow}{step.label} ({step.relation_kind or step.kind})")
+        return "\n".join(lines)
+
+
+def path(graph: Graph, start_ref: str, end_ref: str) -> PathResult:
+    """The shortest connection between two nodes, following data flow where possible."""
     start = resolve_one(graph, start_ref)
     end = resolve_one(graph, end_ref)
-    steps = graph.path(start, end)
-    return {
-        "from": summary(graph, start),
-        "to": summary(graph, end),
-        "found": bool(steps),
-        "steps": [
-            {**_step(graph, s), "direction": "forward" if s.via.source == s.previous else "backward"}
-            if s.via is not None
-            else _step(graph, s)
-            for s in steps
-        ],
-    }
+    steps = []
+    for step in graph.path(start, end):
+        direction = None
+        if step.via is not None:
+            direction = "forward" if step.via.source == step.previous else "backward"
+        steps.append(item(graph, step.node, step, direction=direction))
+    return PathResult(item(graph, start), item(graph, end), steps)
+
+
+# Search
 
 
 _TOKEN = re.compile(r"[a-z0-9]+")
@@ -210,65 +347,173 @@ def _scored(graph: Graph, text: str, limit: int, kinds: list[str] | None) -> lis
         elif node.kind == "test":
             score *= 0.5
         scored.append((node, score))
-    scored.sort(key=lambda item: (-item[1], len(item[0].id), item[0].id))
+    scored.sort(key=lambda pair: (-pair[1], len(pair[0].id), pair[0].id))
     return scored[:limit]
 
 
-def search(graph: Graph, text: str, limit: int = 20, kinds: list[str] | None = None) -> dict[str, Any]:
-    return {
-        "query": text,
-        "results": [
-            {**summary(graph, n), "score": round(s, 2)} for n, s in _scored(graph, text, limit, kinds)
-        ],
-    }
+@dataclass
+class SearchResult:
+    query: str
+    results: list[Item]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"query": self.query, "results": [r.to_dict() for r in self.results]}
+
+    def __str__(self) -> str:
+        if not self.results:
+            return f"Nothing matches {self.query!r}."
+        lines = []
+        for result in self.results:
+            lines.append(str(result))
+            if result.description:
+                lines.append(f"      {_shorten(result.description)}")
+        return "\n".join(lines)
 
 
-def describe(graph: Graph, ref: str) -> dict[str, Any]:
-    node = resolve_one(graph, ref)
-    data = summary(graph, node)
-    for key in ("relation", "path", "parent"):
-        value = getattr(node, key)
-        if value:
-            data[key] = value
-    if node.origins:
-        data["origins"] = sorted(node.origins)
-    if node.attrs:
-        data["attrs"] = node.attrs
-    if node.kind in RELATION_KINDS:
-        data["columns"] = [
-            {k: v for k, v in summary(graph, c).items() if k not in ("kind", "relation_kind", "path")}
-            for c in graph.columns_of(node.id)
-        ]
-    checked = [node.id, *(c.id for c in graph.columns_of(node.id))]
-    data["tests"] = sorted(
-        {graph.nodes[e.source].name for target in checked for e in graph.in_edges(target, "tests")}
+def search(graph: Graph, text: str, limit: int = 20, kinds: list[str] | None = None) -> SearchResult:
+    """Nodes whose names or descriptions match the words in ``text``, best first."""
+    return SearchResult(
+        text, [item(graph, n, score=round(s, 2)) for n, s in _scored(graph, text, limit, kinds)]
     )
-    data["upstream"] = sorted(
-        {
-            _neighbour(graph, other)
-            for _, other in graph.upstream_edges(node.id)
-            if graph.nodes[other].kind != "dag"
-        }
+
+
+# Describe
+
+
+@dataclass
+class Description:
+    node: Item
+    relation: str | None = None
+    parent: str | None = None
+    origins: list[str] = field(default_factory=list)
+    attrs: dict[str, Any] = field(default_factory=dict)
+    columns: list[Item] = field(default_factory=list)
+    tests: list[str] = field(default_factory=list)
+    upstream: list[str] = field(default_factory=list)
+    downstream: list[str] = field(default_factory=list)
+    tasks: list[str] = field(default_factory=list)
+    runs: list[str] = field(default_factory=list)
+    after: list[str] = field(default_factory=list)
+    before: list[str] = field(default_factory=list)
+
+    LISTS = (
+        ("tests", "Tests"),
+        ("upstream", "Upstream"),
+        ("downstream", "Downstream"),
+        ("tasks", "Tasks"),
+        ("runs", "Runs"),
+        ("after", "After"),
+        ("before", "Before"),
     )
-    data["downstream"] = sorted(
-        {
-            _neighbour(graph, other)
-            for _, other in graph.downstream_edges(node.id)
-            if graph.nodes[other].kind != "dag"
-        }
-    )
-    if node.kind == "dag":
-        data["tasks"] = [graph.nodes[e.target].name for e in graph.out_edges(node.id, "runs")]
-    if node.kind == "task":
-        data["runs"] = sorted(graph.label(graph.nodes[e.target]) for e in graph.out_edges(node.id, "runs"))
-        data["after"] = sorted(graph.nodes[e.source].name for e in graph.in_edges(node.id, "precedes"))
-        data["before"] = sorted(graph.nodes[e.target].name for e in graph.out_edges(node.id, "precedes"))
-    return data
+    HIDDEN_ATTRS = frozenset({"fqn", "dbt_name", "checksum", "view_sql"})
+
+    def to_dict(self) -> dict[str, Any]:
+        data = self.node.to_dict()
+        data.update(_drop_empty({"relation": self.relation, "parent": self.parent}))
+        data["origins"] = self.origins
+        data["attrs"] = self.attrs
+        if self.node.kind in RELATION_KINDS:
+            data["columns"] = [c.to_dict() for c in self.columns]
+        for key, _ in self.LISTS:
+            data[key] = getattr(self, key)
+        return data
+
+    def __str__(self) -> str:
+        node = self.node
+        lines = [f"{node.label} ({node.relation_kind or node.kind})", f"  id: {node.id}"]
+        for key, value in (
+            ("relation", self.relation),
+            ("path", node.path),
+            ("data_type", node.data_type),
+            ("description", node.description),
+        ):
+            if value:
+                lines.append(f"  {key}: {value}")
+        if self.origins:
+            lines.append(f"  from: {', '.join(self.origins)}")
+        for key, value in self.attrs.items():
+            if key not in self.HIDDEN_ATTRS and value not in (None, "", [], {}):
+                lines.append(f"  {key.replace('_', ' ')}: {value}")
+        if self.columns:
+            lines += ["", f"Columns ({len(self.columns)})"]
+            width = max(len(c.name) for c in self.columns)
+            for column in self.columns:
+                text = f"  {column.name.ljust(width)}  {column.data_type or ''}".rstrip()
+                if column.description:
+                    text += f"  {_shorten(column.description, 100)}"
+                lines.append(text)
+        for key, heading in self.LISTS:
+            values: list[str] = getattr(self, key)
+            if values:
+                lines += ["", f"{heading} ({len(values)})", *(f"  {v}" for v in values)]
+        return "\n".join(lines)
 
 
 def _neighbour(graph: Graph, node_id: str) -> str:
     node = graph.nodes[node_id]
     return f"{graph.label(node)} ({node.kind})"
+
+
+def describe(graph: Graph, ref: str) -> Description:
+    """One node in detail: columns, tests, neighbours and, for tasks, what they run."""
+    node = resolve_one(graph, ref)
+    result = Description(
+        node=item(graph, node),
+        relation=node.relation,
+        parent=node.parent,
+        origins=sorted(node.origins),
+        attrs=dict(node.attrs),
+    )
+    if node.kind in RELATION_KINDS:
+        result.columns = [item(graph, c) for c in graph.columns_of(node.id)]
+    checked = [node.id, *(c.id for c in graph.columns_of(node.id))]
+    result.tests = sorted({graph.nodes[e.source].name for t in checked for e in graph.in_edges(t, "tests")})
+    result.upstream = sorted(
+        {_neighbour(graph, o) for _, o in graph.upstream_edges(node.id) if graph.nodes[o].kind != "dag"}
+    )
+    result.downstream = sorted(
+        {_neighbour(graph, o) for _, o in graph.downstream_edges(node.id) if graph.nodes[o].kind != "dag"}
+    )
+    if node.kind == "dag":
+        result.tasks = [graph.nodes[e.target].name for e in graph.out_edges(node.id, "runs")]
+    if node.kind == "task":
+        result.runs = sorted(graph.label(graph.nodes[e.target]) for e in graph.out_edges(node.id, "runs"))
+        result.after = sorted(graph.nodes[e.source].name for e in graph.in_edges(node.id, "precedes"))
+        result.before = sorted(graph.nodes[e.target].name for e in graph.out_edges(node.id, "precedes"))
+    return result
+
+
+# List
+
+
+@dataclass
+class Listing:
+    kinds: list[str]
+    items: list[Item]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kinds": self.kinds, "items": [i.to_dict() for i in self.items]}
+
+    def __str__(self) -> str:
+        if not self.items:
+            return f"No {' or '.join(self.kinds)} nodes."
+        width = max(len(i.label) for i in self.items)
+        lines = []
+        for entry in self.items:
+            line = f"{entry.label.ljust(width)}  {entry.kind:<9} {entry.path or ''}".rstrip()
+            lines.append(line)
+        return "\n".join(lines)
+
+
+def list_nodes(graph: Graph, kinds: list[str] | None = None) -> Listing:
+    """Every node of the given kinds (relations by default), sorted by kind then label."""
+    chosen = kinds or sorted(RELATION_KINDS)
+    nodes = [n for n in graph.nodes.values() if n.kind in chosen]
+    nodes.sort(key=lambda n: (chosen.index(n.kind) if n.kind in chosen else 0, graph.label(n).lower()))
+    return Listing(list(chosen), [item(graph, n) for n in nodes])
+
+
+# Free-text query
 
 
 _DOWNSTREAM_WORDS = frozenset(
@@ -308,7 +553,70 @@ _UPSTREAM_WORDS = frozenset(
 )
 
 
-def query(graph: Graph, question: str, limit: int = 8, depth: int = 1) -> dict[str, Any]:
+@dataclass(frozen=True)
+class EdgeItem:
+    source: str
+    target: str
+    kind: str
+    source_label: str
+    target_label: str
+    transform: str | None = None
+    role: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _drop_empty({f.name: getattr(self, f.name) for f in fields(self)})
+
+    def __str__(self) -> str:
+        extra = self.transform or self.role
+        return f"{self.source_label} -{self.kind}-> {self.target_label}" + (f" ({extra})" if extra else "")
+
+
+@dataclass
+class QueryResult:
+    question: str
+    matches: list[Item] = field(default_factory=list)
+    edges: list[EdgeItem] = field(default_factory=list)
+    neighbours: list[Item] = field(default_factory=list)
+    impact: Walk | None = None
+    lineage: Walk | None = None
+
+    EDGE_LIMIT = 80
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "question": self.question,
+            "matches": [m.to_dict() for m in self.matches],
+            "edges": [e.to_dict() for e in self.edges],
+            "neighbours": [n.to_dict() for n in self.neighbours],
+        }
+        if self.impact is not None:
+            data["impact"] = self.impact.to_dict()
+        if self.lineage is not None:
+            data["lineage"] = self.lineage.to_dict()
+        return data
+
+    def __str__(self) -> str:
+        if not self.matches:
+            return (
+                f"Nothing in the graph matches {self.question!r}. "
+                "Try `kerplunk search` with a table or column name."
+            )
+        lines = ["Best matches"]
+        for match in self.matches:
+            lines.append(f"  {match}")
+            if match.description:
+                lines.append(f"      {_shorten(match.description)}")
+        if self.edges:
+            lines += ["", "Connections", *(f"  {e}" for e in self.edges[: self.EDGE_LIMIT])]
+            if len(self.edges) > self.EDGE_LIMIT:
+                lines.append(f"  and {len(self.edges) - self.EDGE_LIMIT} more")
+        for walk in (self.impact, self.lineage):
+            if walk is not None:
+                lines += ["", str(walk)]
+        return "\n".join(lines)
+
+
+def query(graph: Graph, question: str, limit: int = 8, depth: int = 1) -> QueryResult:
     """Answer a free-text question with the most relevant nodes and their neighbourhood.
 
     There is no language model here: kerplunk ranks nodes by the question's words and returns
@@ -316,184 +624,44 @@ def query(graph: Graph, question: str, limit: int = 8, depth: int = 1) -> dict[s
     """
     words = set(_TOKEN.findall(question.lower()))
     seeds = _scored(graph, question, limit, None)
-    result: dict[str, Any] = {"question": question, "matches": [], "edges": []}
+    result = QueryResult(question)
     if not seeds:
         return result
     top_score = seeds[0][1]
     chosen = [node for node, score in seeds if score >= top_score * 0.35]
     seen = {n.id for n in chosen}
-    result["matches"] = [summary(graph, n) for n in chosen]
+    edge_keys: set[tuple[str, str, str]] = set()
+    result.matches = [item(graph, n) for n in chosen]
     for node in chosen:
         frontier = [node.id]
         for _ in range(depth):
             following = []
             for node_id in frontier:
                 for edge in [*graph.out_edges(node_id), *graph.in_edges(node_id)]:
-                    if edge.kind == "contains":
+                    if edge.kind == "contains" or edge.key in edge_keys:
                         continue
-                    record = {"source": edge.source, "target": edge.target, "kind": edge.kind}
-                    for key in ("transform", "role"):
-                        if key in edge.attrs:
-                            record[key] = edge.attrs[key]
-                    if record not in result["edges"]:
-                        result["edges"].append(record)
+                    edge_keys.add(edge.key)
+                    result.edges.append(
+                        EdgeItem(
+                            source=edge.source,
+                            target=edge.target,
+                            kind=edge.kind,
+                            source_label=graph.label(graph.nodes[edge.source]),
+                            target_label=graph.label(graph.nodes[edge.target]),
+                            transform=edge.attrs.get("transform"),
+                            role=edge.attrs.get("role"),
+                        )
+                    )
                     for other in (edge.source, edge.target):
                         if other not in seen:
                             seen.add(other)
                             following.append(other)
             frontier = following
-    result["neighbours"] = [summary(graph, graph.nodes[i]) for i in sorted(seen - {n.id for n in chosen})][
-        :60
-    ]
+    chosen_ids = {n.id for n in chosen}
+    result.neighbours = [item(graph, graph.nodes[i]) for i in sorted(seen - chosen_ids)][:60]
     top = chosen[0]
     if words & _DOWNSTREAM_WORDS:
-        result["impact"] = impact(graph, top.id)
+        result.impact = impact(graph, top.id)
     elif words & _UPSTREAM_WORDS:
-        result["lineage"] = trace(graph, top.id)
+        result.lineage = trace(graph, top.id)
     return result
-
-
-# Text rendering
-
-
-def _line(item: dict[str, Any]) -> str:
-    parts = [f"{item['label']}"]
-    meta = [item.get("relation_kind") or item["kind"]]
-    for key in ("data_type", "transform", "role", "command"):
-        if item.get(key):
-            meta.append(str(item[key]))
-    if item.get("through"):
-        meta.append(f"via {item['through']}")
-    parts.append(f"[{', '.join(meta)}]")
-    if item.get("path"):
-        parts.append(item["path"])
-    if "depth" in item:
-        parts.insert(0, f"{item['depth']:>2}")
-    return "  ".join(parts)
-
-
-def render_walk(result: dict[str, Any]) -> str:
-    target = result["target"]
-    title = "Downstream of" if result["direction"] == "downstream" else "Upstream of"
-    lines = [f"{title} {target['label']} ({target.get('relation_kind') or target['kind']})"]
-    if target.get("description"):
-        lines.append(f"  {_shorten(target['description'])}")
-    sections = [
-        ("columns", "Columns"),
-        ("relations", "Relations"),
-        ("joins_and_filters", "Relations that join, filter or group on it"),
-        ("filtered_by", "Columns that filter or join its relation"),
-        ("tests", "Tests"),
-        ("exposures", "Exposures"),
-        ("tasks", "Orchestration"),
-    ]
-    for key, heading in sections:
-        items = result.get(key) or []
-        if items:
-            lines.append("")
-            lines.append(f"{heading} ({len(items)})")
-            lines.extend(f"  {_line(item)}" for item in items)
-    if not result.get("total"):
-        lines.append("")
-        lines.append("Nothing found." if result["direction"] == "downstream" else "No upstream found.")
-    return "\n".join(lines)
-
-
-def render_path(result: dict[str, Any]) -> str:
-    if not result["found"]:
-        return f"No path between {result['from']['label']} and {result['to']['label']}."
-    lines = [f"Path from {result['from']['label']} to {result['to']['label']}:"]
-    for step in result["steps"]:
-        arrow = ""
-        if step.get("via"):
-            arrow = f"-{step['via']}-> " if step.get("direction") == "forward" else f"<-{step['via']}- "
-        lines.append(f"  {arrow}{step['label']} ({step.get('relation_kind') or step['kind']})")
-    return "\n".join(lines)
-
-
-def render_search(result: dict[str, Any]) -> str:
-    if not result["results"]:
-        return f"Nothing matches {result['query']!r}."
-    lines = []
-    for item in result["results"]:
-        line = _line(item)
-        if item.get("description"):
-            line += f"\n      {_shorten(item['description'])}"
-        lines.append(line)
-    return "\n".join(lines)
-
-
-def _shorten(text: str, width: int = 140) -> str:
-    flat = " ".join(text.split())
-    return flat if len(flat) <= width else flat[: width - 3] + "..."
-
-
-def render_describe(result: dict[str, Any]) -> str:
-    lines = [f"{result['label']} ({result.get('relation_kind') or result['kind']})", f"  id: {result['id']}"]
-    for key in ("relation", "path", "data_type", "description"):
-        if result.get(key):
-            lines.append(f"  {key}: {result[key]}")
-    if result.get("origins"):
-        lines.append(f"  from: {', '.join(result['origins'])}")
-    attrs = {k: v for k, v in (result.get("attrs") or {}).items() if k not in ("fqn", "dbt_name", "checksum")}
-    for key, value in attrs.items():
-        if value not in (None, "", [], {}):
-            lines.append(f"  {key}: {value}")
-    if result.get("columns"):
-        lines.append("")
-        lines.append(f"Columns ({len(result['columns'])})")
-        for column in result["columns"]:
-            text = f"  {column['label'].rsplit('.', 1)[-1]}"
-            if column.get("data_type"):
-                text += f"  {column['data_type']}"
-            if column.get("description"):
-                text += f"  {_shorten(column['description'], 100)}"
-            lines.append(text)
-    for key, heading in (
-        ("tests", "Tests"),
-        ("upstream", "Upstream"),
-        ("downstream", "Downstream"),
-        ("tasks", "Tasks"),
-        ("runs", "Runs"),
-        ("after", "After"),
-        ("before", "Before"),
-    ):
-        if result.get(key):
-            lines.append("")
-            lines.append(f"{heading} ({len(result[key])})")
-            lines.extend(f"  {item}" for item in result[key])
-    return "\n".join(lines)
-
-
-def render_query(graph: Graph, result: dict[str, Any]) -> str:
-    if not result["matches"]:
-        return f"Nothing in the graph matches {result['question']!r}. Try `kerplunk search` with a table or column name."
-    lines = ["Best matches"]
-    for item in result["matches"]:
-        line = f"  {_line(item)}"
-        if item.get("description"):
-            line += f"\n      {_shorten(item['description'])}"
-        lines.append(line)
-    if result["edges"]:
-        lines.append("")
-        lines.append("Connections")
-        for edge in result["edges"][:80]:
-            source = (
-                graph.label(graph.nodes[edge["source"]]) if edge["source"] in graph.nodes else edge["source"]
-            )
-            target = (
-                graph.label(graph.nodes[edge["target"]]) if edge["target"] in graph.nodes else edge["target"]
-            )
-            extra = (
-                f" ({edge.get('transform') or edge.get('role')})"
-                if edge.get("transform") or edge.get("role")
-                else ""
-            )
-            lines.append(f"  {source} -{edge['kind']}-> {target}{extra}")
-        if len(result["edges"]) > 80:
-            lines.append(f"  and {len(result['edges']) - 80} more")
-    if "impact" in result:
-        lines += ["", render_walk(result["impact"])]
-    if "lineage" in result:
-        lines += ["", render_walk(result["lineage"])]
-    return "\n".join(lines)

@@ -1,28 +1,48 @@
+"""The query API, through kerplunk.Project, on the built jaffle_shop example."""
+
 from __future__ import annotations
 
+import json
+import shutil
 from pathlib import Path
 
 import pytest
 
-from kerplunk import query
-from kerplunk.graph import Graph
+import kerplunk
+from kerplunk import Item, Project, QueryError, Walk
 
 pytestmark = pytest.mark.dbt
 
 
 @pytest.fixture
-def graph(jaffle_built_graph: Path) -> Graph:
-    return query.load_graph(jaffle_built_graph / "kerplunk-out")
+def project(jaffle_built_graph: Path, tmp_path: Path) -> Project:
+    copy = tmp_path / "jaffle_shop"
+    shutil.copytree(jaffle_built_graph / "kerplunk-out", copy / "kerplunk-out")
+    return Project(copy)
 
 
-def labels(items: list[dict[str, object]]) -> list[object]:
-    return [item["label"] for item in items]
+def labels(items: list[Item]) -> list[str]:
+    return [i.label for i in items]
 
 
-def test_impact_of_a_staging_column(graph: Graph) -> None:
-    result = query.impact(graph, "stg_payments.amount")
-    assert result["target"]["id"] == "model.jaffle_shop.stg_payments#amount"
-    assert set(labels(result["columns"])) == {
+def test_package_exports_the_api() -> None:
+    assert kerplunk.Project is Project
+    assert set(kerplunk.__all__) >= {"Project", "Walk", "Item", "QueryError", "Graph"}
+
+
+def test_project_finds_the_graph_from_a_subdirectory(jaffle_built_graph: Path) -> None:
+    nested = Project(jaffle_built_graph / "models" / "staging")
+    assert nested.out_dir == jaffle_built_graph / "kerplunk-out"
+    assert nested.root == jaffle_built_graph
+    assert repr(nested).startswith("Project(")
+
+
+def test_impact_of_a_staging_column(project: Project) -> None:
+    walk = project.impact("stg_payments.amount")
+    assert isinstance(walk, Walk)
+    assert walk.direction == "downstream"
+    assert walk.target.id == "model.jaffle_shop.stg_payments#amount"
+    assert set(labels(walk.columns)) == {
         "customers.customer_lifetime_value",
         "orders.amount",
         "orders.credit_card_amount",
@@ -31,115 +51,152 @@ def test_impact_of_a_staging_column(graph: Graph) -> None:
         "orders.gift_card_amount",
         "customer_ltv.lifetime_value",
     }
-    assert set(labels(result["relations"])) == {"customers", "orders"}
-    assert labels(result["joins_and_filters"]) == ["customer_ltv"]
-    assert labels(result["exposures"]) == ["customer_dashboard"]
-    assert set(labels(result["tasks"])) == {
+    assert labels(walk.relations) == ["customers", "orders"]
+    assert labels(walk.joins_and_filters) == ["customer_ltv"]
+    assert labels(walk.exposures) == ["customer_dashboard"]
+    assert set(labels(walk.tasks)) == {
         "jaffle_shop_daily.dbt_run_marts",
         "jaffle_shop_daily.build_customer_ltv",
     }
-    assert "not_null_orders_amount" in labels(result["tests"])
-    ltv = next(c for c in result["columns"] if c["label"] == "customer_ltv.lifetime_value")
-    assert ltv["depth"] == 2 and ltv["transform"] == "direct"
-    assert ltv["through"] == "jaffle_shop_daily.build_customer_ltv"
+    assert "not_null_orders_amount" in labels(walk.tests)
+    ltv = next(c for c in walk.columns if c.label == "customer_ltv.lifetime_value")
+    assert (ltv.depth, ltv.transform, ltv.through) == (2, "direct", "jaffle_shop_daily.build_customer_ltv")
+    assert walk.total == 7 + 2 + 1 + 5 + 1 + 2
+    assert walk.summary() == "7 columns, 3 relations, 5 tests, 1 exposure and 2 tasks downstream."
 
 
-def test_impact_of_a_join_key(graph: Graph) -> None:
-    result = query.impact(graph, "stg_orders.customer_id")
-    assert "customers" in labels(result["joins_and_filters"])
-    assert "orders.customer_id" in labels(result["columns"])
+def test_impact_of_a_join_key_and_of_a_relation(project: Project) -> None:
+    walk = project.impact("stg_orders.customer_id")
+    assert "customers" in labels(walk.joins_and_filters)
+    assert "orders.customer_id" in labels(walk.columns)
+    whole = project.impact("stg_orders")
+    assert {"orders", "customers", "customer_ltv"} <= set(labels(whole.relations))
+    shallow = project.impact("stg_orders", max_depth=1)
+    assert "customer_ltv" not in labels(shallow.relations)
 
 
-def test_impact_of_a_relation_and_depth(graph: Graph) -> None:
-    result = query.impact(graph, "stg_orders")
-    assert {"orders", "customers", "customer_ltv"} <= set(labels(result["relations"]))
-    shallow = query.impact(graph, "stg_orders", max_depth=1)
-    assert "customer_ltv" not in labels(shallow["relations"])
-
-
-def test_trace_to_the_seed(graph: Graph) -> None:
-    result = query.trace(graph, "customer_ltv.lifetime_value")
-    assert labels(result["columns"]) == [
+def test_trace_to_the_seed(project: Project) -> None:
+    walk = project.trace("customer_ltv.lifetime_value")
+    assert labels(walk.columns) == [
         "customers.customer_lifetime_value",
         "stg_payments.amount",
         "raw_payments.amount",
     ]
-    assert [c["transform"] for c in result["columns"]] == ["direct", "transformed", "transformed"]
-    assert "jaffle_shop_daily.build_customer_ltv" in labels(result["tasks"])
-    assert labels(result["filtered_by"]) == ["customers.customer_lifetime_value"]
+    assert [c.transform for c in walk.columns] == ["direct", "transformed", "transformed"]
+    assert "jaffle_shop_daily.build_customer_ltv" in labels(walk.tasks)
+    assert labels(walk.filtered_by) == ["customers.customer_lifetime_value"]
+    assert project.trace("raw_payments.amount").summary() == "1 task upstream."
 
 
-def test_path_search_and_describe(graph: Graph) -> None:
-    result = query.path(graph, "raw_orders.id", "customers.number_of_orders")
-    assert result["found"]
-    assert labels(result["steps"]) == [
-        "raw_orders.id",
-        "stg_orders.order_id",
-        "customers.number_of_orders",
-    ]
-    assert query.search(graph, "lifetime value")["results"][0]["label"] == "customers.customer_lifetime_value"
-    assert query.search(graph, "payments", kinds=["seed"])["results"][0]["label"] == "raw_payments"
-    described = query.describe(graph, "orders")
-    assert described["relation"] == "jaffle_shop.main.orders"
-    assert [c["label"] for c in described["columns"]][:2] == ["orders.order_id", "orders.customer_id"]
-    assert "unique_orders_order_id" in described["tests"]
-    assert "customer_dashboard (exposure)" in described["downstream"]
-    task = query.describe(graph, "dbt_run_marts")
-    assert task["runs"] == ["customers", "orders"]
-    assert task["after"] == ["dbt_run_staging"] and task["before"] == ["dbt_test"]
-    assert task["upstream"] == [] and task["downstream"] == []
-
-
-def test_query_finds_nodes_and_follows_intent(graph: Graph) -> None:
-    result = query.query(graph, "what breaks if I change the payment method in stg_payments?")
-    assert result["matches"][0]["label"] == "stg_payments.payment_method"
-    assert "impact" in result
-    lineage = query.query(graph, "where does customer lifetime value come from")
-    assert "lineage" in lineage
-    assert lineage["lineage"]["target"]["label"] == "customers.customer_lifetime_value"
-    assert query.query(graph, "zzz qqq")["matches"] == []
-
-
-def test_errors_suggest_and_disambiguate(graph: Graph) -> None:
-    with pytest.raises(query.QueryError, match="did you mean"):
-        query.impact(graph, "payment")
-    with pytest.raises(query.QueryError, match="nothing in the graph"):
-        query.trace(graph, "zzz")
-    graph.add_node(
-        graph.nodes["model.jaffle_shop.orders"].__class__(
-            "table.x.orders", "table", "orders", relation="x.y.orders"
-        )
-    )
-    with pytest.raises(query.QueryError, match="ambiguous"):
-        query.describe(graph, "orders")
-
-
-def test_text_rendering(graph: Graph) -> None:
-    impact = query.render_walk(query.impact(graph, "stg_payments.amount"))
-    assert impact.startswith("Downstream of stg_payments.amount (model)")
-    assert "Relations that join, filter or group on it (1)" in impact
-    assert (
-        "customer_ltv.lifetime_value  [table, DOUBLE, direct, via jaffle_shop_daily.build_customer_ltv]"
-        in impact
-    )
-    trace = query.render_walk(query.trace(graph, "raw_payments.amount"))
-    assert trace.splitlines()[2:] == [
-        "Orchestration (1)",
-        "   1  jaffle_shop_daily.dbt_seed  [task, seed]  dags/jaffle_shop_daily.py",
-    ]
-    path = query.render_path(query.path(graph, "raw_payments", "customer_dashboard"))
-    assert path.splitlines()[1:] == [
+def test_path(project: Project) -> None:
+    result = project.path_between("raw_orders.id", "customers.number_of_orders")
+    assert result.found
+    assert labels(result.steps) == ["raw_orders.id", "stg_orders.order_id", "customers.number_of_orders"]
+    assert [s.direction for s in result.steps] == [None, "backward", "backward"]
+    assert str(project.path_between("raw_payments", "customer_dashboard")).splitlines() == [
+        "Path from raw_payments to customer_dashboard (3 steps):",
         "  raw_payments (seed)",
         "  -feeds-> stg_payments (model)",
         "  -feeds-> customers (model)",
         "  -feeds-> customer_dashboard (exposure)",
     ]
-    assert "Columns (9)" in query.render_describe(query.describe(graph, "orders"))
-    assert query.render_search(query.search(graph, "zzz")) == "Nothing matches 'zzz'."
-    rendered = query.render_query(graph, query.query(graph, "stg_payments payment method"))
-    assert rendered.startswith("Best matches")
 
 
-def test_load_graph_without_a_build(tmp_path: Path) -> None:
-    with pytest.raises(query.QueryError, match="run `kerplunk build` first"):
-        query.load_graph(tmp_path)
+def test_search_and_list(project: Project) -> None:
+    result = project.search("lifetime value")
+    assert result.results[0].label == "customers.customer_lifetime_value"
+    assert result.results[0].score is not None
+    assert project.search("payments", kinds=["seed"]).results[0].label == "raw_payments"
+    assert str(project.search("zzz")) == "Nothing matches 'zzz'."
+    models = labels(project.list(["model"]).items)
+    assert models == ["customers", "orders", "stg_customers", "stg_orders", "stg_payments"]
+    everything = project.list()
+    assert {i.kind for i in everything.items} == {"model", "seed", "table"}
+    assert str(project.list(["snapshot"])) == "No snapshot nodes."
+
+
+def test_describe(project: Project) -> None:
+    described = project.describe("orders")
+    assert described.relation == "jaffle_shop.main.orders"
+    assert [c.name for c in described.columns][:2] == ["order_id", "customer_id"]
+    assert "unique_orders_order_id" in described.tests
+    assert "customer_dashboard (exposure)" in described.downstream
+    text = str(described)
+    assert text.startswith("orders (model)\n  id: model.jaffle_shop.orders")
+    assert "Columns (9)" in text and "  order_id  " in text
+    task = project.describe("jaffle_shop_daily.dbt_run_marts")
+    assert task.runs == ["customers", "orders"]
+    assert (task.after, task.before, task.upstream, task.downstream) == (
+        ["dbt_run_staging"],
+        ["dbt_test"],
+        [],
+        [],
+    )
+    dag = project.describe("jaffle_shop_daily")
+    assert dag.tasks[0] == "dbt_seed"
+
+
+def test_query(project: Project) -> None:
+    result = project.query("what breaks if I change the payment method in stg_payments?")
+    assert result.matches[0].label == "stg_payments.payment_method"
+    assert result.impact is not None and result.lineage is None
+    lineage = project.query("where does customer lifetime value come from")
+    assert lineage.lineage is not None
+    assert lineage.lineage.target.label == "customers.customer_lifetime_value"
+    assert str(project.query("zzz qqq")).startswith("Nothing in the graph matches")
+    assert str(result).startswith("Best matches")
+
+
+def test_results_serialise_to_json(project: Project) -> None:
+    for result in (
+        project.impact("orders.amount"),
+        project.trace("orders.amount"),
+        project.path_between("raw_orders", "orders"),
+        project.search("orders"),
+        project.describe("orders"),
+        project.list(),
+        project.query("orders amount"),
+    ):
+        assert json.loads(json.dumps(result.to_dict()))
+    walk = project.impact("orders.amount").to_dict()
+    assert walk["summary"].endswith("downstream.")
+    assert all("label" in c and "id" in c for c in walk["columns"])
+
+
+def test_errors_suggest_and_disambiguate(project: Project) -> None:
+    with pytest.raises(QueryError, match="did you mean"):
+        project.impact("payment")
+    with pytest.raises(QueryError, match="nothing in the graph"):
+        project.trace("zzz")
+    project.graph.add_node(kerplunk.Node("table.x.y.orders", "table", "orders", relation="x.y.orders"))
+    with pytest.raises(QueryError, match="ambiguous"):
+        project.describe("orders")
+
+
+def test_graph_is_reread_after_a_rebuild(project: Project) -> None:
+    before = project.graph
+    assert project.graph is before
+    data = json.loads(project.graph_path.read_text())
+    data["nodes"].append({"id": "table.new", "kind": "table", "name": "brand_new"})
+    project.graph_path.write_text(json.dumps(data))
+    assert project.graph is not before
+    assert project.describe("brand_new").node.kind == "table"
+
+
+def test_no_graph(tmp_path: Path) -> None:
+    project = Project(tmp_path)
+    assert not project.has_graph()
+    assert project.changed_inputs() == []
+    with pytest.raises(QueryError, match="run `kerplunk build` first"):
+        project.impact("x")
+
+
+def test_build_through_the_api(tmp_path: Path) -> None:
+    (tmp_path / "x.sql").write_text("create table t2 as select a * 2 as b from t1")
+    project = Project(tmp_path)
+    result = project.build(dialect="duckdb", warehouses=False, run_dbt=False)
+    assert result.outputs[0] == tmp_path / "kerplunk-out" / "graph.json"
+    assert project.has_graph()
+    assert project.trace("t2.b").columns[0].label == "t1.a"
+    again = project.build(update=True, dialect="duckdb", warehouses=False, run_dbt=False)
+    assert again.cache_misses == 0

@@ -358,3 +358,41 @@ warehouse = "file://{tmp_path}"
     assert [
         (e.target, e.attrs["transform"]) for e in graph.out_edges(f"{big.id}#doubled", "derived_from")
     ] == [(f"{orders.id}#amount", "transformed")]
+
+
+def test_struct_fields_from_duckdb_trace_and_verify(tmp_path: Path) -> None:
+    from kerplunk import Project
+
+    con = duckdb.connect(str(tmp_path / "shop.duckdb"))
+    con.execute("create schema raw")
+    con.execute(
+        "create table raw.orders as select i as id, "
+        "{'country': ['UK','FR','DE'][1 + i % 3], 'address': {'city': 'c' || i, 'postcode': 'p' || i}} as customer "
+        "from range(1, 50) t(i)"
+    )
+    con.close()
+    (tmp_path / "eu.sql").write_text(
+        "create table main.eu as select id, o.customer.country as country, upper(o.customer.address.city) as city "
+        "from raw.orders o where o.customer['country'] <> 'DE'"
+    )
+    project = Project(tmp_path)
+    project.build()
+    orders = project.describe("raw.orders")
+    assert [c.name for c in orders.columns] == [
+        "id",
+        "customer",
+        "customer.country",
+        "customer.address",
+        "customer.address.city",
+        "customer.address.postcode",
+    ]
+    trace = project.trace("eu.city")
+    assert [(c.label, c.transform) for c in trace.columns] == [
+        ("orders.customer.address.city", "transformed")
+    ]
+    impact = project.impact("orders.customer.country")
+    assert "eu.country" in {c.label for c in impact.columns}
+    assert "eu" in {r.label for r in impact.joins_and_filters}
+    result = project.verify(warehouse=tmp_path / "shop.duckdb")
+    assert result.totals()["unexplained"] == 0
+    assert result.totals()["confirmed"] == result.totals()["claimed"] == 3

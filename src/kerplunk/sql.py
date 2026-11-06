@@ -297,8 +297,8 @@ def _column_lineage(
             continue
         out_name = (out_names[index] if out_names else name).lower()
         sources: list[ColumnSource] = []
-        for leaf, transform, asked_for in _leaves(node):
-            source = _leaf_source(leaf, asked_for, transform, default_catalog, default_db)
+        for leaf, transform, asked_for, path in _leaves(node):
+            source = _leaf_source(leaf, asked_for, transform, default_catalog, default_db, path)
             if source and source not in sources:
                 sources.append(source)
         result.columns[out_name] = sources
@@ -310,30 +310,94 @@ def _column_lineage(
     result.references = _references(scope, dialect, schema, default_catalog, default_db)
 
 
+def _strip_fields(expression: exp.Expr) -> exp.Expr:
+    """``customer.address.city`` or ``customer['city']`` down to the ``customer`` column."""
+    while _is_field_access(expression):
+        expression = expression.this
+    return expression
+
+
+def _is_field_access(expression: exp.Expr | None) -> bool:
+    if isinstance(expression, exp.Dot):
+        return isinstance(expression.expression, exp.Identifier)
+    return isinstance(expression, exp.Bracket) and _bracket_field(expression) is not None
+
+
+def _bracket_field(bracket: exp.Bracket) -> str | None:
+    keys = bracket.expressions
+    if len(keys) == 1 and isinstance(keys[0], exp.Literal) and keys[0].is_string:
+        return str(keys[0].this)
+    return None
+
+
 def _is_passthrough(node: LineageNode) -> bool:
     expression = node.expression
     if isinstance(node.source, exp.SetOperation) or isinstance(expression, (exp.Table, exp.Star)):
         return True
     if isinstance(expression, exp.Alias):
         expression = expression.this
-    return isinstance(expression, (exp.Column, exp.Star))
+    return isinstance(_strip_fields(expression), (exp.Column, exp.Star))
 
 
-def _leaves(node: LineageNode) -> Iterator[tuple[LineageNode, Transform, str]]:
-    """Leaf (physical table) nodes under ``node``, whether the path changes the value, and the
-    name of the node that reached each leaf (for a ``*`` leaf, the column that was asked for)."""
-    stack: list[tuple[LineageNode, bool, frozenset[int], str]] = [(node, True, frozenset(), node.name)]
+def _plain(name: str) -> str:
+    return re.sub(r'["`\[\]]', "", name).lower()
+
+
+def _fields_read(column: exp.Column) -> tuple[str, ...]:
+    parts: list[str] = []
+    node: exp.Expr = column
+    while True:
+        parent = node.parent
+        if (
+            isinstance(parent, exp.Dot)
+            and parent.this is node
+            and isinstance(parent.expression, exp.Identifier)
+        ):
+            parts.append(parent.expression.name.lower())
+        elif isinstance(parent, exp.Bracket) and parent.this is node and _bracket_field(parent) is not None:
+            parts.append(str(_bracket_field(parent)).lower())
+        else:
+            return tuple(parts)
+        node = parent
+
+
+def _field_suffixes(expression: exp.Expr, child: LineageNode) -> set[tuple[str, ...]]:
+    """The struct fields ``expression`` reads from the column ``child`` stands for: ``{("country",)}``
+    for ``o.customer.country``, ``{()}`` when it uses the whole column."""
+    wanted = _plain(child.name)
+    suffixes: set[tuple[str, ...]] = set()
+    for column in expression.find_all(exp.Column):
+        name = f"{column.table}.{column.name}" if column.table else column.name
+        if _plain(name) != wanted:
+            continue
+        suffixes.add(_fields_read(column))
+    if not suffixes or () in suffixes:
+        return {()}
+    return suffixes
+
+
+Leaf = tuple[LineageNode, Transform, str, tuple[str, ...]]
+
+
+def _leaves(node: LineageNode) -> Iterator[Leaf]:
+    """Leaf (physical table) nodes under ``node``: whether the path changes the value, the name of
+    the node that reached the leaf (for a ``*`` leaf, the column that was asked for), and the struct
+    field path read from the leaf column."""
+    stack: list[tuple[LineageNode, bool, frozenset[int], str, tuple[str, ...]]] = [
+        (node, True, frozenset(), node.name, ())
+    ]
     while stack:
-        current, direct, seen, parent = stack.pop()
+        current, direct, seen, parent, path = stack.pop()
         if id(current) in seen:
             continue
         direct = direct and _is_passthrough(current)
         if not current.downstream:
             if isinstance(current.expression, exp.Table):
-                yield current, "direct" if direct else "transformed", parent
+                yield current, "direct" if direct else "transformed", parent, path
             continue
         for child in reversed(current.downstream):
-            stack.append((child, direct, seen | {id(current)}, current.name))
+            for suffix in sorted(_field_suffixes(current.expression, child)):
+                stack.append((child, direct, seen | {id(current)}, current.name, suffix + path))
 
 
 def _leaf_source(
@@ -342,6 +406,7 @@ def _leaf_source(
     transform: Transform,
     default_catalog: str | None,
     default_db: str | None,
+    path: tuple[str, ...] = (),
 ) -> ColumnSource | None:
     table = leaf.expression
     if not isinstance(table, exp.Table):
@@ -354,7 +419,7 @@ def _leaf_source(
         column = asked_for.rsplit(".", 1)[-1].strip('"`[]').lower()
         if not column or column == "*":
             return None
-    return ColumnSource(relation, column, transform)
+    return ColumnSource(relation, ".".join((column, *path)), transform)
 
 
 def _unexpanded_star_tables(scope: Scope) -> Iterator[exp.Table]:
@@ -396,15 +461,18 @@ def _references(
                     columns.extend(part.find_all(exp.Column))
         for column in columns:
             source = scope.sources.get(column.table)
+            fields = _fields_read(column)
             if isinstance(source, exp.Table):
-                add(table_key(source, default_catalog, default_db), column.name)
+                add(table_key(source, default_catalog, default_db), ".".join((column.name, *fields)))
             elif isinstance(source, Scope):
                 try:
                     traced = to_node(column.name, scope=source, dialect=dialect, schema=schema)
                 except (SqlglotError, ValueError, KeyError, IndexError, AttributeError):
                     continue
-                for leaf, _, asked_for in _leaves(traced):
-                    leaf_source = _leaf_source(leaf, asked_for, "direct", default_catalog, default_db)
+                for leaf, _, asked_for, path in _leaves(traced):
+                    leaf_source = _leaf_source(
+                        leaf, asked_for, "direct", default_catalog, default_db, path + fields
+                    )
                     if leaf_source:
                         add(leaf_source.relation, leaf_source.column)
     return found

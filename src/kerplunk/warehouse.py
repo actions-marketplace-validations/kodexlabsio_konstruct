@@ -101,7 +101,9 @@ class DuckDBConnector:
                 """,
                 [current],
             ).fetchall():
-                columns.setdefault((catalog, schema, table), []).append(ColumnMeta(name, dtype, comment))
+                columns.setdefault((catalog, schema, table), []).extend(
+                    [ColumnMeta(name, dtype, comment), *_duckdb_struct_fields(name, dtype)]
+                )
         finally:
             con.close()
 
@@ -120,6 +122,28 @@ class DuckDBConnector:
                 )
             )
         return relations
+
+
+def _duckdb_struct_fields(name: str, dtype: str | None) -> list[ColumnMeta]:
+    """Fields of a DuckDB STRUCT column as dotted columns (``address.city``), recursively."""
+    if not dtype or not dtype.upper().startswith("STRUCT"):
+        return []
+    from sqlglot import exp
+    from sqlglot.errors import SqlglotError
+
+    try:
+        built = exp.DataType.build(dtype, dialect="duckdb")
+    except (SqlglotError, ValueError):
+        return []
+    fields: list[ColumnMeta] = []
+    for field_def in built.expressions:
+        if not isinstance(field_def, exp.ColumnDef) or not isinstance(field_def.kind, exp.DataType):
+            continue
+        child = f"{name}.{field_def.name}"
+        child_type = field_def.kind.sql(dialect="duckdb")
+        fields.append(ColumnMeta(child, child_type, None, {"nested": True}))
+        fields.extend(_duckdb_struct_fields(child, child_type))
+    return fields
 
 
 @dataclass

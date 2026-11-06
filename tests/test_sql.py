@@ -312,3 +312,57 @@ def test_round_trip_to_dict() -> None:
 )
 def test_dialect_for(adapter: str | None, dialect: str | None) -> None:
     assert dialect_for(adapter) == dialect
+
+
+STRUCTS = {"lake.sales.orders": {"id": "bigint", "customer": "UNKNOWN"}}
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect", "expected"),
+    [
+        ("select o.customer.country as c from lake.sales.orders o", "trino", ("customer.country", "direct")),
+        ("select customer.country as c from lake.sales.orders", "trino", ("customer.country", "direct")),
+        (
+            "select o.customer['country'] as c from lake.sales.orders o",
+            "duckdb",
+            ("customer.country", "direct"),
+        ),
+        (
+            "select upper(o.customer.address.city) as c from lake.sales.orders o",
+            "trino",
+            ("customer.address.city", "transformed"),
+        ),
+        (
+            "with x as (select customer from lake.sales.orders) select x.customer.country as c from x",
+            "trino",
+            ("customer.country", "direct"),
+        ),
+        (
+            "with y as (select customer.address as a from lake.sales.orders) select y.a.city as c from y",
+            "trino",
+            ("customer.address.city", "direct"),
+        ),
+        ("select o.customer as c from lake.sales.orders o", "trino", ("customer", "direct")),
+    ],
+)
+def test_struct_field_lineage(sql: str, dialect: str, expected: tuple[str, str]) -> None:
+    [result] = analyse(sql, dialect=dialect, schema=STRUCTS)
+    assert result.columns["c"] == [src("lake.sales.orders", *expected)]
+
+
+def test_a_column_read_whole_and_by_field_gives_both() -> None:
+    sql = "select coalesce(o.customer.country, cast(o.customer as varchar)) as c from lake.sales.orders o"
+    [result] = analyse(sql, dialect="trino", schema=STRUCTS)
+    assert set(result.columns["c"]) == {src("lake.sales.orders", "customer", "transformed")}
+
+
+def test_struct_fields_in_filters_are_references() -> None:
+    sql = (
+        "with x as (select id, customer from lake.sales.orders) "
+        "select id from x where x.customer.address.city = 'Leeds' and x.customer['country'] = 'UK'"
+    )
+    [result] = analyse(sql, dialect="duckdb", schema=STRUCTS)
+    assert set(result.references) == {
+        ("lake.sales.orders", "customer.address.city"),
+        ("lake.sales.orders", "customer.country"),
+    }

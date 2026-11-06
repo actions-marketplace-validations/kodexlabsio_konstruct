@@ -267,8 +267,11 @@ class Graph:
         relations = self._match_relations(needle)
         if relations:
             return relations
-        if "." in needle:
-            rel_part, col_part = needle.rsplit(".", 1)
+        parts = needle.split(".")
+        # Try every split into relation and column, the longest relation first, so that nested
+        # columns (orders.customer.country) resolve as well as qualified tables.
+        for cut in range(len(parts) - 1, 0, -1):
+            rel_part, col_part = ".".join(parts[:cut]), ".".join(parts[cut:])
             columns = [
                 col
                 for rel in self._match_relations(rel_part)

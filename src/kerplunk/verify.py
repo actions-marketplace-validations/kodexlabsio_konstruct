@@ -341,28 +341,61 @@ def _signature(rows: list[tuple[Any, ...]], index: int) -> Counter[str]:
     return Counter(repr(row[index]) for row in rows)
 
 
+def _via_parent(output: str, source: str, influence: set[tuple[str, str]]) -> bool:
+    """Whether perturbing a struct column that contains ``source`` (``db.schema.table.column.field``)
+    changed ``output``."""
+    parts = source.split(".")
+    return any((output, ".".join(parts[:end])) in influence for end in range(4, len(parts)))
+
+
 def _paired(rows: list[tuple[Any, ...]], index: int, anchors: list[int]) -> Counter[str]:
     return Counter(repr((tuple(row[i] for i in anchors), row[index])) for row in rows)
 
 
-def _mutation(column: str, dtype: str, strategy: str, rng: random.Random) -> str | None:
-    quoted = _quote(column)
+def _mutation(reference: str, dtype: str, strategy: str, rng: random.Random) -> str | None:
+    """A perturbed value for ``reference`` (a quoted column or struct field) of type ``dtype``."""
     base = dtype.upper().split("(")[0].strip()
     if strategy == "null":
         return f"CAST(NULL AS {dtype})"
     if strategy == "shift":
         if base in _NUMERIC:
-            return f"TRY_CAST({quoted} * {rng.randint(2, 9)} + {rng.randint(1, 97)} AS {dtype})"
+            return f"TRY_CAST({reference} * {rng.randint(2, 9)} + {rng.randint(1, 97)} AS {dtype})"
         if base in ("VARCHAR", "TEXT", "STRING", "CHAR", "BPCHAR"):
-            return f"{quoted} || '~{rng.randint(10, 99)}'"
+            return f"{reference} || '~{rng.randint(10, 99)}'"
         if base == "DATE":
-            return f"CAST({quoted} + INTERVAL {rng.randint(3, 400)} DAY AS DATE)"
+            return f"CAST({reference} + INTERVAL {rng.randint(3, 400)} DAY AS DATE)"
         if base.startswith("TIMESTAMP"):
-            return f"{quoted} + INTERVAL {rng.randint(1, 300)} HOUR"
+            return f"{reference} + INTERVAL {rng.randint(1, 300)} HOUR"
         if base == "BOOLEAN":
-            return f"NOT {quoted}"
+            return f"NOT {reference}"
         return None
     return None
+
+
+def _targets(column: str, dtype: str) -> list[tuple[tuple[str, ...], str]]:
+    """What to perturb in one input column: the column, and each field when it is a STRUCT."""
+    from kerplunk.warehouse import _duckdb_struct_fields
+
+    targets: list[tuple[tuple[str, ...], str]] = [((column,), dtype)]
+    for field_meta in _duckdb_struct_fields(column, dtype):
+        targets.append((tuple(field_meta.name.split(".")), field_meta.data_type or "VARCHAR"))
+    return targets
+
+
+def _reference(path: tuple[str, ...], prefix: str = "") -> str:
+    return prefix + ".".join(_quote(p) for p in path)
+
+
+def _rebuild(path: tuple[str, ...], value: str, prefix: str = "") -> str:
+    """The top-level column of ``path`` with only the field at ``path`` replaced by ``value``."""
+    if len(path) == 1:
+        return value
+    inner = _rebuild(path[1:], value, prefix=f"{_reference(path[:1], prefix)}.") if len(path) > 2 else value
+    return f"struct_update({_reference(path[:1], prefix)}, {_quote(path[1])} := {inner})"
+
+
+def _overlaps(source: str, other: str) -> bool:
+    return source == other or other.startswith(source + ".") or source.startswith(other + ".")
 
 
 def verify(
@@ -449,78 +482,147 @@ def _verify_one(
     for key in sorted(columns):
         scratch = mapping[key]
         for column, dtype in columns[key]:
-            source_column = f"{key}.{column.lower()}"
-            for strategy in strategies:
-                if strategy == "shuffle":
-                    mutated = _shuffled(con, scratch, column, rng.randint(1, 2**31))
-                else:
-                    expression = _mutation(column, dtype, strategy, rng)
-                    if expression is None:
-                        continue
-                    con.execute(
-                        f"CREATE OR REPLACE TABLE kp.mut AS SELECT * REPLACE ({expression} AS {_quote(column)}) "
-                        f"FROM {scratch}"
+            for path, field_type in _targets(column, dtype):
+                source_column = f"{key}.{'.'.join(path).lower()}"
+                for strategy in strategies:
+                    if strategy == "shuffle":
+                        mutated = _shuffled(con, scratch, path, rng.randint(1, 2**31))
+                    else:
+                        expression = _mutation(_reference(path), field_type, strategy, rng)
+                        if expression is None:
+                            continue
+                        con.execute(
+                            f"CREATE OR REPLACE TABLE kp.mut AS SELECT * REPLACE "
+                            f"({_rebuild(path, expression)} AS {_quote(path[0])}) FROM {scratch}"
+                        )
+                        mutated = "kp.mut"
+                    _observe(
+                        con,
+                        candidate,
+                        mapping,
+                        key,
+                        mutated,
+                        names,
+                        baseline,
+                        base_signatures,
+                        claimed,
+                        source_column,
+                        value_influence,
+                        row_influence,
                     )
-                    mutated = "kp.mut"
-                perturbed, _ = _rewrite(
-                    candidate.sql,
-                    {**mapping, key: mutated},
-                    candidate.default_catalog,
-                    candidate.default_schema,
-                )
-                try:
-                    _, rows = _run(con, perturbed)
-                except Exception:  # a perturbation the SQL cannot accept (a cast, say) tells us nothing
-                    continue
-                if len(rows) != len(baseline):
-                    row_influence.add(source_column)
-                    continue
-                changed = {i for i in range(len(names)) if _signature(rows, i) != base_signatures[i]}
-                value_influence.update((names[i], source_column) for i in changed)
-                # Values that only moved between rows (a ROW_NUMBER ordered by the perturbed column
-                # keeps 1..n) leave each column's multiset unchanged. Pair each such column with the
-                # columns claimed not to depend on the input; if those pairs change, it moved.
-                independent = [
-                    i
-                    for i in range(len(names))
-                    if i not in changed and (names[i], source_column) not in claimed
-                ]
-                for index in range(len(names)):
-                    if index in changed:
-                        continue
-                    anchors = [i for i in independent if i != index]
-                    if anchors and _paired(rows, index, anchors) != _paired(baseline, index, anchors):
-                        value_influence.add((names[index], source_column))
     outputs = set(names)
     for output, source in sorted(claimed):
         if output not in outputs:
             continue
         # Only a change in values confirms an edge: a row-count change cannot be pinned on one column.
-        if (output, source) in value_influence:
+        if (output, source) in value_influence or _via_parent(output, source, value_influence):
             model.confirmed.append((output, source))
         else:
             model.not_exercised.append((output, source))
     model.claimed = len(model.confirmed) + len(model.not_exercised)
     for output, source in sorted(value_influence - claimed):
-        if source in references:
+        # Perturbing a struct column moves its fields; a claim on one of those fields explains it.
+        if any(o == output and s.startswith(source + ".") for o, s in claimed):
+            continue
+        if source in references or any(r.startswith(source + ".") for r in references):
             model.through_references.append((output, source))
         else:
             model.unexplained.append((output, source))
-    for source in sorted(row_influence - references - {s for _, s in claimed}):
-        model.unexplained.append(("(row count)", source))
+    expected = references | {s for _, s in claimed}
+    for source in sorted(row_influence):
+        if not any(_overlaps(source, other) for other in expected):
+            model.unexplained.append(("(row count)", source))
 
 
-def _shuffled(con: Any, scratch: str, column: str, salt: int) -> str:
-    quoted = _quote(column)
+def _observe(
+    con: Any,
+    candidate: Candidate,
+    mapping: dict[str, str],
+    key: str,
+    mutated: str,
+    names: list[str],
+    baseline: list[tuple[Any, ...]],
+    base_signatures: list[Counter[str]],
+    claimed: set[tuple[str, str]],
+    source_column: str,
+    value_influence: set[tuple[str, str]],
+    row_influence: set[str],
+) -> None:
+    """Rerun the model with ``key`` replaced by ``mutated`` and record what changed."""
+    perturbed, _ = _rewrite(
+        candidate.sql, {**mapping, key: mutated}, candidate.default_catalog, candidate.default_schema
+    )
+    try:
+        _, rows = _run(con, perturbed)
+    except Exception:  # a perturbation the SQL cannot accept (a cast, say) tells us nothing
+        return
+    claimed_on = {
+        i
+        for i, name in enumerate(names)
+        if any(o == name and _overlaps(source_column, c) for o, c in claimed)
+    }
+    row_id = _row_key(baseline, rows, [i for i in range(len(names)) if i not in claimed_on])
+    if row_id is not None:
+        # Rows identified by an output column that does not depend on this input: compare each
+        # surviving row's values directly, which works even when the perturbation adds or drops rows.
+        before = {row[row_id]: row for row in baseline}
+        after = {row[row_id]: row for row in rows}
+        for identity in before.keys() & after.keys():
+            for index in range(len(names)):
+                if before[identity][index] != after[identity][index] and not _both_nan(
+                    before[identity][index], after[identity][index]
+                ):
+                    value_influence.add((names[index], source_column))
+    if len(rows) != len(baseline):
+        row_influence.add(source_column)
+        return
+    changed = {i for i in range(len(names)) if _signature(rows, i) != base_signatures[i]}
+    value_influence.update((names[i], source_column) for i in changed)
+    # Values that only moved between rows (a ROW_NUMBER ordered by the perturbed column keeps
+    # 1..n) leave each column's multiset unchanged. Pair each such column with the columns claimed
+    # not to depend on the input; if those pairs change, it moved.
+    independent = [
+        i
+        for i in range(len(names))
+        if i not in changed and not any(o == names[i] and _overlaps(source_column, s) for o, s in claimed)
+    ]
+    for index in range(len(names)):
+        if index in changed:
+            continue
+        anchors = [i for i in independent if i != index]
+        if anchors and _paired(rows, index, anchors) != _paired(baseline, index, anchors):
+            value_influence.add((names[index], source_column))
+
+
+def _row_key(
+    baseline: list[tuple[Any, ...]], rows: list[tuple[Any, ...]], candidates: list[int]
+) -> int | None:
+    """An output column that identifies rows uniquely in both runs, if there is one."""
+    for index in candidates:
+        values = [row[index] for row in baseline]
+        if None in values or len(set(values)) != len(values):
+            continue
+        perturbed = [row[index] for row in rows]
+        if len(set(perturbed)) == len(perturbed) and set(perturbed) & set(values):
+            return index
+    return None
+
+
+def _both_nan(a: Any, b: Any) -> bool:
+    return isinstance(a, float) and isinstance(b, float) and a != a and b != b
+
+
+def _shuffled(con: Any, scratch: str, path: tuple[str, ...], salt: int) -> str:
+    quoted = _quote(path[0])
     con.execute(
         f"""
         CREATE OR REPLACE TABLE kp.mut AS
         WITH base AS (SELECT *, row_number() OVER () AS __kp_rn FROM {scratch}),
         perm AS (
             SELECT __kp_v, row_number() OVER (ORDER BY hash(__kp_i, {int(salt)})) AS __kp_rn
-            FROM (SELECT {quoted} AS __kp_v, row_number() OVER () AS __kp_i FROM {scratch})
+            FROM (SELECT {_reference(path)} AS __kp_v, row_number() OVER () AS __kp_i FROM {scratch})
         )
-        SELECT base.* EXCLUDE (__kp_rn) REPLACE (perm.__kp_v AS {quoted})
+        SELECT base.* EXCLUDE (__kp_rn) REPLACE ({_rebuild(path, "perm.__kp_v", prefix="base.")} AS {quoted})
         FROM base JOIN perm USING (__kp_rn)
         """
     )

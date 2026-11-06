@@ -1,3 +1,9 @@
+## v0.4.0 (2026-11-06)
+
+### Feat
+
+- **warehouse**: Add Snowflake, BigQuery and Databricks connectors as extras
+
 ## v0.3.0 (2026-11-06)
 
 ### Feat

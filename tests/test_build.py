@@ -397,3 +397,36 @@ def test_struct_fields_from_duckdb_trace_and_verify(tmp_path: Path) -> None:
     result = project.verify(warehouse=tmp_path / "shop.duckdb")
     assert result.totals()["unexplained"] == 0
     assert result.totals()["confirmed"] == result.totals()["claimed"] == 3
+
+
+def test_lists_of_structs_and_maps_from_duckdb(tmp_path: Path) -> None:
+    from kerplunk import Project
+
+    con = duckdb.connect(str(tmp_path / "shop.duckdb"))
+    con.execute("create schema raw")
+    con.execute(
+        "create table raw.orders as select i as id, "
+        "[{'sku': 'a' || i, 'qty': i % 4 + 1}, {'sku': 'b' || i, 'qty': 2}] as items, "
+        "map(['colour'], ['red' || (i % 3)]) as attrs from range(1, 40) t(i)"
+    )
+    con.close()
+    (tmp_path / "lines.sql").write_text(
+        "create table main.lines as select o.id, o.items[1].sku as first_sku, o.items[1].qty * 10 as first_qty, "
+        "o.attrs['colour'] as colour from raw.orders o"
+    )
+    project = Project(tmp_path)
+    project.build()
+    names = [c.name for c in project.describe("raw.orders").columns]
+    assert names == ["id", "items", "items.sku", "items.qty", "attrs"]
+    assert [(c.label, c.transform) for c in project.trace("lines.first_sku").columns] == [
+        ("orders.items.sku", "direct")
+    ]
+    assert [(c.label, c.transform) for c in project.trace("lines.first_qty").columns] == [
+        ("orders.items.qty", "transformed")
+    ]
+    # attrs is a map: its keys are read at run time, so lineage stops at the map column.
+    assert [c.label for c in project.trace("lines.colour").columns] == ["orders.attrs"]
+    result = project.verify(warehouse=tmp_path / "shop.duckdb")
+    totals = result.totals()
+    assert totals["unexplained"] == 0
+    assert totals["confirmed"] == totals["claimed"] == 4

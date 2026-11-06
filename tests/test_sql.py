@@ -366,3 +366,39 @@ def test_struct_fields_in_filters_are_references() -> None:
         ("lake.sales.orders", "customer.address.city"),
         ("lake.sales.orders", "customer.country"),
     }
+
+
+LISTS = {"db.s.orders": {"id": "int", "items": "UNKNOWN", "attrs": "UNKNOWN"}}
+
+
+@pytest.mark.parametrize(
+    ("sql", "dialect", "expected"),
+    [
+        ("select o.items[1].sku as c from db.s.orders o", "duckdb", ("items.sku", "direct")),
+        ("select o.items[1] as c from db.s.orders o", "duckdb", ("items", "direct")),
+        ("select upper(o.items[1].sku) as c from db.s.orders o", "duckdb", ("items.sku", "transformed")),
+        ("select i.sku as c from `db.s.orders` o, unnest(o.items) as i", "bigquery", ("items.sku", "direct")),
+        (
+            "select i.qty * 2 as c from `db.s.orders` o, unnest(o.items) as i",
+            "bigquery",
+            ("items.qty", "transformed"),
+        ),
+        ("select unnest(items) as c from db.s.orders", "duckdb", ("items", "direct")),
+        (
+            "select t.item.sku as c from db.s.orders o cross join unnest(o.items) as t(item)",
+            "duckdb",
+            ("items.sku", "direct"),
+        ),
+        ("select o.attrs['colour'] as c from db.s.orders o", "duckdb", ("attrs.colour", "direct")),
+    ],
+)
+def test_list_and_map_lineage(sql: str, dialect: str, expected: tuple[str, str]) -> None:
+    [result] = analyse(sql, dialect=dialect, schema=LISTS)
+    assert result.columns["c"] == [src("db.s.orders", *expected)]
+
+
+def test_list_elements_in_filters_are_references() -> None:
+    [result] = analyse(
+        "select id from db.s.orders o where o.items[1].sku = 'x'", dialect="duckdb", schema=LISTS
+    )
+    assert result.references == [("db.s.orders", "items.sku")]

@@ -125,8 +125,10 @@ class DuckDBConnector:
 
 
 def struct_fields(name: str, dtype: str | None, dialect: str = "duckdb") -> list[ColumnMeta]:
-    """Fields of a STRUCT column as dotted columns (``address.city``), recursively."""
-    if not dtype or not dtype.upper().startswith("STRUCT"):
+    """Fields of a STRUCT column, of the structs in a LIST, or of a MAP's struct values, as dotted
+    columns (``address.city``, ``items.sku``), recursively. Elements and values are not named in
+    the path, matching how SQL reads them (``items[1].sku``, ``unnest(items).sku``)."""
+    if not dtype or not any(word in dtype.upper() for word in ("STRUCT", "RECORD", "ROW(")):
         return []
     from sqlglot import exp
     from sqlglot.errors import SqlglotError
@@ -135,15 +137,27 @@ def struct_fields(name: str, dtype: str | None, dialect: str = "duckdb") -> list
         built = exp.DataType.build(dtype, dialect=dialect)
     except (SqlglotError, ValueError):
         return []
-    fields: list[ColumnMeta] = []
+    return list(_fields_of(name, built, dialect))
+
+
+def _fields_of(name: str, built: Any, dialect: str) -> Iterator[ColumnMeta]:
+    from sqlglot import exp
+
+    kind = built.this
+    if kind in (exp.DataType.Type.ARRAY, exp.DataType.Type.LIST) and built.expressions:
+        yield from _fields_of(name, built.expressions[0], dialect)
+        return
+    if kind == exp.DataType.Type.MAP and len(built.expressions) == 2:
+        yield from _fields_of(name, built.expressions[1], dialect)
+        return
+    if kind not in (exp.DataType.Type.STRUCT, exp.DataType.Type.OBJECT):
+        return
     for field_def in built.expressions:
         if not isinstance(field_def, exp.ColumnDef) or not isinstance(field_def.kind, exp.DataType):
             continue
         child = f"{name}.{field_def.name}"
-        child_type = field_def.kind.sql(dialect=dialect)
-        fields.append(ColumnMeta(child, child_type, None, {"nested": True}))
-        fields.extend(struct_fields(child, child_type, dialect))
-    return fields
+        yield ColumnMeta(child, field_def.kind.sql(dialect=dialect), None, {"nested": True})
+        yield from _fields_of(child, field_def.kind, dialect)
 
 
 def _duckdb_struct_fields(name: str, dtype: str | None) -> list[ColumnMeta]:
@@ -312,9 +326,9 @@ def _flatten_fields(fields: Any, prefix: str, identifier_ids: set[int]) -> Itera
         if isinstance(field_type, StructType):
             yield from _flatten_fields(field_type.fields, f"{name}.", identifier_ids)
         elif isinstance(field_type, ListType) and isinstance(field_type.element_type, StructType):
-            yield from _flatten_fields(field_type.element_type.fields, f"{name}.element.", identifier_ids)
+            yield from _flatten_fields(field_type.element_type.fields, f"{name}.", identifier_ids)
         elif isinstance(field_type, MapType) and isinstance(field_type.value_type, StructType):
-            yield from _flatten_fields(field_type.value_type.fields, f"{name}.value.", identifier_ids)
+            yield from _flatten_fields(field_type.value_type.fields, f"{name}.", identifier_ids)
 
 
 class MissingDriver(Exception):

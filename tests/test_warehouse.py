@@ -200,7 +200,7 @@ def _check_iceberg(relations: list[RelationMeta], catalog_name: str, namespace: 
         "shipping.city",
         "shipping.postcode",
         "items",
-        "items.element.sku",
+        "items.sku",
         "attributes",
     ]
     assert columns["order_id"].data_type == "long"
@@ -241,3 +241,21 @@ def test_iceberg_rest_catalog() -> None:
     finally:
         catalog.drop_table(f"{namespace}.orders")
         catalog.drop_namespace(namespace)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "dialect", "expected"),
+    [
+        ("STRUCT(a INTEGER, b STRUCT(c VARCHAR))", "duckdb", ["x.a", "x.b", "x.b.c"]),
+        ("STRUCT(sku VARCHAR, qty INTEGER)[]", "duckdb", ["x.sku", "x.qty"]),
+        ("MAP(VARCHAR, STRUCT(v INTEGER))", "duckdb", ["x.v"]),
+        ("ARRAY<STRUCT<sku STRING>>", "bigquery", ["x.sku"]),
+        ("struct<a:int,b:array<struct<c:string>>>", "databricks", ["x.a", "x.b", "x.b.c"]),
+        ("INTEGER", "duckdb", []),
+        ("STRUCT(broken", "duckdb", []),
+    ],
+)
+def test_struct_fields(dtype: str, dialect: str, expected: list[str]) -> None:
+    from kerplunk.warehouse import struct_fields
+
+    assert [c.name for c in struct_fields("x", dtype, dialect)] == expected

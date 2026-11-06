@@ -376,12 +376,29 @@ def _mutation(
 
 
 def _targets(column: str, dtype: str) -> list[tuple[tuple[str, ...], str]]:
-    """What to perturb in one input column: the column, and each field when it is a STRUCT."""
-    from kerplunk.warehouse import _duckdb_struct_fields
+    """What to perturb in one input column: the column, and each field reachable through structs
+    alone (fields inside list elements are covered by perturbing the list itself)."""
+    from sqlglot import exp
+    from sqlglot.errors import SqlglotError
 
     targets: list[tuple[tuple[str, ...], str]] = [((column,), dtype)]
-    for field_meta in _duckdb_struct_fields(column, dtype):
-        targets.append((tuple(field_meta.name.split(".")), field_meta.data_type or "VARCHAR"))
+    if not dtype.upper().startswith("STRUCT"):
+        return targets
+    try:
+        built = exp.DataType.build(dtype, dialect="duckdb")
+    except (SqlglotError, ValueError):
+        return targets
+
+    def walk(path: tuple[str, ...], node: exp.DataType) -> None:
+        if node.this != exp.DataType.Type.STRUCT:
+            return
+        for field_def in node.expressions:
+            if isinstance(field_def, exp.ColumnDef) and isinstance(field_def.kind, exp.DataType):
+                child = (*path, field_def.name)
+                targets.append((child, field_def.kind.sql(dialect="duckdb")))
+                walk(child, field_def.kind)
+
+    walk((column,), built)
     return targets
 
 
@@ -680,7 +697,10 @@ def _verify_one(
             for path, field_type in _targets(column, dtype):
                 source_column = f"{key}.{'.'.join(path).lower()}"
                 for strategy in strategies:
-                    mutated = engine.mutate(mapping[key], columns[key], path, field_type, strategy, rng)
+                    try:
+                        mutated = engine.mutate(mapping[key], columns[key], path, field_type, strategy, rng)
+                    except Exception:  # a perturbation the engine cannot build tells us nothing
+                        continue
                     if mutated is None:
                         continue
                     perturbed, _ = _rewrite(

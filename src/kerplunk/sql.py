@@ -335,7 +335,13 @@ def _strip_fields(expression: exp.Expr) -> exp.Expr:
 def _is_field_access(expression: exp.Expr | None) -> bool:
     if isinstance(expression, exp.Dot):
         return isinstance(expression.expression, exp.Identifier)
-    return isinstance(expression, exp.Bracket) and _bracket_field(expression) is not None
+    return isinstance(expression, exp.Bracket)
+
+
+def _is_index(bracket: exp.Bracket) -> bool:
+    """``items[1]``: an element of a list, which reads the same field path as the list itself."""
+    keys = bracket.expressions
+    return len(keys) == 1 and isinstance(keys[0], exp.Literal) and not keys[0].is_string
 
 
 def _bracket_field(bracket: exp.Bracket) -> str | None:
@@ -349,9 +355,16 @@ def _is_passthrough(node: LineageNode) -> bool:
     expression = node.expression
     if isinstance(node.source, exp.SetOperation) or isinstance(expression, (exp.Table, exp.Star)):
         return True
+    if isinstance(node.source, (exp.Unnest, exp.Explode)) and isinstance(expression, exp.Identifier):
+        return True
     if isinstance(expression, exp.Alias):
         expression = expression.this
-    return isinstance(_strip_fields(expression), (exp.Column, exp.Star))
+    expression = _strip_fields(expression)
+    # Unnesting a list passes its elements through unchanged; only the rows multiply.
+    if isinstance(expression, (exp.Unnest, exp.Explode)):
+        arguments = expression.expressions if isinstance(expression, exp.Unnest) else [expression.this]
+        return len(arguments) == 1 and isinstance(_strip_fields(arguments[0]), exp.Column)
+    return isinstance(expression, (exp.Column, exp.Star))
 
 
 def _plain(name: str) -> str:
@@ -371,7 +384,7 @@ def _fields_read(column: exp.Column) -> tuple[str, ...]:
             parts.append(parent.expression.name.lower())
         elif isinstance(parent, exp.Bracket) and parent.this is node and _bracket_field(parent) is not None:
             parts.append(str(_bracket_field(parent)).lower())
-        else:
+        elif not (isinstance(parent, exp.Bracket) and parent.this is node and _is_index(parent)):
             return tuple(parts)
         node = parent
 

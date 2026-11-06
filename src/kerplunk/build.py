@@ -164,6 +164,14 @@ class Builder:
         existing = self.graph.column(parent.id, name)
         if existing is not None:
             return existing
+        if "." in name and parent.attrs.get("in_warehouse"):
+            # The warehouse knows this relation's columns: a path it does not have (a map key such
+            # as attrs['colour'], read at run time) belongs to the longest column it does have.
+            parts = name.split(".")
+            for end in range(len(parts) - 1, 0, -1):
+                prefix = self.graph.column(parent.id, ".".join(parts[:end]))
+                if prefix is not None:
+                    return prefix
         return self.graph.add_column(parent, name, origin=origin, attrs={"inferred": True})
 
     def schema_columns(self, nodes: Iterable[Node] | None = None) -> dict[str, dict[str, str]]:

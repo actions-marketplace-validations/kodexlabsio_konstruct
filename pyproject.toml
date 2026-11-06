@@ -1,6 +1,6 @@
 [project]
 name = "kerplunk"
-version = "0.5.0"
+version = "0.5.1"
 description = "Turn a data stack (dbt, SQL, Airflow, warehouse and Iceberg metadata) into a queryable graph with column-level lineage for coding agents."
 readme = "README.md"
 license = "MIT"

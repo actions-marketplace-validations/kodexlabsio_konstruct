@@ -1,3 +1,9 @@
+## v0.5.1 (2026-11-06)
+
+### Fix
+
+- **readme**: Install from GitHub, since kerplunk is not on PyPI yet
+
 ## v0.5.0 (2026-11-06)
 
 ### Feat

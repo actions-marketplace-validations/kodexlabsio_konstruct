@@ -1,10 +1,20 @@
 name: Create Release
 
-# Run by hand from the Actions tab. commitizen works out the next version from the
-# Conventional Commits since the last tag, updates the version and CHANGELOG.md, tags the
-# release and pushes both. Publishing to PyPI is a separate job that stays off until the
-# PUBLISH_TO_PYPI repository variable is set to 'true' and a 'pypi' environment exists.
+# Runs after Build and Test passes on a push to main, like the Kodex Labs website's release
+# workflow, but with semantic versions. commitizen reads the Conventional Commits since the last
+# tag: fix gives a patch release, feat a minor one, a breaking change the next major (minor while
+# the version is 0.x). It updates pyproject.toml, src/kerplunk/__init__.py, uv.lock and
+# CHANGELOG.md, commits "chore(release): Release X.Y.Z", tags vX.Y.Z and publishes a GitHub
+# release with the wheel and sdist. Pushes with nothing releasable (docs, ci, test, chore only)
+# make no release. It can also be run by hand to force an increment.
+#
+# Publishing to PyPI is a separate job that stays off until the PUBLISH_TO_PYPI repository
+# variable is 'true' and a 'pypi' environment with trusted publishing exists.
 on:
+  workflow_run:
+    workflows: [Build and Test]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       increment:
@@ -16,54 +26,105 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  UV_FROZEN: '1'
+
 jobs:
   release:
     name: Create Release
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
+      released: ${{ steps.bump.outputs.released }}
       tag: ${{ steps.bump.outputs.tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          ref: main
           fetch-depth: 0
 
+      - name: Release only the commit that was tested
+        id: current
+        if: github.event_name == 'workflow_run'
+        run: |
+          if [ "$(git rev-parse HEAD)" != "${{ github.event.workflow_run.head_sha }}" ]; then
+            echo "main has moved on since this commit was tested; its own run will release it"
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up uv
+        if: steps.current.outputs.stale != 'true'
         uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen
+        if: steps.current.outputs.stale != 'true'
+        run: uv sync
 
       - name: Bump the version and changelog
         id: bump
+        if: steps.current.outputs.stale != 'true'
+        env:
+          INCREMENT: ${{ inputs.increment || 'auto' }}
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          if [ "${{ inputs.increment }}" = "auto" ]; then
-            uv run cz bump --yes --changelog-to-stdout > RELEASE_NOTES.md
+          if [ -z "$(git tag --list 'v*')" ]; then
+            # First release: the version already in pyproject.toml, with every commit so far.
+            version="$(uv run cz version --project)"
+            uv run cz changelog --unreleased-version "v${version}"
+            git add CHANGELOG.md
+            git commit -m "chore(release): Release ${version}"
+            git tag "v${version}"
           else
-            uv run cz bump --yes --increment "${{ inputs.increment }}" --changelog-to-stdout > RELEASE_NOTES.md
+            args=(--yes)
+            if [ "$INCREMENT" != "auto" ]; then args+=(--increment "$INCREMENT"); fi
+            set +e
+            uv run cz bump "${args[@]}"
+            status=$?
+            set -e
+            # 3: no commits since the last tag; 21: none of them calls for a release.
+            if [ "$status" -eq 3 ] || [ "$status" -eq 21 ]; then
+              echo "Nothing to release"
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            [ "$status" -eq 0 ] || exit "$status"
           fi
-          echo "tag=v$(uv run cz version --project)" >> "$GITHUB_OUTPUT"
+          tag="v$(uv run cz version --project)"
+          uv run cz changelog "$tag" --dry-run > RELEASE_NOTES.md
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Push the release commit and tag
-        run: git push --follow-tags
+        if: steps.bump.outputs.released == 'true'
+        run: git push origin HEAD:main --follow-tags
 
       - name: Build the sdist and wheel
+        if: steps.bump.outputs.released == 'true'
         run: uv build
 
       - name: Create the GitHub release
+        if: steps.bump.outputs.released == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${{ steps.bump.outputs.tag }}" dist/* \
               --title "${{ steps.bump.outputs.tag }}" \
               --notes-file RELEASE_NOTES.md \
+              --verify-tag \
               --latest
 
       - name: Upload the distributions
+        if: steps.bump.outputs.released == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: dist
@@ -72,7 +133,7 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: release
-    if: vars.PUBLISH_TO_PYPI == 'true'
+    if: needs.release.outputs.released == 'true' && vars.PUBLISH_TO_PYPI == 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

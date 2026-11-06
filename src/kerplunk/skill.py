@@ -40,9 +40,9 @@ lineage parsed from the SQL. Query it instead of reading every model by hand.
 
 ## Steps
 
-1. Make sure the graph exists and is current. If `kerplunk-out/graph.json` is missing, or files
-   changed since it was built, run `kerplunk build --update` from the repository root. It reuses
-   earlier work and takes seconds.
+1. Query commands build the graph if `kerplunk-out/` does not exist, and warn when inputs changed
+   since the last build. Add `--refresh` to bring it up to date first; it reuses earlier work and
+   takes seconds. `kerplunk status` shows what kerplunk found and whether the graph is current.
 2. Answer the request with the narrowest command:
    - `kerplunk impact <table.column>` (or `<table>`): everything downstream. Run this before
      renaming, dropping, retyping or changing the logic of a column or model.
@@ -50,11 +50,12 @@ lineage parsed from the SQL. Query it instead of reading every model by hand.
    - `kerplunk describe <name>`: columns, types, descriptions, tests, neighbours of one node.
    - `kerplunk path <a> <b>`: how two tables or columns are connected.
    - `kerplunk search <words>`: find nodes when you do not know the exact name.
+   - `kerplunk list models` (or tables, sources, tasks, ...): what exists.
    - `kerplunk query "<question>"`: free-text questions; returns matching nodes and their
      connections, plus impact or lineage when the question asks for it.
    Add `--json` for structured output.
-3. Report what the graph shows: the affected models, columns, tests, exposures and DAG tasks, with
-   file paths. Then read only the files you need.
+3. Report what the graph shows: start from the one-line summary, then the affected models,
+   columns, tests, exposures and DAG tasks, with file paths. Then read only the files you need.
 
 ## Reading the output
 

@@ -1,0 +1,88 @@
+name: Create Release
+
+# Run by hand from the Actions tab. commitizen works out the next version from the
+# Conventional Commits since the last tag, updates the version and CHANGELOG.md, tags the
+# release and pushes both. Publishing to PyPI is a separate job that stays off until the
+# PUBLISH_TO_PYPI repository variable is set to 'true' and a 'pypi' environment exists.
+on:
+  workflow_dispatch:
+    inputs:
+      increment:
+        description: Version increment (auto reads the commits)
+        type: choice
+        default: auto
+        options: [auto, PATCH, MINOR, MAJOR]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Bump the version and changelog
+        id: bump
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          if [ "${{ inputs.increment }}" = "auto" ]; then
+            uv run cz bump --yes --changelog-to-stdout > RELEASE_NOTES.md
+          else
+            uv run cz bump --yes --increment "${{ inputs.increment }}" --changelog-to-stdout > RELEASE_NOTES.md
+          fi
+          echo "tag=v$(uv run cz version --project)" >> "$GITHUB_OUTPUT"
+
+      - name: Push the release commit and tag
+        run: git push --follow-tags
+
+      - name: Build the sdist and wheel
+        run: uv build
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.bump.outputs.tag }}" dist/* \
+              --title "${{ steps.bump.outputs.tag }}" \
+              --notes-file RELEASE_NOTES.md \
+              --latest
+
+      - name: Upload the distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist
+
+  publish:
+    name: Publish to PyPI
+    needs: release
+    if: vars.PUBLISH_TO_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+
+      - name: Publish with trusted publishing
+        uses: pypa/gh-action-pypi-publish@v1

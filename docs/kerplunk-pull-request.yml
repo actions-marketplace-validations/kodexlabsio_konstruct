@@ -1,0 +1,48 @@
+# kerplunk on pull requests: comments with what the change does to the data stack, column by
+# column, and fails when it removes a column that something downstream still reads.
+#
+# Copy to .github/workflows/kerplunk.yml in a dbt or SQL repository. `dbt parse` gives kerplunk the
+# manifest it needs to resolve ref() and source(); it needs a profile but no warehouse connection.
+# Replace dbt-duckdb with your adapter, and drop the dbt step if the repository has no dbt project.
+name: kerplunk
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v10.3.3
+
+      - name: Install kerplunk and dbt
+        run: |
+          uv tool install kerplunk
+          uv tool install dbt-core --with dbt-duckdb
+
+      - name: Parse the dbt project
+        run: dbt parse --quiet
+
+      - name: Build the graph
+        run: kerplunk build --no-warehouse
+
+      - name: Compare with the base branch
+        run: kerplunk diff --base "origin/${{ github.base_ref }}" --format markdown -q > kerplunk.md
+
+      - name: Comment on the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file kerplunk.md --edit-last \
+            || gh pr comment "${{ github.event.pull_request.number }}" --body-file kerplunk.md
+
+      - name: Fail on breaking changes
+        run: kerplunk diff --base "origin/${{ github.base_ref }}" --fail-on-breaking -q > /dev/null

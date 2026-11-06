@@ -9,6 +9,11 @@
 
 kerplunk turns a data stack into a graph that coding agents can query: dbt models, sources, seeds, tests and exposures; warehouse and Iceberg tables with their columns; Airflow DAGs and tasks; and column-level lineage parsed from the SQL that connects them. One command builds it locally. Agents then ask what a change will break, where a value comes from, or how two tables connect, from the command line, a `/kerplunk` skill in Claude Code and Cursor, or an MCP server.
 
+Two things set it apart from other lineage tools:
+
+- **The lineage is tested against the data.** `kerplunk verify` perturbs each input column of each model (shifting, nulling and shuffling it with a fixed seed), reruns the SQL on a scratch copy and records which outputs actually change. On dbt Labs' jaffle-shop, every one of the 87 claimed column edges is confirmed, and every observed influence was predicted. See [How Much to Trust the Lineage](#how-much-to-trust-the-lineage).
+- **It reviews changes before they merge.** `kerplunk diff` compares a branch with main column by column, ignoring formatting and renamed CTEs, and names the downstream models that a removed column will break. It can post the result as a pull request comment and fail the check.
+
 ![kerplunk impact analysis on the jaffle_shop example](docs/demo-cli.gif)
 
 ## Quick Start
@@ -75,6 +80,8 @@ kerplunk  /src/jaffle_shop
 | `kerplunk describe <name>` | Columns, types, descriptions, tests and neighbours of one node; for a task, what it runs and its neighbours in the DAG |
 | `kerplunk list [kind ...]` | Every node of the given kinds (`models`, `tables`, `sources`, `tasks`, ...; default all relations) |
 | `kerplunk open` | Open `graph.html` in a browser |
+| `kerplunk diff [--base REF]` | What the working tree (or `--head REF`) changes compared with the base (default: the merge base with main): columns added, removed or changed with their expressions before and after, changed join and filter conditions, breaking changes, DAG changes, and the downstream impact of each. `--format markdown` for a pull request comment, `--fail-on-breaking` for CI |
+| `kerplunk verify` | Test the column lineage against the data in a local DuckDB warehouse by perturbation; writes `VERIFY.md` and `verify.json` and marks confirmed edges in the graph. `--seed`, `--rows`, `--model`, `--strict` |
 | `kerplunk query "<question>"` | Free-text question: ranks nodes by its words and returns them with their connections, plus impact or lineage when the question asks for it. There is no language model in kerplunk; the agent reads the result |
 | `kerplunk install` | Register the `/kerplunk` skill (see Agent Integration) |
 | `kerplunk mcp` | Run the MCP server on stdio |
@@ -102,9 +109,11 @@ project.path_between("raw_payments", "customer_dashboard").found
 project.search("lifetime value", kinds=["column"]).results
 project.list(["model"]).items
 project.changed_inputs()  # files changed since the last build
+project.diff(base="origin/main").breaking  # removed columns still read downstream
+project.verify(seed=7).totals()  # {"claimed": 36, "confirmed": 36, "unexplained": 0, ...}
 ```
 
-Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult`, each made of `Item`s). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `kerplunk.QueryError` with suggestions. `project.graph` is the underlying `kerplunk.Graph` for anything the API does not cover.
+Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult` made of `Item`s, plus `Diff` and `Verification`). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `kerplunk.QueryError` with suggestions. `project.graph` is the underlying `kerplunk.Graph` for anything the API does not cover.
 
 ## Outputs
 
@@ -177,29 +186,85 @@ namespaces = ["sales"]
 credential = "${ICEBERG_CREDENTIAL}"
 ```
 
+## Reviewing Changes
+
+`kerplunk diff` answers "what does this branch do to the data?" For each dbt model, SQL file and DAG file that changed, it analyses the base and current versions and compares each output column's canonical expression: the expression with every CTE, subquery and alias inlined down to physical columns. Reformatting, renaming a CTE or reordering columns is therefore not a change, and a real change is shown in full. Join, filter and grouping conditions are compared the same way. A removed column is breaking when a downstream model's current SQL still reads it, so a change that also updates its consumers is not flagged.
+
+```text
+$ kerplunk diff
+1 breaking change, 1 column changed, 1 column removed, 1 column added, row logic changed in 1 relation, 1 DAG changed, 1 exposure affected.
+
+models/orders.sql  (model orders, modified)
+  rows     + WHERE: jaffle_shop.main.stg_orders.status <> 'returned'
+           affects 10 tests, 1 exposure and 1 task downstream (exposures: customer_dashboard)
+
+models/staging/stg_payments.sql  (model stg_payments, modified)
+  added    method
+  changed  amount
+             was  jaffle_shop.main.raw_payments.amount / 100
+             now  jaffle_shop.main.raw_payments.amount / 100.0 * 1.2
+           affects 7 columns, 3 relations, 5 tests, 1 exposure and 2 tasks downstream (exposures: customer_dashboard)
+  removed  payment_method
+           BREAKS orders, which still reads it
+           affects 4 columns, 1 relation, 5 tests, 1 exposure and 1 task downstream (exposures: customer_dashboard)
+
+dags/jaffle_shop_daily.py  (DAG jaffle_shop_daily, modified)
+  runs     task `dbt_run_marts`: no longer runs orders
+```
+
+dbt models are compared by rendering their Jinja without dbt (see How Lineage Works), so `diff` needs only the manifest from `dbt parse`, not a warehouse. [`docs/kerplunk-pull-request.yml`](docs/kerplunk-pull-request.yml) is a ready-made GitHub Actions workflow that posts the markdown version as a pull request comment and fails the check on breaking changes.
+
+## How Much to Trust the Lineage
+
+Static column lineage is a claim about SQL that is rarely checked. `kerplunk verify` checks it against the data, using perturbation (the idea behind perturbation-based provenance): for every dbt model and SQL-built table in a local DuckDB warehouse it copies the model's inputs into memory, perturbs one input column at a time, reruns the model's SQL and records which output columns change.
+
+- **Perturbations:** each input column, and each field of a struct column, is shifted (`x * a + b`, a suffix on strings, days added to dates), set to NULL, and shuffled between rows with a seeded permutation. The seed is recorded, so a run can be repeated exactly. The warehouse is read but never written.
+- **Detecting change:** an output column changes if its multiset of values changes; if values only moved between rows (a `ROW_NUMBER()` ordered by the input still yields 1..n), it is compared paired with the columns claimed not to depend on that input; and when a column identifies rows, rows are matched across runs, so changes are seen even when a perturbation also adds or removes rows.
+- **Classification:** a claimed edge is *confirmed* when its output changed, or *not exercised* when no perturbation moved it on this data (genuine but masked, as with the second argument of a `COALESCE` whose first is never null). An observed influence the graph did not claim is either *via joins and filters* (the graph recorded it as a reference) or *unexplained*, a gap in the static analysis.
+
+Results (seed 1729):
+
+| Project | Models | Claimed column edges | Confirmed | Influences via joins and filters | Unexplained |
+|---------|--------|----------------------|-----------|----------------------------------|-------------|
+| `examples/jaffle_shop` | 6 | 36 | 36 (100%) | 33 | 0 |
+| dbt Labs' jaffle-shop (pinned commit) | 13 | 87 | 87 (100%) | 61 | 0 |
+| 300 generated queries on generated data (differential test) | 300 | not counted | not counted | not counted | 0 |
+
+The tests also make sure the verifier catches wrong lineage, not just confirms right lineage: a deleted edge is reported as unexplained, a fabricated edge as not exercised, and a deleted filter reference as an unexplained change in row count. Two further results:
+
+- **Rendering dbt without dbt:** on jaffle-shop, lineage from kerplunk's own Jinja rendering (used when there is no compiled SQL, and by `diff`) is identical to lineage from dbt's compiled SQL: 113 of 113 column edges and 9 of 9 join and filter references.
+- **Airflow parsing:** the static parser reports exactly the same DAGs, tasks and dependencies as Airflow's own DagBag on every fixture DAG, including TaskGroups, TaskFlow and every dependency syntax.
+
+Each result is a test in the suite (`test_verify`, `test_realworld`, `test_airflow_parity`), so CI checks them on every change.
+
 ## How Lineage Works
 
 - kerplunk qualifies each statement against the columns it knows (from the dbt catalog, the warehouse, or the lineage of upstream models, processed in dependency order), so `SELECT *` expands. sqlglot then follows every output column through CTEs, subqueries, aliases, unions and window functions to physical columns.
 - A path made only of column references and renames is `direct`; anything else (arithmetic, functions, aggregates, `CASE`, window functions) is `transformed`.
 - Columns that change which rows a model returns, without being selected (join keys, filters, GROUP BY, HAVING, QUALIFY), are recorded as `feeds` edges with `role: reference`, traced through CTEs. Impact reports the relations that use them but does not then mark every downstream column, which would bury the answer.
+- Struct fields are followed: `o.customer.address.city`, `customer['country']` and fields of structs passed through CTEs trace to the nested column, in outputs and in conditions, and DuckDB and Iceberg struct columns are listed field by field.
+- Without compiled SQL, dbt models are rendered by kerplunk in a sandbox: loops, variables, `ref`, `source`, `config`, the project's and packages' macros (`dbt_utils.*`), `adapter.dispatch` and dbt's cross-database macros (`dbt.date_trunc`, `dbt.cast`, `dbt.concat`, `dbt.hash`, `dbt.date_spine` and others). An unknown macro becomes a function call that keeps its arguments, so the columns passed to it stay in the lineage.
 - dbt models, warehouse tables with the same relation name, Airflow SQL targets and Iceberg tables merge into one node, so lineage crosses tools: a column computed in dbt, copied into a reporting table by an Airflow task, and used by a dashboard is one chain.
 
 ## Limitations
 
 - Lineage is static. SQL built at runtime, Jinja that dbt has not compiled, Python models, stored procedures and UDF internals are not followed; each gap is listed under Warnings in `REPORT.md`.
-- Without compiled SQL (no `dbt compile` or `docs generate`), kerplunk resolves `ref()` and `source()` itself and drops other Jinja, so macros that generate columns are missed.
+- Without compiled SQL, macros that query the warehouse while compiling (`run_query`, introspective `dbt_utils.get_column_values`) render as empty results, so models that depend on them may differ from dbt's compiled SQL.
 - `SELECT *` over a relation whose columns kerplunk cannot learn (no warehouse, no catalog) still gets lineage for the columns the query goes on to use, and is reported as a warning; columns passed straight through by the star to the output are not known.
 - Airflow parsing covers the common ways of writing DAGs. Task ids or SQL built in loops or from runtime values, dynamic task mapping over computed lists, and DAG factories are skipped with a warning. Selections by `--selector`, `state:`, `result:` and `source_status:` are not resolved.
 - Identifiers are matched case-insensitively. Two relations whose names differ only by case are treated as one.
 - `query` ranks by words, not meaning. It finds `customer_lifetime_value` from "lifetime value" but not from "how much a customer is worth"; the agent is expected to follow up with `search` or `describe`.
-- Iceberg nested fields are listed as columns, but lineage does not yet go inside structs, lists or maps: `o.customer.country` traces to the `customer` struct.
+- Struct fields are followed, but not elements of lists or values of maps: `items[1].sku` traces to `items`.
+- `verify` needs the models built in a local DuckDB warehouse; it does not run against Postgres or remote warehouses yet. It perturbs columns one at a time, so influences that need two inputs to change together are not observed.
+- `diff` compares SQL and DAGs; changes to YAML (tests, descriptions, sources) are listed as files but not analysed.
 
 ### Not Yet (v1)
 
 - Dagster assets and jobs.
 - Snowflake, BigQuery and Databricks metadata connectors as optional extras.
 - Column-level lineage for dbt Python models and through UDFs.
-- Lineage into nested Iceberg and struct fields.
+- `verify` against Postgres (on a scratch schema) and sampled remote warehouses.
+- `diff` for YAML: tests and exposures added or removed.
 - Incremental warehouse metadata (it is re-read on every build; it is fast for local warehouses but not for large remote ones).
 
 ## CI/CD
@@ -298,6 +363,8 @@ uv run pytest --cov                             # everything, with branch covera
 | Browser | `test_browser` | graph.html in Chromium: selection, column lineage, search, hostile text, a 400-relation graph |
 | Scale | `test_scale` | A generated 300-model project: full build and `--update` times |
 | Real world | `test_realworld` | dbt Labs' jaffle-shop at a pinned commit (needs network; `KERPLUNK_REALWORLD=1`) |
+| Lineage against data | `test_verify` | `verify` confirms true lineage and catches removed edges, false edges and dropped filters; a differential property test runs generated queries on generated data and requires the static lineage to agree with execution |
+| Change review | `test_diff` | `diff` on real git repositories: formatting and CTE renames are not changes, removed columns still read downstream are breaking, conditions, DAGs, two commits, all output formats, and dbt Jinja rendering |
 | Parity | `test_airflow_parity` | The static Airflow parser against Airflow's own DagBag (needs Airflow; see the file for the command) |
 
 The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end tests build a copy of the example project for real. In CI, `KERPLUNK_REQUIRE_SERVICES=1` turns a missing service or browser into a failure rather than a skip, and `HYPOTHESIS_PROFILE=ci` runs more generated examples.

@@ -138,6 +138,11 @@ class Diff:
     other: list[str] = field(default_factory=list)
 
     @property
+    def source_files(self) -> list[str]:
+        """Changed files, leaving out generated ones (target/, logs/, kerplunk-out/, packages)."""
+        return [f for f in self.files if not set(Path(f).parts) & dbt.SKIP_DIRS]
+
+    @property
     def breaking(self) -> list[tuple[str, ColumnChange]]:
         return [(r.label, c) for r in self.relations for c in r.columns if c.breaks]
 
@@ -151,7 +156,7 @@ class Diff:
             for exposure in (relation.rows_impact or {}).get("exposures", []):
                 exposures.add(exposure["label"])
         return {
-            "files": len(self.files),
+            "files": len(self.source_files),
             "relations": sum(1 for r in self.relations if r.changed),
             "added": sum(1 for c in columns if c.change == "added"),
             "removed": sum(1 for c in columns if c.change == "removed"),
@@ -221,7 +226,7 @@ class Diff:
 
     def __str__(self) -> str:
         lines = [
-            f"kerplunk diff  {self.base}..{self.head}  ({len(self.files)} file{'s' if len(self.files) != 1 else ''} changed)",
+            f"kerplunk diff  {self.base}..{self.head}  ({len(self.source_files)} file{'s' if len(self.source_files) != 1 else ''} changed)",
             "",
         ]
         lines.append(self.summary())

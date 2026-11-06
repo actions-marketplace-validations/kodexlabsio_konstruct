@@ -321,7 +321,7 @@ def _column_lineage(
     for index, (name, node) in enumerate(nodes.items()):
         if name != "*":
             out_name = (out_names[index] if out_names else name).lower()
-            result.expressions[out_name] = canon.node(node)
+            result.expressions[out_name] = _unbracket(canon.node(node))
     result.conditions = canon.conditions(scope, schema)
 
 
@@ -456,6 +456,19 @@ _ATOM = re.compile(r'[\w."`$]+')
 def _inline(text: str) -> exp.Expr:
     """An already-canonical expression placed inside another, bracketed unless it is a name."""
     return exp.Var(this=text) if _ATOM.fullmatch(text) else exp.Paren(this=exp.Var(this=text))
+
+
+def _unbracket(text: str) -> str:
+    """Drop brackets that enclose the whole expression: ``(a / 100)`` becomes ``a / 100``."""
+    while text.startswith("(") and text.endswith(")"):
+        depth = 0
+        for index, char in enumerate(text):
+            depth += char == "("
+            depth -= char == ")"
+            if depth == 0 and index < len(text) - 1:
+                return text
+        text = text[1:-1]
+    return text
 
 
 class _Canonical:

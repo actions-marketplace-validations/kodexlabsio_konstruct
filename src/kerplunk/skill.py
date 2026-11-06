@@ -51,6 +51,11 @@ lineage parsed from the SQL. Query it instead of reading every model by hand.
    - `kerplunk path <a> <b>`: how two tables or columns are connected.
    - `kerplunk search <words>`: find nodes when you do not know the exact name.
    - `kerplunk list models` (or tables, sources, tasks, ...): what exists.
+   - `kerplunk diff`: after editing models, SQL or DAGs, what the change does column by column
+     compared with main, including removed columns that downstream models still read (breaking).
+     Run it before you finish a change and fix anything it reports as breaking.
+   - `kerplunk verify`: test the lineage against the data when the models are built in a local
+     DuckDB warehouse; edges it confirms are marked `confirmed` in impact and trace.
    - `kerplunk query "<question>"`: free-text questions; returns matching nodes and their
      connections, plus impact or lineage when the question asks for it.
    Add `--json` for structured output.

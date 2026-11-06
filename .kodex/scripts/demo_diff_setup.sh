@@ -11,7 +11,7 @@ rm -rf kerplunk-out logs
 printf 'target/\nlogs/\nkerplunk-out/\n*.duckdb\n' > .gitignore
 git init -q -b main
 git add -A
-git -c user.name=demo -c user.email=demo@example.com commit -qm "base"
+git -c user.name=demo -c user.email=demo@example.com -c commit.gpgsign=false commit -qm "base"
 "$OLDPWD/.venv/bin/kerplunk" build -q > /dev/null
 python3 - <<'PY'
 from pathlib import Path

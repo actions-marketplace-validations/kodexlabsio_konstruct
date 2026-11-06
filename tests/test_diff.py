@@ -106,7 +106,18 @@ def test_unknown_names_keep_their_arguments_and_errors_fall_back(renderer: Rende
 
 def git(root: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        [
+            "git",
+            "-C",
+            str(root),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            *args,
+        ],
         check=True,
         capture_output=True,
         text=True,

@@ -1,0 +1,54 @@
+# Install with: uv run pre-commit install
+# default_install_hook_types installs the pre-commit, commit-msg and pre-push hooks together.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_stages: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  # Ruff and mypy run from the locked dev environment so hooks and CI use the same versions.
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --frozen ruff check --fix
+        language: system
+        types_or: [python, pyi]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --frozen ruff format
+        language: system
+        types_or: [python, pyi]
+      - id: mypy
+        name: mypy
+        entry: uv run --frozen mypy
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+      - id: commitizen
+        name: commitizen check
+        entry: uv run --frozen cz check --allow-abort --commit-msg-file
+        language: system
+        stages: [commit-msg]
+      - id: commit-message-rules
+        name: Kodex Labs commit rules
+        entry: uv run --frozen python .kodex/scripts/check_commit_message.py
+        language: system
+        stages: [commit-msg]
+      - id: pytest
+        name: pytest
+        entry: uv run --frozen pytest -q -x
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

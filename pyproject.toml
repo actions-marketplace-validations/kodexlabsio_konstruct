@@ -45,6 +45,8 @@ dev = [
     "pyiceberg[sql-sqlite]>=0.9",
     "dbt-core>=1.10",
     "dbt-duckdb>=1.10",
+    "commitizen>=4.19.3",
+    "pre-commit>=4.7.0",
 ]
 
 [build-system]
@@ -84,3 +86,14 @@ markers = [
     "dbt: needs dbt-core and dbt-duckdb installed",
     "iceberg_rest: needs an Iceberg REST catalog (KERPLUNK_TEST_ICEBERG_URI)",
 ]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "uv"
+tag_format = "v$version"
+version_scheme = "pep440"
+major_version_zero = true
+update_changelog_on_bump = true
+changelog_file = "CHANGELOG.md"
+version_files = ["src/kerplunk/__init__.py:__version__"]
+bump_message = "chore(release): Release $new_version"

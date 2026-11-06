@@ -190,8 +190,10 @@ def test_a_removed_column_still_read_downstream_is_breaking(
     [(label, change)] = result.breaking
     assert (label, change.column, change.breaks) == ("ltv", "total", ["report"])
     assert result.summary().startswith("1 breaking change")
-    assert main(["--no-color", "-q", "diff", "-C", str(repo), "--base", "HEAD", "--fail-on-breaking"]) == 1
-    assert "BREAKS report, which still reads it" in capsys.readouterr().out
+    assert main(["--no-color", "diff", "-C", str(repo), "--base", "HEAD", "--fail-on-breaking"]) == 1
+    captured = capsys.readouterr()
+    assert "BREAKS report, which still reads it" in captured.out
+    assert "older than" not in captured.err
     # Fixing the consumer in the same change makes it safe.
     (repo / "sql" / "report.sql").write_text(BASE_REPORT.replace("total", "revenue"))
     assert Project(repo).diff(base="HEAD").breaking == []

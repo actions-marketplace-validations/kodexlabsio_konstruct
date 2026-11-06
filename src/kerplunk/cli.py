@@ -32,7 +32,9 @@ def _project(args: argparse.Namespace) -> Project:
     return Project(args.project)
 
 
-def _ready(project: Project, args: argparse.Namespace, console: Console) -> Project:
+def _ready(
+    project: Project, args: argparse.Namespace, console: Console, *, warn_stale: bool = True
+) -> Project:
     """Make sure a query command has a graph: build one if there is none, and refresh or warn
     when inputs changed since the last build."""
     if not project.has_graph():
@@ -44,7 +46,7 @@ def _ready(project: Project, args: argparse.Namespace, console: Console) -> Proj
         project.build()
         return project
     changed = project.changed_inputs()
-    if changed:
+    if changed and (warn_stale or args.refresh):
         shown = ", ".join(changed[:3]) + (f" and {len(changed) - 3} more" if len(changed) > 3 else "")
         if args.refresh:
             console.info(f"{len(changed)} input(s) changed ({shown}); updating the graph")
@@ -280,7 +282,8 @@ def cmd_verify(args: argparse.Namespace, console: Console) -> int:
 def cmd_diff(args: argparse.Namespace, console: Console) -> int:
     from kerplunk.diff import DiffError
 
-    project = _ready(_project(args), args, console)
+    # Changed inputs are what diff is about: it reads the current SQL itself, so no stale warning.
+    project = _ready(_project(args), args, console, warn_stale=False)
     try:
         result = project.diff(base=args.base, head=args.head)
     except DiffError as error:

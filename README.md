@@ -212,6 +212,8 @@ credential = "${ICEBERG_CREDENTIAL}"
 
 `kerplunk diff` answers "what does this branch do to the data?" For each dbt model, SQL file and DAG file that changed, it analyses the base and current versions and compares each output column's canonical expression: the expression with every CTE, subquery and alias inlined down to physical columns. Reformatting, renaming a CTE or reordering columns is therefore not a change, and a real change is shown in full. Join, filter and grouping conditions are compared the same way. A removed column is breaking when a downstream model's current SQL still reads it, so a change that also updates its consumers is not flagged.
 
+![kerplunk diff on a branch of the example project](docs/demo-diff.gif)
+
 ```text
 $ kerplunk diff
 1 breaking change, 1 column changed, 1 column removed, 1 column added, row logic changed in 1 relation, 1 DAG changed, 1 exposure affected.
@@ -400,6 +402,7 @@ The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end 
 - `uv run ruff check`, `uv run ruff format`, `uv run mypy`: lint, format and type check (strict)
 - `uv run .kodex/scripts/prepare_example.py`: build the example warehouse
 - `vhs .kodex/scripts/demo-cli.tape`: re-record `docs/demo-cli.gif`
+- `.kodex/scripts/demo_diff_setup.sh && vhs .kodex/scripts/demo-diff.tape`: re-record `docs/demo-diff.gif`
 - `vhs .kodex/scripts/demo-claude-code.tape`: record the same question through `/kerplunk` in Claude Code (needs Claude Code signed in)
 
 ### Commits

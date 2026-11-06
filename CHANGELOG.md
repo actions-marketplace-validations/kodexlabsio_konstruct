@@ -1,3 +1,18 @@
+## v0.2.0 (2026-11-06)
+
+### Feat
+
+- **lineage**: Verify lineage against Postgres as well as DuckDB
+- **dbt**: Select only the dbt nodes a change affects, column by column
+- **lineage**: Add kerplunk diff for column-level change review
+- **dbt**: Render dbt Jinja without dbt, matching compiled lineage
+- **lineage**: Follow lineage into struct fields
+- **lineage**: Verify column lineage against the data by perturbation
+
+### Fix
+
+- **ci**: Use the runner's Chrome for browser tests and fix the default diff base
+
 ## v0.1.1 (2026-11-06)
 
 ### Fix

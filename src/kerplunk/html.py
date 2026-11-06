@@ -95,6 +95,7 @@ dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td { text-align: left; vertical-align: top; padding: 3px 4px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 th { color: var(--muted); font-weight: 600; }
+#panel td:nth-child(1), #panel td:nth-child(2) { white-space: nowrap; overflow-wrap: normal; }
 tr.current td { background: var(--node-bg); }
 ul.plain { list-style: none; margin: 0; padding: 0; }
 ul.plain li { padding: 2px 0; overflow-wrap: anywhere; }
@@ -157,10 +158,10 @@ _SCRIPT = r"""
   function label(id) {
     const n = byId.get(id);
     if (!n) return id;
-    if (n.kind === "column" && n.parent) {
-      const parent = byId.get(n.parent);
-      return (parent ? parent.name : n.parent) + "." + n.name;
-    }
+    if (n.kind === "column" && n.parent) return label(n.parent) + "." + n.name;
+    const attrs = n.attrs || {};
+    if (n.kind === "source" && attrs.source_name) return attrs.source_name + "." + n.name;
+    if (n.kind === "task" && attrs.dag) return attrs.dag + "." + n.name;
     return n.name;
   }
 
@@ -463,6 +464,17 @@ _SCRIPT = r"""
     view.y = (r.height - bounds.h * view.k) / 2 - bounds.y * view.k;
     applyView();
   }
+  // Opening the panel narrows the drawing; bring the selected node back into view if needed.
+  function ensureVisible(id) {
+    const c = coords.get(id);
+    if (!c) return;
+    const r = svg.getBoundingClientRect();
+    const left = c.x * view.k + view.x;
+    const top = c.y * view.k + view.y;
+    const right = left + NODE_W * view.k;
+    const bottom = top + NODE_H * view.k;
+    if (left < 0 || top < 0 || right > r.width || bottom > r.height) centreOn(id);
+  }
   function centreOn(id) {
     const c = coords.get(id);
     if (!c) return;
@@ -613,6 +625,7 @@ _SCRIPT = r"""
     renderPanel();
     paint();
     if (centre) centreOn(id);
+    else ensureVisible(id);
   }
 
   function relationLink(id) {
@@ -665,7 +678,7 @@ _SCRIPT = r"""
     body.append(section("Upstream", ups.length), linkList(ups, relationLink));
     body.append(section("Downstream", downs.length), linkList(downs, relationLink));
 
-    const columns = columnsOf(n.id).sort(byName);
+    const columns = columnsOf(n.id);
     body.append(section("Columns", columns.length));
     if (columns.length) {
       const table = el("table");
@@ -733,7 +746,7 @@ _SCRIPT = r"""
     box.append(el("h4", null, "Used in joins, filters or grouping by (" + refs.length + ")"));
     box.append(linkList(refs, relationLink));
     body.append(box);
-    box.scrollIntoView({ block: "nearest" });
+    box.scrollIntoView({ block: "start" });
   }
 
   renderHeader();

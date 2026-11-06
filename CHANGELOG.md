@@ -1,3 +1,9 @@
+## v0.1.1 (2026-11-06)
+
+### Fix
+
+- **ci**: Push the release tag by name
+
 ## v0.1.0 (2026-11-06)
 
 ### Feat

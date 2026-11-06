@@ -104,9 +104,12 @@ jobs:
           echo "released=true" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+      # commitizen's tags are lightweight, which --follow-tags would not push, so push it by name.
       - name: Push the release commit and tag
         if: steps.bump.outputs.released == 'true'
-        run: git push origin HEAD:main --follow-tags
+        run: |
+          git push origin HEAD:main
+          git push origin "${{ steps.bump.outputs.tag }}"
 
       - name: Build the sdist and wheel
         if: steps.bump.outputs.released == 'true'

@@ -1,0 +1,5 @@
+Path from raw_payments to customer_dashboard (3 steps):
+  raw_payments (seed)
+  -feeds-> stg_payments (model)
+  -feeds-> customers (model)
+  -feeds-> customer_dashboard (exposure)

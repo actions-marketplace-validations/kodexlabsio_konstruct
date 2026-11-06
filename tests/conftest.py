@@ -7,6 +7,12 @@ import sys
 from pathlib import Path
 
 import pytest
+from hypothesis import settings
+
+# HYPOTHESIS_PROFILE=ci runs more examples; the default keeps local runs quick.
+settings.register_profile("ci", max_examples=400)
+settings.register_profile("dev", max_examples=60)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "dev"))
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "examples" / "jaffle_shop"

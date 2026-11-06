@@ -159,7 +159,9 @@ def _print_build(
             console.print(f"    and {len(graph.warnings) - 5} more in {outputs[1]}")
     else:
         console.row("warnings", "none", style=("green",))
-    console.row("wrote", f"{', '.join(outputs)} in {result.seconds:.1f}s")
+    folder = _relative(result.outputs[0].parent)
+    names = ", ".join(path.name for path in result.outputs)
+    console.row("wrote", f"{names} to {folder} in {result.seconds:.1f}s")
 
 
 # status and init

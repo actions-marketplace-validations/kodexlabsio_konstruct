@@ -106,7 +106,8 @@ def column_id(parent_id: str, column: str) -> str:
 
 def relation_key(*parts: str | None) -> str:
     """Canonical, case-insensitive key for a warehouse relation, e.g. ``jaffle.main.orders``."""
-    return ".".join(part.strip('"`[]').lower() for part in parts if part)
+    cleaned = (part.strip('"`[]').lower() for part in parts if part)
+    return ".".join(part for part in cleaned if part)
 
 
 @dataclass

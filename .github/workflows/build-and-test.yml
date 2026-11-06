@@ -93,6 +93,7 @@ jobs:
       KERPLUNK_TEST_PG_DSN: postgresql://kerplunk:kerplunk@localhost:5432/kerplunk
       KERPLUNK_TEST_ICEBERG_URI: http://localhost:8181
       KERPLUNK_REQUIRE_SERVICES: '1'
+      HYPOTHESIS_PROFILE: ci
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -115,8 +116,56 @@ jobs:
           echo "The Iceberg REST catalog did not start"
           exit 1
 
-      - name: Run tests
-        run: uv run pytest
+      - name: Install Chromium for the browser tests
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run tests with coverage
+        run: uv run pytest --cov --cov-report=term --cov-report=xml
+
+      - name: Upload the coverage report
+        if: matrix.python == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: coverage.xml
+
+  real-world:
+    name: Real-world dbt project (dbt-labs/jaffle-shop)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Clone, build and analyse the project
+        env:
+          KERPLUNK_REALWORLD: '1'
+        run: uv run pytest tests/test_realworld.py
+
+  airflow-parity:
+    name: Airflow parser against Apache Airflow
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      - name: Compare static parsing with Airflow's DagBag
+        run: >-
+          uv run --with "apache-airflow>=3" --with apache-airflow-providers-standard
+          --with apache-airflow-providers-common-sql
+          python -m pytest tests/test_airflow_parity.py
 
   end-to-end:
     name: End to end (jaffle_shop)

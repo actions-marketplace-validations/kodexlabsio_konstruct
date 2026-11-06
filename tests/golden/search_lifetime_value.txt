@@ -1,0 +1,6 @@
+customers.customer_lifetime_value  [model, DOUBLE]  models/customers.sql
+customer_ltv.lifetime_value  [table, DOUBLE]
+customer_dashboard  [exposure]  models/exposures.yml
+      Weekly view of customers, their orders and lifetime value.
+accepted_values_orders_status__placed__shipped__completed__return_pending__returned  [test]  models/schema.yml
+accepted_values_stg_orders_status__placed__shipped__completed__return_pending__returned  [test]  models/staging/schema.yml

@@ -16,9 +16,9 @@ Type "export PATH=$PWD/.venv/bin:$PATH PS1='$ ' && cd examples/jaffle_shop && rm
 Enter
 Show
 
-Type "kerplunk build ."
+Type "kerplunk build"
 Enter
-Sleep 3s
+Sleep 4s
 
 Type "kerplunk impact stg_payments.amount"
 Enter

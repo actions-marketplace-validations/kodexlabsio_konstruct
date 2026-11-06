@@ -1,0 +1,8 @@
+This example is based on jaffle_shop_duckdb by dbt Labs
+(https://github.com/dbt-labs/jaffle_shop_duckdb, commit 20cc904), licensed under the
+Apache License 2.0; see LICENSE in this directory.
+
+kerplunk changes to the original:
+- Removed the files that only serve the original repository (Docker, devcontainer, CI, tooling).
+- Added models/exposures.yml, dags/jaffle_shop_daily.py and dags/sql/customer_ltv.sql to
+  show an exposure, an Airflow DAG and a SQL task that writes a table outside dbt.

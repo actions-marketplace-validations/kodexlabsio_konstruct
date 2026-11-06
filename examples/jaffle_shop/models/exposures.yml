@@ -1,0 +1,13 @@
+version: 2
+
+exposures:
+  - name: customer_dashboard
+    label: Customer dashboard
+    type: dashboard
+    maturity: medium
+    description: Weekly view of customers, their orders and lifetime value.
+    owner:
+      name: Analytics
+    depends_on:
+      - ref('customers')
+      - ref('orders')

@@ -11,6 +11,7 @@ Built <time> from `<root>` by kerplunk <version> in <seconds>s. SQL dialect: duc
 | dbt models | 5 |
 | airflow dags | 1 |
 | dagster assets | 0 |
+| dagster ops | 0 |
 | sql files | 0 |
 
 | Node kind | Count |

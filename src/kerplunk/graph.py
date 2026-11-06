@@ -382,15 +382,17 @@ class Graph:
         seen = {s.node.id for s in steps}
         extra: list[Step] = []
         for step in steps:
-            through = step.via.attrs.get("via") if step.via is not None else None
-            if (
-                isinstance(through, str)
-                and through in self.nodes
-                and through not in seen
-                and self.nodes[through].kind == "task"
-            ):
-                seen.add(through)
-                extra.append(Step(self.nodes[through], step.depth, step.via, step.previous))
+            if step.via is None:
+                continue
+            for through in [step.via.attrs.get("via"), *step.via.attrs.get("also_via", [])]:
+                if (
+                    isinstance(through, str)
+                    and through in self.nodes
+                    and through not in seen
+                    and self.nodes[through].kind == "task"
+                ):
+                    seen.add(through)
+                    extra.append(Step(self.nodes[through], step.depth, step.via, step.previous))
         return extra
 
     def trace(self, node: Node, max_depth: int | None = None) -> list[Step]:

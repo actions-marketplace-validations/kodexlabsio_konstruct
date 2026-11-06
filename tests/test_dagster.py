@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import textwrap
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -39,6 +40,112 @@ def test_fixture_assets_dependencies_jobs_and_schedule() -> None:
     assert jobs["reporting_job"].schedule == "0 6 * * *"
     assert jobs["everything"].selection == ["*"]
     assert parsed.warnings == []
+
+
+def test_fixture_op_job_schedule_and_sensors() -> None:
+    parsed = parse_file(FIXTURE)
+    ops = {o.name: o for o in parsed.ops}
+    assert set(ops) == {"copy_orders", "total_by_day", "notify", "refresh_customers"}
+    assert ops["total_by_day"].function == "summarise"
+    assert ops["copy_orders"].sql and "from main.orders" in ops["copy_orders"].sql
+    assert ops["refresh_customers"].dbt_commands == ["dbt run --select customers"]
+    job = next(j for j in parsed.jobs if j.name == "archive_orders")
+    assert job.schedule == "0 2 * * *"
+    assert {c.handle: c.upstream for c in job.ops} == {
+        "archive.copy_orders": [],
+        "archive.total_by_day": ["archive.copy_orders"],
+        "notify": ["archive.total_by_day"],
+        "notify_finance": ["archive.total_by_day"],
+        "archive_again.copy_orders": [],
+        "archive_again.total_by_day": ["archive_again.copy_orders"],
+        "refresh_customers": ["archive.total_by_day", "archive_again.total_by_day"],
+    }
+    sensors = {s.name: s for s in parsed.sensors}
+    assert sensors["ltv_refreshed"].assets == ["reporting/customer_ltv"]
+    assert sensors["ltv_refreshed"].jobs == ["archive_orders"]
+    assert sensors["after_archive"].monitored_jobs == ["archive_orders"]
+    assert sensors["after_archive"].status == "SUCCESS"
+    assert sensors["archive_failed"].status == "FAILURE"
+
+
+def test_op_composition() -> None:
+    source = textwrap.dedent(
+        """
+        import subprocess
+        from dagster import Definitions, SensorDefinition, graph, job, op, schedule, sensor
+
+        @op
+        def fan_out(): ...
+
+        @op
+        def work(item): ...
+
+        @op
+        def gather(items): ...
+
+        @op
+        def load(): subprocess.run(["dbt", "build", "--select", "tag:nightly"])
+
+        @graph
+        def pipeline():
+            results = fan_out().map(work)
+            gather(results.collect())
+            fan_out().map(lambda item: work(item))
+            first, second = load(), load()
+            gather([first, second])
+
+        @graph(name="looping")
+        def looping():
+            for _ in range(3):
+                load()
+
+        @graph
+        def recursive():
+            recursive()
+
+        @job
+        def direct():
+            load.alias("a")()
+            load.configured({}, name="b")()
+
+        pipeline_job = pipeline.to_job(name="pipeline_job", description="Mapped work")
+
+        @schedule(cron_schedule="@daily", job_name="direct")
+        def daily(context): ...
+
+        @sensor(job=pipeline_job)
+        def poke(context): ...
+
+        @sensor()
+        def orphan(context): ...
+
+        watcher = SensorDefinition(name="watcher", evaluation_fn=lambda c: None, job=direct)
+        defs = Definitions(jobs=[direct, pipeline_job, looping, recursive])
+        """
+    )
+    parsed = parse_source(Path("d.py"), source)
+    jobs = {j.name: j for j in parsed.jobs}
+    assert set(jobs) == {"direct", "pipeline_job", "looping", "recursive"}
+    assert {c.handle: c.upstream for c in jobs["pipeline_job"].ops} == {
+        "fan_out": [],
+        "work": ["fan_out"],
+        "gather": ["work"],
+        "fan_out_2": [],
+        "work_2": ["fan_out_2"],
+        "load": [],
+        "load_2": [],
+        "gather_2": ["load", "load_2"],
+    }
+    assert jobs["pipeline_job"].description == "Mapped work"
+    assert [c.handle for c in jobs["direct"].ops] == ["a", "b"]
+    assert jobs["direct"].schedule == "@daily"
+    assert [c.handle for c in jobs["looping"].ops] == ["load"]
+    assert jobs["recursive"].ops == []
+    assert {o.name: o.dbt_commands for o in parsed.ops}["load"] == ["dbt build --select tag:nightly"]
+    sensors = {s.name: s.jobs for s in parsed.sensors}
+    assert sensors == {"poke": ["pipeline_job"], "watcher": ["direct"]}
+    assert any("loop in graph looping" in w for w in parsed.warnings)
+    assert any("graph recursive invokes itself" in w for w in parsed.warnings)
 
 
 def test_keys_resources_and_selections(tmp_path: Path) -> None:
@@ -92,7 +199,11 @@ def test_dagster_assets_join_dbt_and_warehouse_lineage(built_jaffle: Path, tmp_p
     result = project.build(run_dbt=False)
     graph = result.graph
     assert result.inputs["dagster_assets"] == 6
-    assert any(s["input"] == "dagster" and s["detail"] == "6 assets, 2 jobs" for s in graph.meta["sources"])
+    assert result.inputs["dagster_ops"] == 7
+    assert any(
+        s["input"] == "dagster" and s["detail"] == "6 assets, 4 ops, 3 jobs, 3 sensors"
+        for s in graph.meta["sources"]
+    )
 
     dbt_task = graph.nodes["task.dagster.jaffle_shop_dbt"]
     runs = {graph.nodes[e.target].name for e in graph.out_edges(dbt_task.id, "runs")}
@@ -118,6 +229,55 @@ def test_dagster_assets_join_dbt_and_warehouse_lineage(built_jaffle: Path, tmp_p
         "order_counts",
         "order_totals",
     }
+
+    # The op-based job: a task per op invocation, column lineage from the SQL each op runs.
+    archive = graph.nodes["dag.archive_orders"]
+    assert archive.attrs["schedule"] == "0 2 * * *"
+    assert archive.attrs["sensors"] == ["ltv_refreshed on asset reporting/customer_ltv"]
+    handles = {graph.nodes[e.target].name for e in graph.out_edges(archive.id, "runs")}
+    assert "archive_again.total_by_day" in handles and len(handles) == 7
+    totals = project.trace("daily_totals.total")
+    assert [c.id for c in totals.columns] == [
+        "table.jaffle_shop.archive.orders#amount",
+        "model.jaffle_shop.orders#amount",
+        "model.jaffle_shop.stg_payments#amount",
+        "seed.jaffle_shop.raw_payments#amount",
+    ]
+    impact = project.impact("model.jaffle_shop.orders#amount")
+    assert {"archive.copy_orders", "archive_again.copy_orders"} <= {t.name for t in impact.tasks}
+    summarise = graph.nodes["task.archive_orders.archive.total_by_day"]
+    assert "op" not in summarise.attrs
+    assert summarise.attrs["function"] == "summarise"
+    assert {graph.nodes[e.source].name for e in graph.in_edges(summarise.id, "precedes")} == {
+        "archive.copy_orders"
+    }
+    refresh = graph.nodes["task.archive_orders.refresh_customers"]
+    assert {graph.nodes[e.target].name for e in graph.out_edges(refresh.id, "runs")} == {"customers"}
+
+    # Sensors order work: the asset sensor runs the archive after customer_ltv, the success
+    # sensor runs everything after the archive's last ops, the failure sensor adds nothing.
+    after_ltv = {e.target for e in graph.out_edges(ltv.id, "precedes") if e.attrs.get("sensor")}
+    assert after_ltv == {
+        "task.archive_orders.archive.copy_orders",
+        "task.archive_orders.archive_again.copy_orders",
+    }
+    everything = graph.nodes["dag.everything"]
+    assert everything.attrs["sensors"] == [
+        "after_archive on job archive_orders (success)",
+        "archive_failed on job archive_orders (failure)",
+    ]
+    ordered = {
+        (e.source, e.target)
+        for e in graph.edges
+        if e.kind == "precedes" and e.attrs.get("sensor") == "after_archive"
+    }
+    assert {s for s, _ in ordered} == {
+        "task.archive_orders.notify",
+        "task.archive_orders.notify_finance",
+        "task.archive_orders.refresh_customers",
+    }
+    assert not any(e.attrs.get("sensor") == "archive_failed" for e in graph.edges)
+    assert project.describe("archive_orders").node.kind == "dag"
 
 
 @pytest.mark.dagster_parity
@@ -160,6 +320,14 @@ def test_static_parse_matches_dagster(built_jaffle: Path, tmp_path: Path) -> Non
     assert dbt_models == dagster_dbt
 
     jobs = {job.name: job for job in definitions.resolve_all_job_defs()}
+    ours_ops = {c.handle: c.upstream for j in parsed.jobs if j.name == "archive_orders" for c in j.ops}
+    assert ours_ops == _op_dependencies(jobs["archive_orders"].graph)
+    for sensor in parsed.sensors:
+        truth_sensor = definitions.resolve_sensor_def(sensor.name)
+        assert sensor.jobs == [truth_sensor.job_name], sensor.name
+    assert next(j for j in parsed.jobs if j.name == "archive_orders").schedule == (
+        definitions.resolve_schedule_def("nightly_archive").cron_schedule
+    )
     reporting = {k.to_user_string() for k in jobs["reporting_job"].asset_layer.selected_asset_keys}
     ours = {
         graph_node.name
@@ -168,6 +336,50 @@ def test_static_parse_matches_dagster(built_jaffle: Path, tmp_path: Path) -> Non
         )
     }
     assert ours == reporting
+
+
+def _op_dependencies(graph: Any) -> dict[str, list[str]]:
+    """Dagster's own answer: each op handle in a job, nested graphs flattened, and the op
+    handles its inputs come from."""
+    from dagster._core.definitions.graph_definition import GraphDefinition
+
+    def output(owner: Any, node_name: str, output_name: str, prefix: str) -> list[str]:
+        node = owner.node_named(node_name)
+        if isinstance(node.definition, GraphDefinition):
+            mapping = node.definition.get_output_mapping(output_name)
+            return output(
+                node.definition,
+                mapping.maps_from.node_name,
+                mapping.maps_from.output_name,
+                f"{prefix}{node_name}.",
+            )
+        return [f"{prefix}{node_name}"]
+
+    found: dict[str, list[str]] = {}
+
+    def walk(owner: Any, prefix: str, outer: dict[str, list[str]]) -> None:
+        structure = owner.dependency_structure
+        for node in owner.nodes:
+            inputs: dict[str, list[str]] = {}
+            upstream = structure.input_to_upstream_outputs_for_node(node.name)
+            for definition in node.definition.input_defs:
+                handles = []
+                for source in upstream.get(node.get_input(definition.name), []):
+                    handles += output(owner, source.node_name, source.output_def.name, prefix)
+                for mapping in owner.input_mappings:
+                    if (
+                        mapping.maps_to.node_name == node.name
+                        and mapping.maps_to.input_name == definition.name
+                    ):
+                        handles += outer.get(mapping.graph_input_name, [])
+                inputs[definition.name] = handles
+            if isinstance(node.definition, GraphDefinition):
+                walk(node.definition, f"{prefix}{node.name}.", inputs)
+            else:
+                found[f"{prefix}{node.name}"] = sorted({h for hs in inputs.values() for h in hs})
+
+    walk(graph, "", {})
+    return found
 
 
 def test_multi_asset_prefixes_selections_and_schedules(tmp_path: Path) -> None:

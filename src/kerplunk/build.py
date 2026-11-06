@@ -22,7 +22,7 @@ from kerplunk.config import (
     discover_sql_files,
     discover_warehouses,
 )
-from kerplunk.graph import RELATION_KINDS, Graph, Node, relation_key
+from kerplunk.graph import RELATION_KINDS, Edge, Graph, Node, relation_key
 from kerplunk.sql import PLACEHOLDER, StatementLineage, analyse, dialect_for, strip_templating
 from kerplunk.warehouse import MissingDriver, RelationMeta
 
@@ -206,17 +206,30 @@ class Builder:
             target = self.relation(statement.target, origin)
         if target is None:
             return
+
+        def record(edge: Edge | None) -> None:
+            # Several tasks can write the same edge (the same op twice in a job, two DAGs
+            # running one SQL file); the first is ``via``, the rest ``also_via``.
+            if edge is not None and via and edge.attrs.get("via") not in (None, via):
+                others = edge.attrs.setdefault("also_via", [])
+                if via not in others:
+                    others.append(via)
+
         for read in statement.reads:
             source = self.relation(read, origin)
-            self.graph.add_edge(source.id, target.id, "feeds", **attrs)
+            record(self.graph.add_edge(source.id, target.id, "feeds", **attrs))
         for name, sources in statement.columns.items():
             out = self.column(target, name, origin)
             for item in sources:
                 upstream = self.column(self.relation(item.relation, origin), item.column, origin)
-                self.graph.add_edge(out.id, upstream.id, "derived_from", transform=item.transform, **attrs)
+                record(
+                    self.graph.add_edge(
+                        out.id, upstream.id, "derived_from", transform=item.transform, **attrs
+                    )
+                )
         for relation, column in statement.references:
             used = self.column(self.relation(relation, origin), column, origin)
-            self.graph.add_edge(used.id, target.id, "feeds", role="reference", **attrs)
+            record(self.graph.add_edge(used.id, target.id, "feeds", role="reference", **attrs))
 
     def analyse_cached(
         self, sql: str, *, kind: str, schema_key: str, target: str | None = None
@@ -637,6 +650,7 @@ class Builder:
         assets = {a.key: (f, a) for f in files for a in f.assets}
         data_nodes: dict[str, Node] = {}
         tasks: dict[str, Node] = {}
+        job_tasks: dict[str, list[Node]] = {}
         sql_statements: dict[str, list[StatementLineage]] = {}
         for file in files:
             rel = self.rel_path(file.path)
@@ -687,8 +701,7 @@ class Builder:
                 {
                     "input": "dagster",
                     "path": rel,
-                    "detail": f"{len(file.assets)} asset{'s' if len(file.assets) != 1 else ''}, "
-                    f"{len(file.jobs)} job{'s' if len(file.jobs) != 1 else ''}",
+                    "detail": _dagster_detail(file),
                 }
             )
         for file in files:
@@ -701,6 +714,7 @@ class Builder:
                         self.graph.add_edge(tasks[dep].id, task.id, "precedes")
                 for statement in sql_statements.get(asset.key, []):
                     self.task_statement(statement, task, f"dagster asset {asset.key}")
+            ops = {op.name: op for op in file.ops}
             for job in file.jobs:
                 dag = self.graph.add_node(
                     Node(
@@ -712,15 +726,125 @@ class Builder:
                         origins=["dagster"],
                         attrs={
                             k: v
-                            for k, v in {"schedule": job.schedule, "orchestrator": "dagster"}.items()
+                            for k, v in {
+                                "schedule": job.schedule,
+                                "orchestrator": "dagster",
+                                "line": job.line,
+                            }.items()
                             if v
                         },
                     )
                 )
+                job_tasks[job.name] = []
+                if job.ops:
+                    job_tasks[job.name] = self.dagster_ops(
+                        job, dag, ops, self.rel_path(file.path), schema_key
+                    )
+                    continue
                 for key in _selected_assets(job.selection, assets):
                     if key in tasks:
                         self.graph.add_edge(dag.id, tasks[key].id, "runs")
+                        job_tasks[job.name].append(tasks[key])
+        for file in files:
+            for sensor in file.sensors:
+                self.dagster_sensor(sensor, tasks, job_tasks, self.rel_path(file.path))
         self.inputs["dagster_assets"] = sum(len(f.assets) for f in files)
+        self.inputs["dagster_ops"] = sum(len(j.ops) for f in files for j in f.jobs)
+
+    def dagster_ops(
+        self,
+        job: dagster.JobInfo,
+        dag: Node,
+        ops: dict[str, dagster.OpInfo],
+        path: str,
+        schema_key: str,
+    ) -> list[Node]:
+        """Tasks for an op-based job: one per op invocation, ordered by the data passed between them."""
+        nodes: dict[str, Node] = {}
+        for call in job.ops:
+            op = ops.get(call.op)
+            node = self.graph.add_node(
+                Node(
+                    id=f"task.{job.name}.{call.handle}",
+                    kind="task",
+                    name=call.handle,
+                    description=op.description if op else None,
+                    path=path,
+                    origins=["dagster"],
+                    attrs={
+                        k: v
+                        for k, v in {
+                            "dag": job.name,
+                            "orchestrator": "dagster",
+                            "operator": "@op",
+                            "op": call.op if call.op != call.handle.rsplit(".", 1)[-1] else None,
+                            "function": op.function if op else None,
+                            "line": op.line if op else None,
+                            "kinds": op.kinds if op else None,
+                        }.items()
+                        if v
+                    },
+                )
+            )
+            nodes[call.handle] = node
+            self.graph.add_edge(dag.id, node.id, "runs")
+            if op is None:
+                continue
+            label = f"dagster op {job.name}.{call.handle}"
+            commands = [i for c in op.dbt_commands for i in airflow.parse_dbt_commands(c)]
+            self.run_dbt_invocations(commands, node, f"dagster: {path}: op {call.handle}")
+            if op.sql:
+                for statement in self.analyse_cached(
+                    strip_templating(op.sql), kind="task", schema_key=schema_key
+                ):
+                    self.task_statement(statement, node, label)
+        for call in job.ops:
+            for upstream in call.upstream:
+                if upstream in nodes:
+                    self.graph.add_edge(nodes[upstream].id, nodes[call.handle].id, "precedes")
+        return list(nodes.values())
+
+    def dagster_sensor(
+        self,
+        sensor: dagster.SensorInfo,
+        tasks: dict[str, Node],
+        job_tasks: dict[str, list[Node]],
+        path: str,
+    ) -> None:
+        """Record a sensor on the jobs it starts, and order the work it connects: an asset sensor
+        runs its job after the asset, a run status sensor on success runs its job after the
+        monitored job. Failure sensors are recorded but add no ordering."""
+        watched = [f"asset {a}" for a in sensor.assets] + [
+            f"job {j}" + (f" ({sensor.status.lower()})" if sensor.status else "")
+            for j in sensor.monitored_jobs
+        ]
+        before: list[Node] = [tasks[a] for a in sensor.assets if a in tasks]
+        if sensor.status in (None, "SUCCESS"):
+            for monitored in sensor.monitored_jobs:
+                members = job_tasks.get(monitored, [])
+                ids = {m.id for m in members}
+                before += [
+                    m
+                    for m in members
+                    if not any(e.target in ids for e in self.graph.out_edges(m.id, "precedes"))
+                ]
+        for job_name in sensor.jobs:
+            dag = self.graph.nodes.get(f"dag.{job_name}")
+            if dag is None:
+                self.graph.warn(f"dagster: {path}: sensor {sensor.name} starts unknown job {job_name}")
+                continue
+            dag.attrs.setdefault("sensors", []).append(
+                sensor.name + (f" on {', '.join(watched)}" if watched else "")
+            )
+            members = job_tasks.get(job_name, [])
+            ids = {m.id for m in members}
+            roots = [
+                m for m in members if not any(e.source in ids for e in self.graph.in_edges(m.id, "precedes"))
+            ]
+            for upstream in before:
+                for root in roots:
+                    if upstream.id != root.id:
+                        self.graph.add_edge(upstream.id, root.id, "precedes", sensor=sensor.name)
 
     def dagster_data(
         self, key: str, assets: dict[str, tuple[dagster.DagsterFile, dagster.AssetInfo]]
@@ -750,11 +874,14 @@ class Builder:
         return node
 
     def task_dbt(self, task: airflow.TaskInfo, node: Node, path: str) -> None:
-        for invocation in task.dbt:
+        self.run_dbt_invocations(task.dbt, node, f"airflow: {path}: task {task.task_id}")
+
+    def run_dbt_invocations(self, invocations: list[airflow.DbtInvocation], node: Node, label: str) -> None:
+        """``runs`` edges from a task to the dbt nodes its dbt commands select."""
+        for invocation in invocations:
             if invocation.unsupported:
                 self.graph.warn(
-                    f"airflow: {path}: task {task.task_id}: dbt selection not resolved statically: "
-                    + " ".join(invocation.unsupported)
+                    f"{label}: dbt selection not resolved statically: " + " ".join(invocation.unsupported)
                 )
             selected = dbt.select_nodes(self.graph, invocation.selectors, invocation.excludes)
             if invocation.command == "seed":
@@ -776,7 +903,7 @@ class Builder:
                 self.graph.add_edge(node.id, target.id, "runs", command=invocation.command)
             if invocation.selectors and not selected and invocation.command != "test":
                 self.graph.warn(
-                    f"airflow: {path}: task {task.task_id}: `dbt {invocation.command} --select "
+                    f"{label}: `dbt {invocation.command} --select "
                     f"{' '.join(invocation.selectors)}` matched no dbt nodes"
                 )
 
@@ -834,6 +961,19 @@ class Builder:
                 target.path = target.path or rel
                 self.apply(statement, target=target, origin="sql", label=f"sql {rel}", via=rel)
         self.inputs["sql_files"] = len(files)
+
+
+def _dagster_detail(file: dagster.DagsterFile) -> str:
+    def count(n: int, noun: str) -> str:
+        return f"{n} {noun}{'s' if n != 1 else ''}"
+
+    parts = [count(len(file.assets), "asset")]
+    if file.ops:
+        parts.append(count(len(file.ops), "op"))
+    parts.append(count(len(file.jobs), "job"))
+    if file.sensors:
+        parts.append(count(len(file.sensors), "sensor"))
+    return ", ".join(parts)
 
 
 def _selected_assets(

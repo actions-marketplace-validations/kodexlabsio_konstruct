@@ -80,7 +80,7 @@ kerplunk  /src/jaffle_shop
 | **DuckDB** | Tables, views, columns, types, comments and view definitions, read only | v0 |
 | **Postgres** | Tables, views, materialised views, partitioned tables, columns, types, comments and view definitions, read only | v0 |
 | **Iceberg** | Any PyIceberg catalog, REST included: namespaces, tables, columns (nested struct fields as `parent.child`), field ids, identifier fields, partitioning, current snapshot. Metadata only; no data files are read | v0 |
-| **Dagster** | Definition files parsed statically (never imported): `@asset`, `@multi_asset` and `@dbt_assets` (with its dbt selection), keys and prefixes, dependencies from parameters, `ins=` and `deps=`, groups, asset jobs with their selections, and schedules. An asset's data is the dbt model, warehouse table or SQL target of the same name, and SQL an asset runs gets column lineage | v0 |
+| **Dagster** | Definition files parsed statically (never imported): `@asset`, `@multi_asset` and `@dbt_assets` (with its dbt selection), keys and prefixes, dependencies from parameters, `ins=` and `deps=`, groups, asset jobs with their selections, and schedules. An asset's data is the dbt model, warehouse table or SQL target of the same name, and SQL an asset runs gets column lineage. Op-based jobs: `@op`, `@graph` and `@job` (nested graphs, `.alias()`, fan-in, `.map()`/`.collect()`, `graph.to_job()`), one task per op invocation named by its Dagster handle, with column lineage from each op's SQL and dbt runs from `dbt.cli([...])`. `@schedule` and sensors (`@sensor`, `@asset_sensor`, `@multi_asset_sensor`, `@run_status_sensor`, `@run_failure_sensor`): an asset sensor orders its job after the asset, a success sensor after the monitored job | v0 |
 | **Snowflake** | Tables, views, columns, types, comments and view definitions from each database's `information_schema`, through `kerplunk[snowflake]`. Tested against fakesnow, an emulator of Snowflake's Python connector | v0 |
 | **BigQuery** | Datasets, tables, views and view queries through the client API, with nested `RECORD` fields and their descriptions, through `kerplunk[bigquery]`. Tested against the BigQuery emulator | v0 |
 | **Databricks** | Unity Catalog `information_schema` for each catalogue, including struct columns, through `kerplunk[databricks]`. Tested against a stub driver only: there is no Databricks emulator | v0 |
@@ -278,7 +278,7 @@ The tests also make sure the verifier catches wrong lineage, not just confirms r
 
 - **Rendering dbt without dbt:** on jaffle-shop, lineage from kerplunk's own Jinja rendering (used when there is no compiled SQL, and by `diff`) is identical to lineage from dbt's compiled SQL: 113 of 113 column edges and 9 of 9 join and filter references.
 - **Airflow parsing:** the static parser reports exactly the same DAGs, tasks and dependencies as Airflow's own DagBag on every fixture DAG, including TaskGroups, TaskFlow and every dependency syntax.
-- **Dagster parsing:** the static parser gives the same asset keys, dependencies, dbt selection and job selections as Dagster's own asset graph for the fixture definitions.
+- **Dagster parsing:** the static parser gives the same asset keys, dependencies, dbt selection and job selections as Dagster's own asset graph for the fixture definitions, the same op handles and op-to-op dependencies as Dagster's job graph (nested graphs and aliases included), and the same sensor and schedule targets.
 
 Each result is a test in the suite (`test_verify`, `test_realworld`, `test_airflow_parity`, `test_dagster`), so CI checks them on every change.
 
@@ -296,6 +296,7 @@ Each result is a test in the suite (`test_verify`, `test_realworld`, `test_airfl
 - Lineage is static. SQL built at runtime, Jinja that dbt has not compiled, Python models, stored procedures and UDF internals are not followed; each gap is listed under Warnings in `REPORT.md`.
 - Without compiled SQL, macros that query the warehouse while compiling (`run_query`, introspective `dbt_utils.get_column_values`) render as empty results, so models that depend on them may differ from dbt's compiled SQL.
 - `SELECT *` over a relation whose columns kerplunk cannot learn (no warehouse, no catalog) still gets lineage for the columns the query goes on to use, and is reported as a warning; columns passed straight through by the star to the output are not known.
+- Dagster ops compose statically only: a graph body built in a loop is counted once (with a warning), ops created by factories are not seen, and sensors that choose a job at run time (`RunRequest(job_name=...)` without `job=`) are not linked. Op inputs and outputs are not tracked as data; lineage comes from the SQL an op runs.
 - Airflow parsing covers the common ways of writing DAGs. Task ids or SQL built in loops or from runtime values, dynamic task mapping over computed lists, and DAG factories are skipped with a warning. Selections by `--selector`, `state:`, `result:` and `source_status:` are not resolved.
 - Identifiers are matched case-insensitively. Two relations whose names differ only by case are treated as one.
 - `query` ranks by words, not meaning. It finds `customer_lifetime_value` from "lifetime value" but not from "how much a customer is worth"; the agent is expected to follow up with `search` or `describe`.
@@ -305,7 +306,6 @@ Each result is a test in the suite (`test_verify`, `test_realworld`, `test_airfl
 
 ### Not Yet (v1)
 
-- Dagster op-based jobs (`@op` and `@job` graphs) and sensors.
 - Testing the Databricks connector against a real workspace.
 - Column-level lineage for dbt Python models and through UDFs.
 - `verify` against sampled remote warehouses (Snowflake, BigQuery, Databricks).
@@ -409,7 +409,7 @@ uv run pytest --cov                             # everything, with branch covera
 | Real world | `test_realworld` | dbt Labs' jaffle-shop at a pinned commit (needs network; `KERPLUNK_REALWORLD=1`) |
 | Lineage against data | `test_verify` | `verify` confirms true lineage and catches removed edges, false edges and dropped filters; a differential property test runs generated queries on generated data and requires the static lineage to agree with execution |
 | Change review | `test_diff` | `diff` on real git repositories: formatting and CTE renames are not changes, removed columns still read downstream are breaking, conditions, DAGs, two commits, all output formats, and dbt Jinja rendering |
-| Dagster | `test_dagster` | The Dagster parser, assets joining dbt and warehouse lineage, and parity with Dagster's own asset graph (needs Dagster; see the CI job) |
+| Dagster | `test_dagster` | The Dagster parser, assets and op jobs joining dbt and warehouse lineage, sensors ordering work, and parity with Dagster's own asset and job graphs (needs Dagster; see the CI job) |
 | Parity | `test_airflow_parity` | The static Airflow parser against Airflow's own DagBag (needs Airflow; see the file for the command) |
 
 The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end tests build a copy of the example project for real. In CI, `KERPLUNK_REQUIRE_SERVICES=1` turns a missing service or browser into a failure rather than a skip, and `HYPOTHESIS_PROFILE=ci` runs more generated examples.

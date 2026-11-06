@@ -1,3 +1,9 @@
+## v0.5.0 (2026-11-06)
+
+### Feat
+
+- **lineage**: Follow lineage into list elements and map values
+
 ## v0.4.0 (2026-11-06)
 
 ### Feat

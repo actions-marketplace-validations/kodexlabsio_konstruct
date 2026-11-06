@@ -146,7 +146,7 @@ def repo(tmp_path: Path) -> Path:
     (root / "sql" / "report.sql").write_text(BASE_REPORT)
     (root / "dag.py").write_text(DAG)
     (root / ".gitignore").write_text("kerplunk-out/\n*.duckdb\n")
-    git(root, "init", "-q")
+    git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
     Project(root).build()
@@ -265,7 +265,7 @@ def test_dbt_project_diff(built_jaffle: Path, tmp_path: Path) -> None:
     root = tmp_path / "shop"
     shutil.copytree(built_jaffle, root)
     (root / ".gitignore").write_text("target/\nlogs/\nkerplunk-out/\n*.duckdb\n")
-    git(root, "init", "-q")
+    git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
     from .conftest import run_dbt
@@ -297,7 +297,7 @@ def test_column_aware_selection_is_sound(built_jaffle: Path, tmp_path: Path) -> 
     root = tmp_path / "shop"
     shutil.copytree(built_jaffle, root)
     (root / ".gitignore").write_text("target/\nlogs/\nkerplunk-out/\n*.duckdb\n")
-    git(root, "init", "-q")
+    git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
     run_dbt(root, "build")

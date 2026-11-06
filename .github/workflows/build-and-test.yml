@@ -97,6 +97,7 @@ jobs:
       KERPLUNK_TEST_ICEBERG_URI: http://localhost:8181
       KERPLUNK_REQUIRE_SERVICES: '1'
       HYPOTHESIS_PROFILE: ci
+      KERPLUNK_BROWSER_CHANNEL: chrome
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -119,19 +120,9 @@ jobs:
           echo "The Iceberg REST catalog did not start"
           exit 1
 
-      # Chromium and its system libraries take minutes to install, so the browser tests run once,
-      # on the Python version the project develops against.
-      - name: Cache Playwright's Chromium
-        if: matrix.python == '3.12'
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('uv.lock') }}
-
-      - name: Install Chromium for the browser tests
-        if: matrix.python == '3.12'
-        run: uv run playwright install --with-deps chromium
-
+      # The browser tests run once, on the Python version the project develops against, in the
+      # Google Chrome that GitHub's runners already have (installing Playwright's Chromium and its
+      # system libraries takes many minutes on these images).
       - name: Run tests with coverage
         if: matrix.python == '3.12'
         run: uv run pytest --cov --cov-report=term --cov-report=xml

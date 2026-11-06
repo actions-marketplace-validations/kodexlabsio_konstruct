@@ -28,7 +28,8 @@ def browser() -> Iterator[Any]:
         pytest.skip("playwright is not installed")
     with sync_playwright() as playwright:
         try:
-            instance = playwright.chromium.launch()
+            # KERPLUNK_BROWSER_CHANNEL=chrome uses an installed Google Chrome instead of Playwright's.
+            instance = playwright.chromium.launch(channel=os.environ.get("KERPLUNK_BROWSER_CHANNEL") or None)
         except Error as error:
             if os.environ.get("KERPLUNK_REQUIRE_SERVICES"):
                 raise

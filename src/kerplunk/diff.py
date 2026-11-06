@@ -46,11 +46,12 @@ def _git(root: Path, *args: str, check: bool = True) -> str:
 
 def default_base(root: Path) -> str:
     """The merge base with origin/main (or main, or master); otherwise HEAD."""
+    head = _git(root, "rev-parse", "HEAD", check=False).strip()
     for candidate in ("origin/main", "origin/master", "main", "master"):
         if _git(root, "rev-parse", "--verify", "--quiet", candidate, check=False).strip():
             base = _git(root, "merge-base", "HEAD", candidate, check=False).strip()
-            if base and base != _git(root, "rev-parse", "HEAD", check=False).strip():
-                return base
+            # The first main branch found decides: on main itself, compare with HEAD.
+            return base if base and base != head else "HEAD"
     return "HEAD"
 
 

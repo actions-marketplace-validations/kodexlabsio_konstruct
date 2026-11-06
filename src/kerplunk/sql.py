@@ -72,6 +72,11 @@ class StatementLineage:
     columns: dict[str, list[ColumnSource]] = field(default_factory=dict)
     references: list[tuple[str, str]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Each output column's expression with CTEs, subqueries and aliases inlined down to physical
+    # columns, and the statement's join, filter and grouping conditions in the same form. Both
+    # ignore formatting, quoting, aliases and CTE names, so `kerplunk diff` can compare versions.
+    expressions: dict[str, str] = field(default_factory=dict)
+    conditions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +89,8 @@ class StatementLineage:
             },
             "references": [list(r) for r in self.references],
             "errors": self.errors,
+            "expressions": self.expressions,
+            "conditions": self.conditions,
         }
 
     @classmethod
@@ -98,6 +105,8 @@ class StatementLineage:
             },
             references=[(r, c) for r, c in data.get("references", [])],
             errors=list(data.get("errors", [])),
+            expressions=dict(data.get("expressions", {})),
+            conditions=list(data.get("conditions", [])),
         )
 
 
@@ -308,6 +317,12 @@ def _column_lineage(
         )
 
     result.references = _references(scope, dialect, schema, default_catalog, default_db)
+    canon = _Canonical(dialect, default_catalog, default_db)
+    for index, (name, node) in enumerate(nodes.items()):
+        if name != "*":
+            out_name = (out_names[index] if out_names else name).lower()
+            result.expressions[out_name] = canon.node(node)
+    result.conditions = canon.conditions(scope, schema)
 
 
 def _strip_fields(expression: exp.Expr) -> exp.Expr:
@@ -409,7 +424,8 @@ def _leaf_source(
     path: tuple[str, ...] = (),
 ) -> ColumnSource | None:
     table = leaf.expression
-    if not isinstance(table, exp.Table):
+    # A table-valued function (generate_series(...) AS t(x)) has no name and no upstream columns.
+    if not isinstance(table, exp.Table) or not table.name:
         return None
     relation = table_key(table, default_catalog, default_db)
     column = leaf.name.rsplit(".", 1)[-1].strip('"`[]').lower()
@@ -432,6 +448,120 @@ def _unexpanded_star_tables(scope: Scope) -> Iterator[exp.Table]:
 
 
 _REFERENCE_CLAUSES = ("joins", "where", "group", "having", "qualify")
+
+
+_ATOM = re.compile(r'[\w."`$]+')
+
+
+def _inline(text: str) -> exp.Expr:
+    """An already-canonical expression placed inside another, bracketed unless it is a name."""
+    return exp.Var(this=text) if _ATOM.fullmatch(text) else exp.Paren(this=exp.Var(this=text))
+
+
+class _Canonical:
+    """Column expressions and conditions in terms of physical columns only."""
+
+    def __init__(self, dialect: str | None, default_catalog: str | None, default_db: str | None) -> None:
+        self.dialect = dialect
+        self.default_catalog = default_catalog
+        self.default_db = default_db
+        # Keyed by id(), so each entry keeps its node alive: lineage nodes built for conditions are
+        # temporary, and a freed node's id can be reused by the next one.
+        self.memo: dict[int, tuple[LineageNode, str]] = {}
+
+    def node(self, node: LineageNode) -> str:
+        cached = self.memo.get(id(node))
+        if cached is not None and cached[0] is node:
+            return cached[1]
+        self.memo[id(node)] = (node, "...")  # guards against cycles while this node is expanded
+        text = self._expand(node)
+        self.memo[id(node)] = (node, text)
+        return text
+
+    def _expand(self, node: LineageNode) -> str:
+        expression = node.expression
+        if isinstance(expression, exp.Table):
+            relation = table_key(expression, self.default_catalog, self.default_db)
+            return f"{relation}.{_plain(node.name.rsplit('.', 1)[-1])}"
+        if isinstance(node.source, exp.SetOperation) and node.downstream:
+            branches = sorted(self.node(child) for child in node.downstream)
+            return f"{node.name}({', '.join(branches)})"
+        if isinstance(expression, exp.Alias):
+            expression = expression.this
+        if isinstance(expression, exp.Star):
+            return ", ".join(self.node(child) for child in node.downstream)
+        children = {_plain(child.name): child for child in node.downstream}
+        star_tables = [
+            c for c in node.downstream if isinstance(c.expression, exp.Table) and c.name.endswith("*")
+        ]
+
+        def replace(item: exp.Expr) -> exp.Expr:
+            if not isinstance(item, exp.Column):
+                return item
+            name = f"{item.table}.{item.name}" if item.table else item.name
+            child = children.get(_plain(name))
+            if child is not None:
+                return _inline(self.node(child))
+            if len(star_tables) == 1 and isinstance(star_tables[0].expression, exp.Table):
+                relation = table_key(star_tables[0].expression, self.default_catalog, self.default_db)
+                return exp.Var(this=f"{relation}.{item.name.lower()}")
+            return item
+
+        return expression.copy().transform(replace).sql(dialect=self.dialect)
+
+    def conditions(self, root: Scope, schema: MappingSchema) -> list[str]:
+        found: set[str] = set()
+        for scope in root.traverse():
+            select = scope.expression
+            if not isinstance(select, exp.Select):
+                continue
+            for key in _REFERENCE_CLAUSES:
+                value = select.args.get(key)
+                for part in value if isinstance(value, list) else [value]:
+                    if not isinstance(part, exp.Expr):
+                        continue
+                    if isinstance(part, exp.Join):
+                        on = part.args.get("on")
+                        if not isinstance(on, exp.Expr):
+                            continue
+                        label = " ".join(x for x in (part.side, part.kind, "JOIN ON") if x).upper()
+                        part = on
+                    else:
+                        label = {
+                            "where": "WHERE",
+                            "group": "GROUP BY",
+                            "having": "HAVING",
+                            "qualify": "QUALIFY",
+                        }[key]
+                        if isinstance(part, (exp.Where, exp.Having, exp.Qualify)):
+                            part = part.this
+                    found.add(f"{label}: {self._condition(part, scope, schema)}")
+        return sorted(found)
+
+    def _condition(self, part: exp.Expr, scope: Scope, schema: MappingSchema) -> str:
+        def replace(item: exp.Expr) -> exp.Expr:
+            if not isinstance(item, exp.Column):
+                return item
+            source = scope.sources.get(item.table)
+            if isinstance(source, exp.Table):
+                return exp.Var(
+                    this=f"{table_key(source, self.default_catalog, self.default_db)}.{item.name.lower()}"
+                )
+            if isinstance(source, Scope):
+                try:
+                    traced = to_node(item.name, scope=source, dialect=self.dialect, schema=schema)
+                except (SqlglotError, ValueError, KeyError, IndexError, AttributeError):
+                    return item
+                return _inline(self.node(traced))
+            return item
+
+        if isinstance(part, exp.Group):
+            if part.args.get("all") or not part.expressions:
+                return "ALL"
+            return ", ".join(
+                sorted(e.copy().transform(replace).sql(dialect=self.dialect) for e in part.expressions)
+            )
+        return part.copy().transform(replace).sql(dialect=self.dialect)
 
 
 def _references(

@@ -19,6 +19,7 @@ from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
 from kerplunk.graph import Graph, Node, NodeKind, column_id, relation_key
+from kerplunk.jinja import Renderer, render_model
 from kerplunk.sql import dialect_for, strip_templating
 
 log = logging.getLogger(__name__)
@@ -322,6 +323,7 @@ def load(project: DbtProject, graph: Graph, *, dialect: str | None) -> DbtLoad |
 
     models: list[ModelSql] = []
     schemas: dict[tuple[str | None, str | None], int] = {}
+    renderer: Renderer | None = None
     for item in manifest.get("nodes", {}).values():
         kind = RELATION_TYPES.get(item.get("resource_type", ""))
         if kind is None:
@@ -360,7 +362,11 @@ def load(project: DbtProject, graph: Graph, *, dialect: str | None) -> DbtLoad |
         if compiled:
             models.append(ModelSql(node.id, relation, compiled, True, upstream))
         elif raw and item.get("language", "sql") == "sql":
-            models.append(ModelSql(node.id, relation, render_refs(raw, manifest), False, upstream))
+            if renderer is None:
+                macro_paths = [p for p in project.source_paths if "macro" in p.name]
+                renderer = Renderer(project.root, manifest, macro_paths=macro_paths or None)
+            sql = render_model(raw, renderer, lambda text: render_refs(text, manifest))
+            models.append(ModelSql(node.id, relation, sql, False, upstream))
 
     for item in manifest.get("sources", {}).values():
         node = graph.add_node(

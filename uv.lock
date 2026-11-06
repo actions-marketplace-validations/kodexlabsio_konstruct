@@ -1186,6 +1186,7 @@ version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "jinja2" },
     { name = "mcp" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pyiceberg" },
@@ -1212,6 +1213,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.1" },
+    { name = "jinja2", specifier = ">=3.1" },
     { name = "mcp", specifier = ">=2.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pyiceberg", specifier = ">=0.9" },

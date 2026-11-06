@@ -374,7 +374,24 @@ class Graph:
         steps = self._walk(self.expand(node), self.downstream_edges, max_depth, True)
         if node.kind == "column":
             steps += self._relation_consumers(steps, upstream=False)
-        return steps
+        return steps + self._through_tasks(steps)
+
+    def _through_tasks(self, steps: list[Step]) -> list[Step]:
+        """Tasks whose SQL an edge in the walk came from (an Airflow SQL task, a Dagster asset):
+        they read the changed data, so they are affected too."""
+        seen = {s.node.id for s in steps}
+        extra: list[Step] = []
+        for step in steps:
+            through = step.via.attrs.get("via") if step.via is not None else None
+            if (
+                isinstance(through, str)
+                and through in self.nodes
+                and through not in seen
+                and self.nodes[through].kind == "task"
+            ):
+                seen.add(through)
+                extra.append(Step(self.nodes[through], step.depth, step.via, step.previous))
+        return extra
 
     def trace(self, node: Node, max_depth: int | None = None) -> list[Step]:
         """Everything upstream of ``node``. For a column, the tasks that build each relation on the

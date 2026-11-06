@@ -84,6 +84,7 @@ addopts = "-ra"
 markers = [
     "postgres: needs a Postgres server (KERPLUNK_TEST_PG_DSN)",
     "dbt: needs dbt-core and dbt-duckdb installed",
+    "iceberg: uses PyIceberg with a local SQL catalog",
     "iceberg_rest: needs an Iceberg REST catalog (KERPLUNK_TEST_ICEBERG_URI)",
 ]
 

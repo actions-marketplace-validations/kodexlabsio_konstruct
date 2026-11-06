@@ -23,6 +23,8 @@ SQL_KWARGS = ("sql", "query", "sql_query")
 WRITE_KWARGS = ("target_table", "destination_table", "destination_project_dataset_table")
 READ_KWARGS = ("table", "source_table", "source_project_dataset_table")
 UNRESOLVED = "{{ unresolved }}"
+# Marks a whole TaskGroup in a dependency until its first and last tasks are known.
+GROUP = "\x00group:"
 DBT_COMMANDS = frozenset({"run", "build", "test", "seed", "snapshot", "compile"})
 
 
@@ -216,7 +218,7 @@ class _Parser:
                     f"{len(self.unowned)} task(s) could not be matched to a DAG: "
                     + ", ".join(t.task_id for t in self.unowned)
                 )
-        for hint, upstream, downstream in self.pending:
+        for hint, upstream, downstream in self._expand_groups():
             owner = hint or next(
                 (d for d in self.dags if upstream in d.tasks and downstream in d.tasks), None
             )
@@ -246,9 +248,9 @@ class _Parser:
                     group_id = self.value(expr.args[0]) if expr.args else self.kwarg(expr, "group_id")
                     if isinstance(group_id, str):
                         inner_group = f"{group}.{group_id}" if group else group_id
-                        members = self.group_members.setdefault(inner_group, [])
+                        self.group_members.setdefault(inner_group, [])
                         if isinstance(item.optional_vars, ast.Name):
-                            self.task_vars[item.optional_vars.id] = members
+                            self.task_vars[item.optional_vars.id] = [GROUP + inner_group]
             self.visit_body(statement.body, inner_dag, inner_group)
             return
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -395,6 +397,28 @@ class _Parser:
             return self.operator_task(call, name, dag, group)
         return None
 
+    def _expand_groups(self) -> list[tuple[DagInfo | None, str, str]]:
+        """Replace TaskGroup markers as Airflow does: a group upstream of something contributes
+        its last tasks, and a group downstream of something receives it at its first tasks."""
+        concrete = [(u, d) for _, u, d in self.pending if not u.startswith(GROUP) and not d.startswith(GROUP)]
+
+        def members(group: str) -> list[str]:
+            return self.group_members.get(group, [])
+
+        def ends(group: str, first: bool) -> list[str]:
+            inside = set(members(group))
+            linked = {d if first else u for u, d in concrete if u in inside and d in inside}
+            return [t for t in members(group) if t not in linked]
+
+        expanded: list[tuple[DagInfo | None, str, str]] = []
+        for hint, upstream, downstream in self.pending:
+            ups = ends(upstream[len(GROUP) :], first=False) if upstream.startswith(GROUP) else [upstream]
+            downs = (
+                ends(downstream[len(GROUP) :], first=True) if downstream.startswith(GROUP) else [downstream]
+            )
+            expanded.extend((hint, u, d) for u in ups for d in downs if u != d)
+        return expanded
+
     def depend(self, dag: DagInfo | None, upstream: list[str], downstream: list[str]) -> None:
         for up in upstream:
             for down in downstream:
@@ -511,7 +535,7 @@ class _Parser:
                 decorator_call = decorator if isinstance(decorator, ast.Call) else None
         if func.name in self.group_functions:
             # A @task_group function: its tasks were registered when the function was visited.
-            return list(self.group_members.get(self.group_functions[func.name], []))
+            return [GROUP + self.group_functions[func.name]]
         task_id = func.name
         if decorator_call is not None:
             declared = self.kwarg(decorator_call, "task_id")

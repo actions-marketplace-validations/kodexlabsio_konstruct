@@ -155,6 +155,46 @@ def test_task_groups_prefix_ids_and_expand_in_dependencies(tmp_path: Path) -> No
     }
 
 
+def test_task_group_dependencies_use_its_first_and_last_tasks(tmp_path: Path) -> None:
+    [dag] = parse_file(Path(__file__).parent / "fixtures" / "airflow" / "groups.py")
+    assert set(dag.dependencies) == {
+        ("start", "load.a"),
+        ("load.a", "load.inner.b"),
+        ("load.inner.b", "end"),
+    }
+
+
+def test_task_group_functions(tmp_path: Path) -> None:
+    [dag] = parse(
+        tmp_path,
+        """
+        from airflow.sdk import DAG, task, task_group
+
+        @task_group
+        def stage():
+            @task
+            def one(): ...
+            @task
+            def two(): ...
+            one() >> two()
+
+        @task
+        def first(): ...
+        @task
+        def last(): ...
+
+        with DAG("tg"):
+            first() >> stage() >> last()
+        """,
+    )
+    assert set(dag.tasks) == {"first", "stage.one", "stage.two", "last"}
+    assert set(dag.dependencies) == {
+        ("first", "stage.one"),
+        ("stage.one", "stage.two"),
+        ("stage.two", "last"),
+    }
+
+
 def test_chain_cross_downstream_and_left_shift(tmp_path: Path) -> None:
     [dag] = parse(
         tmp_path,

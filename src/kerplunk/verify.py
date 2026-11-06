@@ -34,6 +34,7 @@ from kerplunk.graph import Graph, Node
 from kerplunk.sql import strip_templating, table_key
 
 STRATEGIES = ("shift", "null", "shuffle")
+_TEXT = ("VARCHAR", "TEXT", "STRING", "CHAR", "BPCHAR", "CHARACTER VARYING", "CHARACTER")
 _NUMERIC = (
     "TINYINT",
     "SMALLINT",
@@ -311,10 +312,10 @@ def _quote(name: str) -> str:
 
 
 def _rewrite(
-    sql: str, mapping: dict[str, str], catalog: str | None, schema: str | None
+    sql: str, mapping: dict[str, str], catalog: str | None, schema: str | None, dialect: str = "duckdb"
 ) -> tuple[str, set[str]]:
     """Point every input table at a scratch copy; return the SQL and the relations it reads."""
-    tree = sqlglot.parse_one(sql, dialect="duckdb")
+    tree = sqlglot.parse_one(sql, dialect=dialect)
     ctes = {cte.alias_or_name.lower() for cte in tree.find_all(exp.CTE)}
     seen: set[str] = set()
 
@@ -328,7 +329,7 @@ def _rewrite(
         alias = node.alias or node.name
         return exp.alias_(exp.to_table(mapping[key]), alias, table=True)
 
-    return tree.transform(replace).sql(dialect="duckdb"), seen
+    return tree.transform(replace).sql(dialect=dialect), seen
 
 
 def _run(con: Any, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
@@ -352,20 +353,22 @@ def _paired(rows: list[tuple[Any, ...]], index: int, anchors: list[int]) -> Coun
     return Counter(repr((tuple(row[i] for i in anchors), row[index])) for row in rows)
 
 
-def _mutation(reference: str, dtype: str, strategy: str, rng: random.Random) -> str | None:
+def _mutation(
+    reference: str, dtype: str, strategy: str, rng: random.Random, cast: str = "TRY_CAST"
+) -> str | None:
     """A perturbed value for ``reference`` (a quoted column or struct field) of type ``dtype``."""
     base = dtype.upper().split("(")[0].strip()
     if strategy == "null":
         return f"CAST(NULL AS {dtype})"
     if strategy == "shift":
         if base in _NUMERIC:
-            return f"TRY_CAST({reference} * {rng.randint(2, 9)} + {rng.randint(1, 97)} AS {dtype})"
-        if base in ("VARCHAR", "TEXT", "STRING", "CHAR", "BPCHAR"):
+            return f"{cast}({reference} * {rng.randint(2, 9)} + {rng.randint(1, 97)} AS {dtype})"
+        if base in _TEXT:
             return f"{reference} || '~{rng.randint(10, 99)}'"
         if base == "DATE":
-            return f"CAST({reference} + INTERVAL {rng.randint(3, 400)} DAY AS DATE)"
+            return f"CAST({reference} + INTERVAL '{rng.randint(3, 400)} days' AS DATE)"
         if base.startswith("TIMESTAMP"):
-            return f"{reference} + INTERVAL {rng.randint(1, 300)} HOUR"
+            return f"{reference} + INTERVAL '{rng.randint(1, 300)} hours'"
         if base == "BOOLEAN":
             return f"NOT {reference}"
         return None
@@ -398,39 +401,241 @@ def _overlaps(source: str, other: str) -> bool:
     return source == other or other.startswith(source + ".") or source.startswith(other + ".")
 
 
+class Engine:
+    """Where perturbed copies of a model's inputs live and its SQL is rerun."""
+
+    dialect = "duckdb"
+    label = ""
+
+    def start(self) -> None:
+        """Clear scratch tables before the next model."""
+
+    def copy(self, key: str, index: int, max_rows: int) -> tuple[str, list[tuple[str, str]]]:
+        raise NotImplementedError
+
+    def mutate(
+        self,
+        scratch: str,
+        columns: list[tuple[str, str]],
+        path: tuple[str, ...],
+        dtype: str,
+        strategy: str,
+        rng: random.Random,
+    ) -> str | None:
+        raise NotImplementedError
+
+    def run(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """Release the connection."""
+
+
+class DuckDBEngine(Engine):
+    """An in-memory DuckDB with the warehouse file attached read-only."""
+
+    dialect = "duckdb"
+
+    def __init__(self, warehouse: Path) -> None:
+        import duckdb
+
+        self.label = str(warehouse)
+        self.con = duckdb.connect()
+        self.con.execute(f"ATTACH {_literal(str(warehouse))} (READ_ONLY)")
+        row = self.con.execute(
+            "SELECT database_name FROM duckdb_databases() WHERE path = ?", [str(warehouse.resolve())]
+        ).fetchone()
+        self.database = (row[0] if row else warehouse.stem).lower()
+
+    def start(self) -> None:
+        self.con.execute("DROP SCHEMA IF EXISTS kp CASCADE")
+        self.con.execute("CREATE SCHEMA kp")
+
+    def copy(self, key: str, index: int, max_rows: int) -> tuple[str, list[tuple[str, str]]]:
+        parts = key.split(".")
+        if len(parts) != 3 or parts[0] != self.database:
+            raise LookupError(f"input {key} is not in the warehouse {self.database}")
+        scratch = f"kp.in{index}"
+        source = ".".join(_quote(p) for p in parts)
+        self.con.execute(f"CREATE TABLE {scratch} AS SELECT * FROM {source} LIMIT {int(max_rows)}")
+        return scratch, [(row[0], row[1]) for row in self.con.execute(f"DESCRIBE {scratch}").fetchall()]
+
+    def mutate(
+        self,
+        scratch: str,
+        columns: list[tuple[str, str]],
+        path: tuple[str, ...],
+        dtype: str,
+        strategy: str,
+        rng: random.Random,
+    ) -> str | None:
+        quoted = _quote(path[0])
+        if strategy == "shuffle":
+            salt = rng.randint(1, 2**31)
+            self.con.execute(
+                f"""
+                CREATE OR REPLACE TABLE kp.mut AS
+                WITH base AS (SELECT *, row_number() OVER () AS __kp_rn FROM {scratch}),
+                perm AS (
+                    SELECT __kp_v, row_number() OVER (ORDER BY hash(__kp_i, {salt})) AS __kp_rn
+                    FROM (SELECT {_reference(path)} AS __kp_v, row_number() OVER () AS __kp_i FROM {scratch})
+                )
+                SELECT base.* EXCLUDE (__kp_rn) REPLACE ({_rebuild(path, "perm.__kp_v", prefix="base.")} AS {quoted})
+                FROM base JOIN perm USING (__kp_rn)
+                """
+            )
+            return "kp.mut"
+        expression = _mutation(_reference(path), dtype, strategy, rng)
+        if expression is None:
+            return None
+        self.con.execute(
+            f"CREATE OR REPLACE TABLE kp.mut AS SELECT * REPLACE ({_rebuild(path, expression)} AS {quoted}) "
+            f"FROM {scratch}"
+        )
+        return "kp.mut"
+
+    def run(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
+        return _run(self.con, sql)
+
+    def close(self) -> None:
+        self.con.close()
+
+
+class PostgresEngine(Engine):
+    """Temporary tables in one transaction that is always rolled back, so nothing persists."""
+
+    dialect = "postgres"
+
+    def __init__(self, dsn: str) -> None:
+        import psycopg
+
+        self.label = "postgres"
+        self.con = psycopg.connect(dsn)
+        row = self.con.execute("SELECT current_database()").fetchone()
+        self.database = str(row[0]).lower() if row else ""
+        self.label = f"postgres database {self.database}"
+        self.tables: list[str] = []
+
+    def _savepoint(self, sql: str) -> Any:
+        self.con.execute("SAVEPOINT kp")
+        try:
+            cursor = self.con.execute(sql)
+        except Exception:
+            self.con.execute("ROLLBACK TO SAVEPOINT kp")
+            raise
+        self.con.execute("RELEASE SAVEPOINT kp")
+        return cursor
+
+    def start(self) -> None:
+        for table in self.tables:
+            self.con.execute(f"DROP TABLE IF EXISTS {table}")
+        self.tables = []
+
+    def _columns(self, table: str) -> list[tuple[str, str]]:
+        rows = self.con.execute(
+            "SELECT attname, format_type(atttypid, atttypmod) FROM pg_attribute "
+            "WHERE attrelid = %s::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+            [table],
+        ).fetchall()
+        return [(str(r[0]), str(r[1])) for r in rows]
+
+    def copy(self, key: str, index: int, max_rows: int) -> tuple[str, list[tuple[str, str]]]:
+        parts = key.split(".")
+        if len(parts) != 3 or parts[0] != self.database:
+            raise LookupError(f"input {key} is not in the database {self.database}")
+        scratch = f"kp_in{index}"
+        source = ".".join(_quote(p) for p in parts[1:])
+        self._savepoint(f"CREATE TEMP TABLE {scratch} AS SELECT * FROM {source} LIMIT {int(max_rows)}")
+        self.tables.append(scratch)
+        return scratch, self._columns(scratch)
+
+    def mutate(
+        self,
+        scratch: str,
+        columns: list[tuple[str, str]],
+        path: tuple[str, ...],
+        dtype: str,
+        strategy: str,
+        rng: random.Random,
+    ) -> str | None:
+        if len(path) > 1:
+            return None
+        column = path[0]
+        self.con.execute("DROP TABLE IF EXISTS kp_mut")
+        if "kp_mut" not in self.tables:
+            self.tables.append("kp_mut")
+        if strategy == "shuffle":
+            salt = rng.randint(1, 2**31)
+            listed = ", ".join(
+                f"perm.__kp_v AS {_quote(name)}" if name == column else f"base.{_quote(name)}"
+                for name, _ in columns
+            )
+            sql = (
+                f"CREATE TEMP TABLE kp_mut AS WITH base AS (SELECT *, row_number() OVER () AS __kp_rn FROM {scratch}), "
+                f"perm AS (SELECT __kp_v, row_number() OVER (ORDER BY md5(__kp_i::text || '{salt}')) AS __kp_rn "
+                f"FROM (SELECT {_quote(column)} AS __kp_v, row_number() OVER () AS __kp_i FROM {scratch}) AS x) "
+                f"SELECT {listed} FROM base JOIN perm USING (__kp_rn)"
+            )
+        else:
+            expression = _mutation(_quote(column), dtype, strategy, rng, cast="CAST")
+            if expression is None:
+                return None
+            listed = ", ".join(
+                f"{expression} AS {_quote(name)}" if name == column else _quote(name) for name, _ in columns
+            )
+            sql = f"CREATE TEMP TABLE kp_mut AS SELECT {listed} FROM {scratch}"
+        try:
+            self._savepoint(sql)
+        except Exception:  # a value the type cannot hold (an overflow, say): try the next perturbation
+            return None
+        return "kp_mut"
+
+    def run(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
+        cursor = self._savepoint(sql)
+        names = [d.name.lower() for d in cursor.description or []]
+        return names, list(cursor.fetchall())
+
+    def close(self) -> None:
+        self.con.rollback()
+        self.con.close()
+
+
+def engine_for(warehouse: str | Path) -> Engine:
+    """A Postgres connection string or URL, or a DuckDB file."""
+    text = str(warehouse)
+    if text.startswith(("postgres://", "postgresql://")) or "host=" in text or "dbname=" in text:
+        return PostgresEngine(text)
+    return DuckDBEngine(Path(text))
+
+
 def verify(
     graph: Graph,
     root: Path,
-    warehouse: Path,
+    warehouse: str | Path,
     *,
     seed: int = 1729,
     max_rows: int = 10000,
     strategies: tuple[str, ...] = STRATEGIES,
     only: list[str] | None = None,
 ) -> Verification:
-    import duckdb
-
     started = time.perf_counter()
-    result = Verification(str(warehouse), seed, max_rows, strategies)
-    con = duckdb.connect()
-    con.execute(f"ATTACH {_literal(str(warehouse))} (READ_ONLY)")
-    database = con.execute(
-        "SELECT database_name FROM duckdb_databases() WHERE path = ?", [str(warehouse.resolve())]
-    ).fetchone()
-    attached = database[0] if database else warehouse.stem
-    for candidate in candidates(graph, root):
-        node = candidate.node
-        if only and not any(name in (node.name, node.id, graph.label(node)) for name in only):
-            continue
-        model = ModelResult(node.id, graph.label(node))
-        result.models.append(model)
-        timer = time.perf_counter()
-        try:
-            _verify_one(con, attached, graph, candidate, model, seed, max_rows, strategies)
-        except Exception as error:  # a model that will not run is reported, not fatal
-            model.skipped = f"{type(error).__name__}: {str(error).strip().splitlines()[0][:160]}"
-        model.seconds = round(time.perf_counter() - timer, 3)
-    con.close()
+    engine = engine_for(warehouse)
+    result = Verification(engine.label, seed, max_rows, strategies)
+    try:
+        for candidate in candidates(graph, root):
+            node = candidate.node
+            if only and not any(name in (node.name, node.id, graph.label(node)) for name in only):
+                continue
+            model = ModelResult(node.id, graph.label(node))
+            result.models.append(model)
+            timer = time.perf_counter()
+            try:
+                _verify_one(engine, graph, candidate, model, seed, max_rows, strategies)
+            except Exception as error:  # a model that will not run is reported, not fatal
+                model.skipped = f"{type(error).__name__}: {str(error).strip().splitlines()[0][:160]}"
+            model.seconds = round(time.perf_counter() - timer, 3)
+    finally:
+        engine.close()
     result.seconds = time.perf_counter() - started
     return result
 
@@ -440,8 +645,7 @@ def _literal(text: str) -> str:
 
 
 def _verify_one(
-    con: Any,
-    attached: str,
+    engine: Engine,
     graph: Graph,
     candidate: Candidate,
     model: ModelResult,
@@ -451,27 +655,19 @@ def _verify_one(
 ) -> None:
     node = candidate.node
     claimed, references = claims(graph, node)
-    _, inputs = _rewrite(candidate.sql, {}, candidate.default_catalog, candidate.default_schema)
+    dialect = engine.dialect
+    _, inputs = _rewrite(candidate.sql, {}, candidate.default_catalog, candidate.default_schema, dialect)
     mapping: dict[str, str] = {}
     columns: dict[str, list[tuple[str, str]]] = {}
-    con.execute("DROP SCHEMA IF EXISTS kp CASCADE")
-    con.execute("CREATE SCHEMA kp")
+    engine.start()
     for index, key in enumerate(sorted(inputs)):
-        parts = key.split(".")
-        if len(parts) != 3 or parts[0] != attached.lower():
-            raise LookupError(f"input {key} is not in the warehouse {attached}")
-        source = ".".join(_quote(p) for p in parts)
-        scratch = f"kp.in{index}"
-        con.execute(f"CREATE TABLE {scratch} AS SELECT * FROM {source} LIMIT {int(max_rows)}")
-        mapping[key] = scratch
-        columns[key] = [(row[0], row[1]) for row in con.execute(f"DESCRIBE {scratch}").fetchall()]
-    query, _ = _rewrite(candidate.sql, mapping, candidate.default_catalog, candidate.default_schema)
-    names, baseline = _run(con, query)
-    _, again = _run(con, query)
+        mapping[key], columns[key] = engine.copy(key, index, max_rows)
+    query, _ = _rewrite(candidate.sql, mapping, candidate.default_catalog, candidate.default_schema, dialect)
+    names, baseline = engine.run(query)
+    _, again = engine.run(query)
     if Counter(map(repr, baseline)) != Counter(map(repr, again)):
         raise RuntimeError("the model is not deterministic, so changes cannot be attributed")
     model.rows = len(baseline)
-    model.claimed = len(claimed)
     if not baseline:
         raise RuntimeError("the model returns no rows on its inputs")
     base_signatures = [_signature(baseline, i) for i in range(len(names))]
@@ -480,28 +676,26 @@ def _verify_one(
     row_influence: set[str] = set()
     rng = random.Random(seed)
     for key in sorted(columns):
-        scratch = mapping[key]
         for column, dtype in columns[key]:
             for path, field_type in _targets(column, dtype):
                 source_column = f"{key}.{'.'.join(path).lower()}"
                 for strategy in strategies:
-                    if strategy == "shuffle":
-                        mutated = _shuffled(con, scratch, path, rng.randint(1, 2**31))
-                    else:
-                        expression = _mutation(_reference(path), field_type, strategy, rng)
-                        if expression is None:
-                            continue
-                        con.execute(
-                            f"CREATE OR REPLACE TABLE kp.mut AS SELECT * REPLACE "
-                            f"({_rebuild(path, expression)} AS {_quote(path[0])}) FROM {scratch}"
-                        )
-                        mutated = "kp.mut"
+                    mutated = engine.mutate(mapping[key], columns[key], path, field_type, strategy, rng)
+                    if mutated is None:
+                        continue
+                    perturbed, _ = _rewrite(
+                        candidate.sql,
+                        {**mapping, key: mutated},
+                        candidate.default_catalog,
+                        candidate.default_schema,
+                        dialect,
+                    )
+                    try:
+                        _, rows = engine.run(perturbed)
+                    except Exception:  # a perturbation the SQL cannot accept tells us nothing
+                        continue
                     _observe(
-                        con,
-                        candidate,
-                        mapping,
-                        key,
-                        mutated,
+                        rows,
                         names,
                         baseline,
                         base_signatures,
@@ -510,6 +704,17 @@ def _verify_one(
                         value_influence,
                         row_influence,
                     )
+    _classify(model, names, claimed, references, value_influence, row_influence)
+
+
+def _classify(
+    model: ModelResult,
+    names: list[str],
+    claimed: set[tuple[str, str]],
+    references: set[str],
+    value_influence: set[tuple[str, str]],
+    row_influence: set[str],
+) -> None:
     outputs = set(names)
     for output, source in sorted(claimed):
         if output not in outputs:
@@ -535,11 +740,7 @@ def _verify_one(
 
 
 def _observe(
-    con: Any,
-    candidate: Candidate,
-    mapping: dict[str, str],
-    key: str,
-    mutated: str,
+    rows: list[tuple[Any, ...]],
     names: list[str],
     baseline: list[tuple[Any, ...]],
     base_signatures: list[Counter[str]],
@@ -548,14 +749,7 @@ def _observe(
     value_influence: set[tuple[str, str]],
     row_influence: set[str],
 ) -> None:
-    """Rerun the model with ``key`` replaced by ``mutated`` and record what changed."""
-    perturbed, _ = _rewrite(
-        candidate.sql, {**mapping, key: mutated}, candidate.default_catalog, candidate.default_schema
-    )
-    try:
-        _, rows = _run(con, perturbed)
-    except Exception:  # a perturbation the SQL cannot accept (a cast, say) tells us nothing
-        return
+    """Record which outputs changed between the baseline and a perturbed run."""
     claimed_on = {
         i
         for i, name in enumerate(names)
@@ -610,23 +804,6 @@ def _row_key(
 
 def _both_nan(a: Any, b: Any) -> bool:
     return isinstance(a, float) and isinstance(b, float) and a != a and b != b
-
-
-def _shuffled(con: Any, scratch: str, path: tuple[str, ...], salt: int) -> str:
-    quoted = _quote(path[0])
-    con.execute(
-        f"""
-        CREATE OR REPLACE TABLE kp.mut AS
-        WITH base AS (SELECT *, row_number() OVER () AS __kp_rn FROM {scratch}),
-        perm AS (
-            SELECT __kp_v, row_number() OVER (ORDER BY hash(__kp_i, {int(salt)})) AS __kp_rn
-            FROM (SELECT {_reference(path)} AS __kp_v, row_number() OVER () AS __kp_i FROM {scratch})
-        )
-        SELECT base.* EXCLUDE (__kp_rn) REPLACE ({_rebuild(path, "perm.__kp_v", prefix="base.")} AS {quoted})
-        FROM base JOIN perm USING (__kp_rn)
-        """
-    )
-    return "kp.mut"
 
 
 def annotate(graph: Graph, verification: Verification) -> None:

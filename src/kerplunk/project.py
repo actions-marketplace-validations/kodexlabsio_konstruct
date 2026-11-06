@@ -169,11 +169,12 @@ class Project:
         from kerplunk.verify import annotate, verify
 
         graph = self.graph
-        path = Path(warehouse) if warehouse else self._duckdb_warehouse()
+        target = str(warehouse) if warehouse else self._verification_warehouse()
         result = verify(
-            graph, self.root, path, seed=seed, max_rows=max_rows, only=list(models) if models else None
+            graph, self.root, target, seed=seed, max_rows=max_rows, only=list(models) if models else None
         )
-        if path.resolve().is_relative_to(self.root.resolve()):
+        path = Path(target)
+        if not result.warehouse.startswith("postgres") and path.resolve().is_relative_to(self.root.resolve()):
             result.warehouse = str(path.resolve().relative_to(self.root.resolve()))
         if write:
             annotate(graph, result)
@@ -185,14 +186,25 @@ class Project:
             )
         return result
 
-    def _duckdb_warehouse(self) -> Path:
+    def _verification_warehouse(self) -> str:
+        """The DuckDB file the build read, or else the Postgres warehouse it connected to."""
         for source in self.graph.meta.get("sources", []):
             if source.get("input") == "duckdb" and source.get("status") != "failed":
                 path = Path(str(source["name"]).removeprefix("duckdb ").strip())
-                return path if path.is_absolute() else self.root / path
+                return str(path if path.is_absolute() else self.root / path)
+        from kerplunk.config import discover_warehouses
+        from kerplunk.dbt import find_projects
+        from kerplunk.warehouse import PostgresConnector
+
+        config = self.config()
+        for warehouse in discover_warehouses(config, find_projects(config.root)):
+            if warehouse.type in ("postgres", "postgresql"):
+                connector = warehouse.connector(config.root)
+                if isinstance(connector, PostgresConnector):
+                    return connector.dsn
         raise query.QueryError(
-            "verification needs a local DuckDB warehouse with the models built in it; none was found "
-            "(pass --warehouse PATH)"
+            "verification needs the models built in a local DuckDB file or a Postgres database; "
+            "none was found (pass --warehouse PATH or a postgresql:// URL)"
         )
 
     def diff(self, base: str | None = None, head: str | None = None) -> Diff:

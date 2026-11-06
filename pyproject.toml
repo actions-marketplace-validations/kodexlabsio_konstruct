@@ -51,6 +51,7 @@ dev = [
     "playwright>=1.64.1",
     "pytest-cov>=7.1.0",
     "hypothesis>=6.170.15",
+    "dbt-postgres>=1.11.0",
 ]
 
 [build-system]

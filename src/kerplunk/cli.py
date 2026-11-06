@@ -495,7 +495,9 @@ def parser() -> argparse.ArgumentParser:
     diff.add_argument("--no-build", action="store_true", help="fail rather than build a missing graph")
     diff.set_defaults(func=cmd_diff, json=False)
 
-    verify = add("verify", "test the column lineage against the data by perturbing inputs (DuckDB)")
+    verify = add(
+        "verify", "test the column lineage against the data by perturbing inputs (DuckDB or Postgres)"
+    )
     verify.add_argument("-m", "--model", action="append", metavar="NAME", help="only this model (repeatable)")
     verify.add_argument(
         "--seed", type=int, default=1729, help="random seed, for reproducible runs (default 1729)"
@@ -504,7 +506,9 @@ def parser() -> argparse.ArgumentParser:
         "--rows", type=int, default=10000, metavar="N", help="rows copied per input (default 10000)"
     )
     verify.add_argument(
-        "--warehouse", metavar="FILE", help="DuckDB file with the built models (default: discovered)"
+        "--warehouse",
+        metavar="FILE",
+        help="DuckDB file or postgresql:// URL with the built models (default: discovered)",
     )
     verify.add_argument(
         "--strict", action="store_true", help="exit with status 1 if any influence is unexplained"

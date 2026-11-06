@@ -213,3 +213,47 @@ def test_static_lineage_agrees_with_execution(tmp_path_factory: pytest.TempPathF
     [model] = result.models
     assert model.skipped is None, model.skipped
     assert model.unexplained == [], sql
+
+
+@pytest.mark.postgres
+def test_verify_on_postgres_with_dbt(tmp_path: Path) -> None:
+    """The jaffle_shop example built on Postgres with dbt-postgres, verified in a rolled-back
+    transaction: every claimed edge confirmed, nothing unexplained, nothing left behind."""
+    import shutil
+    import uuid
+    from urllib.parse import urlparse
+
+    import psycopg
+
+    from .conftest import EXAMPLE, run_dbt
+    from .test_warehouse import require
+
+    dsn = require("KERPLUNK_TEST_PG_DSN")
+    url = urlparse(dsn)
+    schema = f"kp_{uuid.uuid4().hex[:8]}"
+    root = tmp_path / "shop"
+    shutil.copytree(
+        EXAMPLE, root, ignore=shutil.ignore_patterns("target", "logs", "kerplunk-out", "*.duckdb", "dags")
+    )
+    (root / "profiles.yml").write_text(
+        "jaffle_shop:\n  target: dev\n  outputs:\n    dev:\n      type: postgres\n"
+        f"      host: {url.hostname}\n      port: {url.port or 5432}\n      user: {url.username}\n"
+        f"      password: {url.password}\n      dbname: {url.path.lstrip('/')}\n      schema: {schema}\n      threads: 4\n"
+    )
+    try:
+        run_dbt(root, "build")
+        run_dbt(root, "docs", "generate")
+        project = Project(root)
+        project.build(run_dbt=False)
+        result = project.verify(warehouse=dsn)
+        totals = result.totals()
+        assert result.warehouse.startswith("postgres database")
+        assert totals["models"] == 5 and totals["skipped"] == 0
+        assert totals["confirmed"] == totals["claimed"] == 31
+        assert totals["unexplained"] == 0
+        with psycopg.connect(dsn) as con:
+            leftovers = con.execute("select count(*) from pg_class where relname like 'kp_%'").fetchone()
+        assert leftovers == (0,)
+    finally:
+        with psycopg.connect(dsn, autocommit=True) as con:
+            con.execute(f"drop schema if exists {schema} cascade")

@@ -28,7 +28,7 @@ repos:
         name: ruff format
         entry: uv run --frozen ruff format
         language: system
-        types_or: [python, pyi]
+        types_or: [python, pyi, markdown]
       - id: mypy
         name: mypy
         entry: uv run --frozen mypy

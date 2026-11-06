@@ -92,16 +92,16 @@ project = kerplunk.Project("path/to/repo")
 project.build(update=True)
 
 walk = project.impact("stg_payments.amount")
-print(walk.summary())       # 7 columns, 3 relations, 5 tests, 1 exposure and 2 tasks downstream.
+print(walk.summary())  # 7 columns, 3 relations, 5 tests, 1 exposure and 2 tasks downstream.
 for column in walk.columns:
     print(column.label, column.transform, column.path)
 
-print(project.trace("customer_ltv.lifetime_value"))   # the same text the CLI prints
-project.describe("orders").columns                    # typed results
+print(project.trace("customer_ltv.lifetime_value"))  # the same text the CLI prints
+project.describe("orders").columns  # typed results
 project.path_between("raw_payments", "customer_dashboard").found
 project.search("lifetime value", kinds=["column"]).results
 project.list(["model"]).items
-project.changed_inputs()                               # files changed since the last build
+project.changed_inputs()  # files changed since the last build
 ```
 
 Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult`, each made of `Item`s). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `kerplunk.QueryError` with suggestions. `project.graph` is the underlying `kerplunk.Graph` for anything the API does not cover.

@@ -250,7 +250,8 @@ def test_uncompiled_manifest_renders_refs_and_sources(tmp_path: Path) -> None:
     assert source.description == "Application database"
     column = graph.column("model.shop.stg_events", "id")
     assert column is not None and column.description == "Event id" and column.data_type == "bigint"
-    assert any("no catalog.json" in w for w in graph.warnings)
+    assert not result.has_catalog
+    assert result.counts == {"model": 3, "seed": 0, "snapshot": 0, "test": 0, "source": 1, "exposure": 0}
 
 
 def test_render_refs_with_packages_and_versions() -> None:

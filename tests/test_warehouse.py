@@ -147,7 +147,7 @@ def test_postgres_view_sql_parses_to_lineage(postgres_schema: tuple[str, str]) -
 # Iceberg
 
 
-def _make_iceberg_tables(catalog: Any) -> None:
+def _make_iceberg_tables(catalog: Any, namespace: str = "sales") -> None:
     from pyiceberg.partitioning import PartitionField, PartitionSpec
     from pyiceberg.schema import Schema
     from pyiceberg.transforms import DayTransform
@@ -162,7 +162,7 @@ def _make_iceberg_tables(catalog: Any) -> None:
         TimestamptzType,
     )
 
-    catalog.create_namespace("sales")
+    catalog.create_namespace(namespace)
     schema = Schema(
         NestedField(1, "order_id", LongType(), required=True, doc="Order key"),
         NestedField(2, "amount", DoubleType()),
@@ -183,13 +183,13 @@ def _make_iceberg_tables(catalog: Any) -> None:
     )
     spec = PartitionSpec(PartitionField(source_id=3, field_id=1000, transform=DayTransform(), name="day"))
     catalog.create_table(
-        "sales.orders", schema=schema, partition_spec=spec, properties={"comment": "All orders"}
+        f"{namespace}.orders", schema=schema, partition_spec=spec, properties={"comment": "All orders"}
     )
 
 
-def _check_iceberg(relations: list[RelationMeta], catalog_name: str) -> None:
+def _check_iceberg(relations: list[RelationMeta], catalog_name: str, namespace: str = "sales") -> None:
     [orders] = relations
-    assert orders.parts == (catalog_name, "sales", "orders")
+    assert orders.parts == (catalog_name, namespace, "orders")
     assert orders.comment == "All orders"
     columns = {c.name: c for c in orders.columns}
     assert list(columns) == [
@@ -231,14 +231,13 @@ def test_iceberg_rest_catalog() -> None:
 
     uri = require("KERPLUNK_TEST_ICEBERG_URI")
     name = f"rest_{uuid.uuid4().hex[:6]}"
-    catalog = load_catalog(name, type="rest", uri=uri, **{"py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO"})
-    for table in catalog.list_tables("sales") if ("sales",) in catalog.list_namespaces() else []:
-        catalog.drop_table(table)
-    if ("sales",) in catalog.list_namespaces():
-        catalog.drop_namespace("sales")
-    _make_iceberg_tables(catalog)
+    namespace = f"kp_{uuid.uuid4().hex[:8]}"
+    properties = {"type": "rest", "uri": uri, "py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO"}
+    catalog = load_catalog(name, **properties)
+    _make_iceberg_tables(catalog, namespace)
     try:
-        _check_iceberg(IcebergConnector(name, {"type": "rest", "uri": uri}).fetch(), name)
+        connector = IcebergConnector(name, {"type": "rest", "uri": uri}, namespaces=[namespace])
+        _check_iceberg(connector.fetch(), name, namespace)
     finally:
-        catalog.drop_table("sales.orders")
-        catalog.drop_namespace("sales")
+        catalog.drop_table(f"{namespace}.orders")
+        catalog.drop_namespace(namespace)

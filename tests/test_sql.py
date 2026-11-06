@@ -118,6 +118,25 @@ def test_qualified_star_in_a_join() -> None:
     assert result.columns["amount"] == [src(ORDERS, "amount")]
 
 
+def test_star_over_an_unknown_relation_uses_the_columns_the_query_asks_for() -> None:
+    sql = """
+    with source as (select * from raw.unknown_orders),
+    renamed as (
+        select id as order_id, order_total as order_total_cents, (order_total / 100)::numeric(16, 2) as order_total
+        from source
+    )
+    select * from renamed
+    """
+    result = one(sql, schema={})
+    relation = "db.raw.unknown_orders"
+    assert result.columns == {
+        "order_id": [src(relation, "id")],
+        "order_total_cents": [src(relation, "order_total")],
+        "order_total": [src(relation, "order_total", "transformed")],
+    }
+    assert any("unknown columns: db.raw.unknown_orders" in e for e in result.errors)
+
+
 def test_select_star_without_a_schema_is_reported() -> None:
     result = one("select * from mystery", schema={})
     assert result.reads == ["db.main.mystery"]

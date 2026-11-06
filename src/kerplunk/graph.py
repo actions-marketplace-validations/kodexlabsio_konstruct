@@ -31,6 +31,9 @@ NodeKind = Literal[
 EdgeKind = Literal["contains", "feeds", "derived_from", "runs", "precedes", "tests"]
 
 RELATION_KINDS: frozenset[str] = frozenset({"source", "table", "model", "seed", "snapshot"})
+# When several nodes describe one physical relation (a seed and the dbt source that reads it), SQL
+# that names the relation resolves to the first kind in this order.
+RELATION_PRIORITY: dict[str, int] = {"source": 0, "model": 1, "snapshot": 2, "seed": 3, "table": 4}
 GRAPH_FORMAT_VERSION = 1
 
 
@@ -122,7 +125,7 @@ class Graph:
         self._edges: dict[tuple[str, str, str], Edge] = {}
         self._out: dict[str, list[Edge]] = {}
         self._in: dict[str, list[Edge]] = {}
-        self._relations: dict[str, str] = {}
+        self._relations: dict[str, list[str]] = {}
         self.warnings: list[str] = []
         self.meta: dict[str, Any] = {}
 
@@ -133,8 +136,7 @@ class Graph:
         existing = self.nodes.get(node.id)
         if existing is None:
             self.nodes[node.id] = node
-            if node.relation and node.kind in RELATION_KINDS:
-                self._relations.setdefault(node.relation, node.id)
+            self._index_relation(node)
             return node
         for key in ("parent", "relation", "description", "data_type", "path"):
             if not getattr(existing, key) and getattr(node, key):
@@ -144,9 +146,15 @@ class Graph:
                 existing.origins.append(origin)
         for key, value in node.attrs.items():
             existing.attrs.setdefault(key, value)
-        if existing.relation and existing.kind in RELATION_KINDS:
-            self._relations.setdefault(existing.relation, existing.id)
+        self._index_relation(existing)
         return existing
+
+    def _index_relation(self, node: Node) -> None:
+        if node.relation and node.kind in RELATION_KINDS:
+            ids = self._relations.setdefault(node.relation, [])
+            if node.id not in ids:
+                ids.append(node.id)
+                ids.sort(key=lambda i: RELATION_PRIORITY.get(self.nodes[i].kind, 9))
 
     def add_column(
         self,
@@ -210,8 +218,18 @@ class Graph:
         return [e for e in self._in.get(node_id, []) if kind is None or e.kind == kind]
 
     def node_for_relation(self, key: str) -> Node | None:
-        node_id = self._relations.get(key.lower())
-        return self.nodes.get(node_id) if node_id else None
+        """The node SQL naming this relation refers to (see RELATION_PRIORITY)."""
+        ids = self._relations.get(key.lower())
+        return self.nodes[ids[0]] if ids else None
+
+    def nodes_for_relation(self, key: str) -> list[Node]:
+        """Every node that describes this relation, the preferred one first."""
+        return [self.nodes[i] for i in self._relations.get(key.lower(), [])]
+
+    def shared_relations(self) -> Iterator[tuple[str, list[Node]]]:
+        for key, ids in self._relations.items():
+            if len(ids) > 1:
+                yield key, [self.nodes[i] for i in ids]
 
     def relations(self) -> Iterator[Node]:
         return (n for n in self.nodes.values() if n.kind in RELATION_KINDS)
@@ -229,7 +247,9 @@ class Graph:
         """Short human label: ``orders.amount`` for a column, ``orders`` for a relation."""
         if node.kind == "column":
             parent = self.parent_of(node)
-            return f"{parent.name}.{node.name}" if parent else node.name
+            return f"{self.label(parent)}.{node.name}" if parent else node.name
+        if node.kind == "source" and node.attrs.get("source_name"):
+            return f"{node.attrs['source_name']}.{node.name}"
         if node.kind == "task" and node.attrs.get("dag"):
             return f"{node.attrs['dag']}.{node.name}"
         return node.name
@@ -258,7 +278,9 @@ class Graph:
         others = [
             n
             for n in self.nodes.values()
-            if n.kind not in RELATION_KINDS and n.kind != "column" and n.name.lower() == needle
+            if n.kind not in RELATION_KINDS
+            and n.kind != "column"
+            and needle in (n.name.lower(), self.label(n).lower())
         ]
         if others:
             return others
@@ -274,7 +296,12 @@ class Graph:
                 matches.append(node)
         exact = [n for n in matches if n.name.lower() == needle or n.relation == needle]
         if len(exact) == 1 or (exact and len(matches) > len(exact)):
-            return exact
+            matches = exact
+        # Nodes for one physical relation (a seed and the source over it) are one answer.
+        relations = {n.relation for n in matches}
+        if len(matches) > 1 and len(relations) == 1 and None not in relations:
+            preferred = self.node_for_relation(str(next(iter(relations))))
+            return [preferred] if preferred else matches
         return matches
 
     # Traversal

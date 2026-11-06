@@ -36,6 +36,7 @@ Example ``kerplunk.toml``::
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import tomllib
@@ -97,9 +98,13 @@ class WarehouseConfig:
             )
         raise ConfigError(f"unknown warehouse type {self.type!r} (expected duckdb, postgres or iceberg)")
 
-    def describe(self) -> str:
+    def describe(self, root: Path | None = None) -> str:
         if self.type == "duckdb":
-            return f"duckdb {self.options.get('path')}"
+            path = Path(str(self.options.get("path", "")))
+            if root is not None and path.is_absolute():
+                with contextlib.suppress(ValueError):
+                    path = path.relative_to(root)
+            return f"duckdb {path}"
         if self.type == "iceberg":
             return f"iceberg {self.options.get('name', 'iceberg')} at {self.options.get('uri', '?')}"
         return f"{self.type} ({self.source})"

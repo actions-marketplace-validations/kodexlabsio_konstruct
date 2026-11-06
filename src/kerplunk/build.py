@@ -92,14 +92,14 @@ class RelationIndex:
             return
         parts = node.relation.split(".")
         for start in range(len(parts)):
-            self.by_suffix.setdefault(".".join(parts[start:]), set()).add(node.id)
+            self.by_suffix.setdefault(".".join(parts[start:]), set()).add(node.relation)
 
     def find(self, key: str, *, drop_leading: bool = False) -> Node | None:
         parts = [p for p in key.lower().split(".") if p and p != PLACEHOLDER.lower()]
         while parts:
             matches = self.by_suffix.get(".".join(parts), set())
             if len(matches) == 1:
-                return self.graph.nodes[next(iter(matches))]
+                return self.graph.node_for_relation(next(iter(matches)))
             if matches or not drop_leading or len(parts) <= 2:
                 return None
             parts = parts[1:]
@@ -121,8 +121,16 @@ class Builder:
         self.default_catalog = config.default_catalog
         self.default_schema = config.default_schema
         self.inputs: dict[str, int] = {}
+        # One entry per input, for the build summary and `kerplunk status`.
+        self.sources: list[dict[str, str]] = []
+        self.watched: set[str] = set()
 
     # Shared helpers
+
+    def watch(self, *paths: Path) -> None:
+        for path in paths:
+            if path.exists():
+                self.watched.add(self.rel_path(path))
 
     def rel_path(self, path: Path | str) -> str:
         return os.path.relpath(Path(path).resolve(), self.config.root)
@@ -228,6 +236,8 @@ class Builder:
     def run(self) -> Graph:
         projects = self.load_dbt()
         self.load_warehouses(projects)
+        self.link_shared_relations()
+        self.warn_missing_catalogs()
         self.index = RelationIndex(self.graph)
         self.dbt_lineage()
         schema_key = Cache.key(self.schema_columns())
@@ -236,6 +246,10 @@ class Builder:
         self.load_sql_files(projects, used_sql, schema_key)
         self.graph.meta["dialect"] = self.dialect
         self.graph.meta["inputs"] = self.inputs
+        self.graph.meta["sources"] = self.sources
+        if self.config.config_file:
+            self.watch(self.config.config_file)
+        self.graph.meta["watched"] = sorted(self.watched)
         return self.graph
 
     def load_dbt(self) -> list[dbt.DbtProject]:
@@ -245,11 +259,23 @@ class Builder:
             projects = [p for p in dbt.find_projects(self.config.root) if not self.config.excluded(p.root)]
         self.loads: list[dbt.DbtLoad] = []
         for project in projects:
-            dbt.ensure_artefacts(project, run_dbt=self.config.run_dbt, graph=self.graph)
-            self.graph.meta.setdefault("root", str(self.config.root))
+            status = dbt.ensure_artefacts(project, run_dbt=self.config.run_dbt, graph=self.graph)
+            self.watch(project.root / "dbt_project.yml", *project.source_paths)
             loaded = dbt.load(project, self.graph, dialect=self.config.dialect)
+            entry = {
+                "input": "dbt",
+                "name": project.name,
+                "path": self.rel_path(project.root),
+                "note": status,
+            }
+            self.sources.append(entry)
             if loaded is None:
+                entry["status"] = "failed"
                 continue
+            self.watch(project.manifest_path, project.catalog_path)
+            entry["detail"] = ", ".join(
+                f"{count} {kind}{'s' if count != 1 else ''}" for kind, count in loaded.counts.items() if count
+            )
             self.loads.append(loaded)
             self.dialect = self.dialect or loaded.dialect
             self.default_catalog = self.default_catalog or loaded.default_catalog
@@ -267,9 +293,25 @@ class Builder:
                 raise
             except Exception as error:  # any driver error becomes a warning
                 message = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
-                self.graph.warn(f"warehouse {warehouse.describe()}: {message}")
+                self.graph.warn(f"warehouse {warehouse.describe(self.config.root)}: {message}")
+                self.sources.append(
+                    {
+                        "input": warehouse.type,
+                        "name": warehouse.describe(self.config.root),
+                        "status": "failed",
+                        "note": message,
+                    }
+                )
                 continue
             count += 1
+            self.sources.append(
+                {
+                    "input": warehouse.type,
+                    "name": warehouse.describe(self.config.root),
+                    "detail": f"{len(relations)} relation{'s' if len(relations) != 1 else ''}",
+                    "note": warehouse.source,
+                }
+            )
             self.dialect = self.dialect or connector.dialect
             if self.default_schema is None and connector.default_schema and relations:
                 # Unqualified tables in SQL files and DAGs then resolve inside this warehouse.
@@ -280,7 +322,13 @@ class Builder:
         self.inputs["warehouses"] = count
 
     def merge_relation(self, meta: RelationMeta, origin: str) -> None:
-        node = self.graph.node_for_relation(meta.key)
+        nodes = self.graph.nodes_for_relation(meta.key)
+        if not nodes:
+            self._merge_into(None, meta, origin)
+        for node in nodes:
+            self._merge_into(node, meta, origin)
+
+    def _merge_into(self, node: Node | None, meta: RelationMeta, origin: str) -> None:
         attrs = {"table_type": meta.kind, **meta.attrs}
         if node is None:
             node = self.graph.add_node(
@@ -325,6 +373,46 @@ class Builder:
                 existing.attrs["in_warehouse"] = True
                 for key, value in column.attrs.items():
                     existing.attrs.setdefault(key, value)
+
+    def link_shared_relations(self) -> None:
+        """Connect nodes that describe one physical relation, such as a seed and the dbt source
+        that reads the table it loads: the producer feeds the reader, column by column."""
+        for _, nodes in self.graph.shared_relations():
+            reader = nodes[0]
+            for producer in nodes[1:]:
+                if producer.kind not in ("model", "snapshot", "seed") or reader.kind != "source":
+                    continue
+                self.graph.add_edge(producer.id, reader.id, "feeds", same_relation=True)
+                for column in self.graph.columns_of(producer.id):
+                    mirror = self.graph.column(reader.id, column.name)
+                    if mirror is None:
+                        mirror = self.graph.add_column(
+                            reader,
+                            column.name,
+                            data_type=column.data_type,
+                            description=column.description,
+                            origin="dbt",
+                            attrs={"from_relation": producer.id},
+                        )
+                    self.graph.add_edge(
+                        mirror.id, column.id, "derived_from", transform="direct", same_relation=True
+                    )
+
+    def warn_missing_catalogs(self) -> None:
+        for loaded in self.loads:
+            if loaded.has_catalog:
+                continue
+            nodes = [
+                n
+                for n in self.graph.relations()
+                if n.id.startswith(("model.", "source.", "seed.", "snapshot."))
+            ]
+            unseen = [n for n in nodes if not n.attrs.get("in_warehouse")]
+            if unseen:
+                self.graph.warn(
+                    f"dbt: {loaded.project.name}: no catalog.json and {len(unseen)} dbt node(s) not found in "
+                    "a warehouse, so their column types are unknown; run `dbt docs generate`"
+                )
 
     def dbt_lineage(self) -> None:
         count = 0
@@ -387,10 +475,12 @@ class Builder:
         files = discover_dag_files(self.config)
         dags_seen = 0
         for path in files:
+            self.watch(path)
             try:
                 content = path.read_bytes()
             except OSError as error:
                 self.graph.warn(f"airflow: cannot read {self.rel_path(path)}: {error}")
+                self.sources.append({"input": "airflow", "path": self.rel_path(path), "status": "failed"})
                 continue
             key = Cache.key("dag", hashlib.sha256(content).hexdigest(), str(path))
 
@@ -403,15 +493,33 @@ class Builder:
             parsed = self.cache.get_or_compute(key, compute)
             if isinstance(parsed, dict):
                 self.graph.warn(f"airflow: {self.rel_path(path)}: {parsed['error']}")
+                self.sources.append(
+                    {
+                        "input": "airflow",
+                        "path": self.rel_path(path),
+                        "status": "failed",
+                        "note": parsed["error"],
+                    }
+                )
                 continue
+            tasks = 0
             for item in parsed:
                 dag = airflow.DagInfo.from_dict(item)
                 for task in dag.tasks.values():
                     if task.sql_path and Path(task.sql_path).is_file():
                         task.sql = Path(task.sql_path).read_text(encoding="utf-8")
                         used_sql.add(Path(task.sql_path).resolve())
+                        self.watch(Path(task.sql_path))
                 self.add_dag(dag, schema_key)
                 dags_seen += 1
+                tasks += len(dag.tasks)
+            self.sources.append(
+                {
+                    "input": "airflow",
+                    "path": self.rel_path(path),
+                    "detail": f"{len(parsed)} DAG{'s' if len(parsed) != 1 else ''}, {tasks} task{'s' if tasks != 1 else ''}",
+                }
+            )
         self.inputs["airflow_dags"] = dags_seen
         return used_sql
 
@@ -546,13 +654,45 @@ class Builder:
                 self.graph.warn(f"sql: cannot read {self.rel_path(path)}: {error}")
                 continue
             rel = self.rel_path(path)
-            for statement in self.analyse_cached(strip_templating(text), kind="file", schema_key=schema_key):
+            self.watch(path)
+            statements = self.analyse_cached(strip_templating(text), kind="file", schema_key=schema_key)
+            writes = sorted({s.target for s in statements if s.target})
+            self.sources.append(
+                {
+                    "input": "sql",
+                    "path": rel,
+                    "detail": f"writes {', '.join(writes)}" if writes else "writes nothing",
+                }
+            )
+            for statement in statements:
                 if not statement.target:
+                    for problem in statement.errors:
+                        self.graph.warn(f"sql {rel}: {problem}")
                     continue
                 target = self.relation(statement.target, "sql")
                 target.path = target.path or rel
                 self.apply(statement, target=target, origin="sql", label=f"sql {rel}", via=rel)
         self.inputs["sql_files"] = len(files)
+
+
+def changed_inputs(graph_path: Path, graph: Graph) -> list[str]:
+    """Files the last build read that have changed since it ran, relative to the project root."""
+    try:
+        built = graph_path.stat().st_mtime
+    except OSError:
+        return []
+    root = Path(str(graph.meta.get("root", graph_path.parent.parent)))
+    changed = []
+    for name in graph.meta.get("watched", []):
+        path = root / name
+        candidates = path.rglob("*") if path.is_dir() else [path]
+        for candidate in candidates:
+            try:
+                if candidate.is_file() and candidate.stat().st_mtime > built:
+                    changed.append(os.path.relpath(candidate, root))
+            except OSError:
+                continue
+    return sorted(set(changed))
 
 
 def _topological(models: list[dbt.ModelSql]) -> list[dbt.ModelSql]:

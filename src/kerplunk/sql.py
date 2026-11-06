@@ -297,8 +297,8 @@ def _column_lineage(
             continue
         out_name = (out_names[index] if out_names else name).lower()
         sources: list[ColumnSource] = []
-        for leaf, transform in _leaves(node):
-            source = _leaf_source(leaf, out_name, transform, default_catalog, default_db)
+        for leaf, transform, asked_for in _leaves(node):
+            source = _leaf_source(leaf, asked_for, transform, default_catalog, default_db)
             if source and source not in sources:
                 sources.append(source)
         result.columns[out_name] = sources
@@ -319,25 +319,26 @@ def _is_passthrough(node: LineageNode) -> bool:
     return isinstance(expression, (exp.Column, exp.Star))
 
 
-def _leaves(node: LineageNode) -> Iterator[tuple[LineageNode, Transform]]:
-    """Leaf (physical table) nodes under ``node``, with whether the path changes the value."""
-    stack: list[tuple[LineageNode, bool, frozenset[int]]] = [(node, True, frozenset())]
+def _leaves(node: LineageNode) -> Iterator[tuple[LineageNode, Transform, str]]:
+    """Leaf (physical table) nodes under ``node``, whether the path changes the value, and the
+    name of the node that reached each leaf (for a ``*`` leaf, the column that was asked for)."""
+    stack: list[tuple[LineageNode, bool, frozenset[int], str]] = [(node, True, frozenset(), node.name)]
     while stack:
-        current, direct, seen = stack.pop()
+        current, direct, seen, parent = stack.pop()
         if id(current) in seen:
             continue
         direct = direct and _is_passthrough(current)
         if not current.downstream:
             if isinstance(current.expression, exp.Table):
-                yield current, "direct" if direct else "transformed"
+                yield current, "direct" if direct else "transformed", parent
             continue
         for child in reversed(current.downstream):
-            stack.append((child, direct, seen | {id(current)}))
+            stack.append((child, direct, seen | {id(current)}, current.name))
 
 
 def _leaf_source(
     leaf: LineageNode,
-    out_name: str,
+    asked_for: str,
     transform: Transform,
     default_catalog: str | None,
     default_db: str | None,
@@ -348,8 +349,11 @@ def _leaf_source(
     relation = _table_key(table, default_catalog, default_db)
     column = leaf.name.rsplit(".", 1)[-1].strip('"`[]').lower()
     if column == "*":
-        # Columns of a relation sqlglot could not expand: assume a same-named pass-through.
-        return ColumnSource(relation, out_name, "direct")
+        # A relation whose columns sqlglot could not expand: the column is the one the query
+        # asked the star for, which the relation must therefore have.
+        column = asked_for.rsplit(".", 1)[-1].strip('"`[]').lower()
+        if not column or column == "*":
+            return None
     return ColumnSource(relation, column, transform)
 
 
@@ -399,8 +403,8 @@ def _references(
                     traced = to_node(column.name, scope=source, dialect=dialect, schema=schema)
                 except (SqlglotError, ValueError, KeyError, IndexError, AttributeError):
                     continue
-                for leaf, _ in _leaves(traced):
-                    leaf_source = _leaf_source(leaf, column.name, "direct", default_catalog, default_db)
+                for leaf, _, asked_for in _leaves(traced):
+                    leaf_source = _leaf_source(leaf, asked_for, "direct", default_catalog, default_db)
                     if leaf_source:
                         add(leaf_source.relation, leaf_source.column)
     return found

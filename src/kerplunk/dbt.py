@@ -65,6 +65,8 @@ class DbtLoad:
     default_catalog: str | None
     default_schema: str | None
     manifest_checksum: str | None
+    has_catalog: bool = True
+    counts: dict[str, int] = field(default_factory=dict)
 
 
 def walk_dirs(root: Path) -> Iterator[Path]:
@@ -126,33 +128,36 @@ def artefacts_stale(project: DbtProject) -> bool:
     return _newest_source_mtime(project) > project.manifest_path.stat().st_mtime
 
 
-def ensure_artefacts(project: DbtProject, *, run_dbt: bool, graph: Graph) -> None:
-    """Run ``dbt docs generate`` (or ``dbt parse``) when the artefacts are missing or stale."""
+def ensure_artefacts(project: DbtProject, *, run_dbt: bool, graph: Graph) -> str:
+    """Run ``dbt docs generate`` (or ``dbt parse``) when the artefacts are missing or stale.
+
+    Returns what happened, for the build summary.
+    """
     if not artefacts_stale(project):
-        return
+        return "artefacts up to date"
     missing = not project.manifest_path.is_file()
     state = "missing" if missing else "older than the project files"
     if not run_dbt:
         if missing:
             graph.warn(f"dbt: {project.name}: target/manifest.json is missing and running dbt is disabled")
-        else:
-            graph.warn(f"dbt: {project.name}: target/manifest.json is {state}; using it anyway")
-        return
+            return "no manifest; running dbt is disabled"
+        graph.warn(f"dbt: {project.name}: target/manifest.json is {state}; using it anyway")
+        return "manifest is stale; running dbt is disabled"
     dbt = shutil.which("dbt")
     if dbt is None:
         graph.warn(
             f"dbt: {project.name}: target/manifest.json is {state} and dbt is not on PATH; "
             "run `dbt docs generate` in the project"
         )
-        return
-    base = [dbt]
+        return f"manifest is {state} and dbt is not on PATH"
     env = dict(os.environ)
     if (project.root / "profiles.yml").is_file() and "DBT_PROFILES_DIR" not in env:
         env["DBT_PROFILES_DIR"] = str(project.root)
     for command in (["docs", "generate"], ["parse"]):
         log.info("running dbt %s in %s", " ".join(command), project.root)
+        # kerplunk only parses and compiles, so a require-dbt-version pin need not block it.
         result = subprocess.run(
-            [*base, *command, "--quiet"],
+            [dbt, *command, "--quiet", "--no-version-check"],
             cwd=project.root,
             env=env,
             capture_output=True,
@@ -165,9 +170,31 @@ def ensure_artefacts(project: DbtProject, *, run_dbt: bool, graph: Graph) -> Non
                     f"dbt: {project.name}: `dbt docs generate` failed, so models are read from "
                     "uncompiled SQL and warehouse column types come from other inputs"
                 )
-            return
-        detail = (result.stdout + result.stderr).strip().splitlines()
-        graph.warn(f"dbt: {project.name}: `dbt {' '.join(command)}` failed: {detail[-1] if detail else ''}")
+            return f"ran dbt {' '.join(command)}"
+        graph.warn(
+            f"dbt: {project.name}: `dbt {' '.join(command)}` failed: {dbt_error(result.stdout + result.stderr)}"
+        )
+    return "dbt failed"
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_TIMESTAMP = re.compile(r"^\d\d:\d\d:\d\d\s+")
+
+
+def dbt_error(output: str, limit: int = 400) -> str:
+    """The useful part of dbt's error output, on one line."""
+    lines = [_TIMESTAMP.sub("", _ANSI.sub("", line)).strip() for line in output.splitlines()]
+    lines = [line for line in lines if line]
+    for index, line in enumerate(lines):
+        if "Encountered an error" in line:
+            lines = lines[index + 1 :]
+            break
+    else:
+        errors = [line for line in lines if "error" in line.lower()]
+        lines = errors or lines[-3:]
+    text = " ".join(line for line in lines if not line.startswith("Error encountered in "))
+    text = text or (lines[-1] if lines else "no output")
+    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -283,11 +310,6 @@ def load(project: DbtProject, graph: Graph, *, dialect: str | None) -> DbtLoad |
         graph.warn(f"dbt: {project.name}: no readable manifest at {project.manifest_path}")
         return None
     catalog = _read_json(project.catalog_path)
-    if catalog is None:
-        graph.warn(
-            f"dbt: {project.name}: no catalog.json, so column types and undocumented columns "
-            "come from the warehouse or from lineage"
-        )
     metadata = manifest.get("metadata", {})
     dialect = dialect or dialect_for(metadata.get("adapter_type"))
     root = project.root
@@ -394,6 +416,18 @@ def load(project: DbtProject, graph: Graph, *, dialect: str | None) -> DbtLoad |
         default_catalog=default_catalog,
         default_schema=default_schema,
         manifest_checksum=metadata.get("invocation_id"),
+        has_catalog=catalog is not None,
+        counts={
+            kind: sum(1 for item in group.values() if item.get("resource_type") == kind)
+            for kind, group in (
+                ("model", manifest.get("nodes", {})),
+                ("seed", manifest.get("nodes", {})),
+                ("snapshot", manifest.get("nodes", {})),
+                ("test", manifest.get("nodes", {})),
+                ("source", manifest.get("sources", {})),
+                ("exposure", manifest.get("exposures", {})),
+            )
+        },
     )
 
 

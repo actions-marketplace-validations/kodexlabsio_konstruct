@@ -230,6 +230,8 @@ class Graph:
         if node.kind == "column":
             parent = self.parent_of(node)
             return f"{parent.name}.{node.name}" if parent else node.name
+        if node.kind == "task" and node.attrs.get("dag"):
+            return f"{node.attrs['dag']}.{node.name}"
         return node.name
 
     # Name resolution
@@ -335,13 +337,48 @@ class Graph:
 
         A column reached through a join, filter or group-by (``role = "reference"``) is reported,
         but the walk does not continue from the whole relation it reached, so one join key does
-        not mark every downstream column as affected.
+        not mark every downstream column as affected. For a column, the exposures that use and
+        the tasks that read or run each affected relation are reported too.
         """
-        return self._walk(self.expand(node), self.downstream_edges, max_depth, True)
+        steps = self._walk(self.expand(node), self.downstream_edges, max_depth, True)
+        if node.kind == "column":
+            steps += self._relation_consumers(steps, upstream=False)
+        return steps
 
     def trace(self, node: Node, max_depth: int | None = None) -> list[Step]:
-        """Everything upstream of ``node``."""
-        return self._walk(self.expand(node), self.upstream_edges, max_depth, False)
+        """Everything upstream of ``node``. For a column, the tasks that build each relation on the
+        way (including the column's own) are reported too."""
+        steps = self._walk(self.expand(node), self.upstream_edges, max_depth, False)
+        if node.kind == "column":
+            steps += self._relation_consumers(steps, upstream=True)
+        return steps
+
+    def _relation_consumers(self, steps: list[Step], *, upstream: bool) -> list[Step]:
+        seen = {s.node.id for s in steps}
+        extra: list[Step] = []
+        for step in steps:
+            column = step.node
+            if column.kind != "column" or not column.parent or (step.depth == 0 and not upstream):
+                continue
+            parent = column.parent
+            candidates: list[tuple[Edge, str]] = [(e, e.source) for e in self.in_edges(parent, "runs")]
+            if upstream:
+                candidates += [
+                    (e, e.source)
+                    for e in self.in_edges(parent, "feeds")
+                    if e.source in self.nodes and self.nodes[e.source].kind == "task"
+                ]
+            else:
+                candidates += [
+                    (e, e.target)
+                    for e in self.out_edges(parent, "feeds")
+                    if e.target in self.nodes and self.nodes[e.target].kind in ("exposure", "task")
+                ]
+            for edge, other in candidates:
+                if other not in seen:
+                    seen.add(other)
+                    extra.append(Step(self.nodes[other], step.depth + 1, edge, parent))
+        return extra
 
     def path(self, start: Node, end: Node) -> list[Step]:
         """Shortest path from ``start`` to ``end``, following data flow in either direction."""
@@ -388,9 +425,8 @@ class Graph:
             "format_version": GRAPH_FORMAT_VERSION,
             "meta": self.meta,
             "nodes": [n.to_dict() for n in sorted(self.nodes.values(), key=lambda n: n.id)],
-            "edges": [
-                e.to_dict() for e in sorted(self._edges.values(), key=lambda e: (e.source, e.target, e.kind))
-            ],
+            # Insertion order, which a build makes deterministic, keeps columns in table order.
+            "edges": [e.to_dict() for e in self._edges.values()],
             "warnings": self.warnings,
         }
 

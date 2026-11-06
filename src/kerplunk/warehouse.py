@@ -46,6 +46,7 @@ class RelationMeta:
 class Connector(Protocol):
     label: str
     dialect: str | None
+    default_schema: str | None
 
     def fetch(self) -> list[RelationMeta]: ...
 
@@ -60,6 +61,7 @@ class DuckDBConnector:
     schemas: list[str] | None = None
     label: str = "duckdb"
     dialect: str | None = "duckdb"
+    default_schema: str | None = "main"
 
     def fetch(self) -> list[RelationMeta]:
         import duckdb
@@ -126,6 +128,7 @@ class PostgresConnector:
     schemas: list[str] | None = None
     label: str = "postgres"
     dialect: str | None = "postgres"
+    default_schema: str | None = "public"
 
     def fetch(self) -> list[RelationMeta]:
         import psycopg
@@ -202,6 +205,7 @@ class IcebergConnector:
     namespaces: list[str] | None = None
     label: str = "iceberg"
     dialect: str | None = None
+    default_schema: str | None = None
 
     def fetch(self) -> list[RelationMeta]:
         from pyiceberg.catalog import load_catalog

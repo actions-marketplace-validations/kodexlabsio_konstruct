@@ -105,7 +105,17 @@ def test_impact_of_a_column_follows_lineage_tests_and_tasks() -> None:
         "model.shop.orders#amount",
         "model.shop.customers#lifetime_value",
         "test.shop.not_null_orders_amount",
+        # orders is affected, so its exposure and the task that runs it are too
+        "exposure.shop.dashboard",
+        "task.nightly.dbt_run",
     }
+
+
+def test_trace_of_a_column_reports_the_tasks_that_build_its_relations() -> None:
+    g = small_graph()
+    steps = g.trace(g.resolve("orders.amount")[0])
+    assert "task.nightly.dbt_run" in ids(steps)
+    assert "exposure.shop.dashboard" not in ids(steps)
 
 
 def test_impact_through_a_join_key_stops_at_the_relation() -> None:
@@ -134,6 +144,7 @@ def test_trace_of_a_column_goes_to_the_raw_source() -> None:
         "model.shop.orders#amount",
         "model.shop.stg_payments#amount",
         "source.shop.raw.payments#amount",
+        "task.nightly.dbt_run",
     }
     depths = {s.node.id: s.depth for s in steps}
     assert depths["source.shop.raw.payments#amount"] == 3
@@ -149,7 +160,10 @@ def test_trace_of_a_relation_includes_the_task_that_runs_it() -> None:
 def test_max_depth_limits_the_walk() -> None:
     g = small_graph()
     steps = g.trace(g.resolve("customers.lifetime_value")[0], max_depth=1)
-    assert ids(steps) == {"model.shop.customers#lifetime_value", "model.shop.orders#amount"}
+    assert ids(steps) - {"task.nightly.dbt_run"} == {
+        "model.shop.customers#lifetime_value",
+        "model.shop.orders#amount",
+    }
 
 
 def test_path_between_columns_follows_data_flow() -> None:

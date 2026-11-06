@@ -80,3 +80,20 @@ def dbt_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
         pytest.skip("dbt is not installed")
     monkeypatch.setenv("PATH", f"{Path(dbt).parent}{os.pathsep}{os.environ.get('PATH', '')}")
     monkeypatch.setenv("DBT_SEND_ANONYMOUS_USAGE_STATS", "false")
+
+
+@pytest.fixture(scope="session")
+def jaffle_built_graph(built_jaffle: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The example after a full `kerplunk build`: the project root, with kerplunk-out inside."""
+    from kerplunk.build import build
+    from kerplunk.config import load_config
+
+    dbt = dbt_executable()
+    assert dbt is not None
+    project = tmp_path_factory.mktemp("jaffle_graph") / "jaffle_shop"
+    shutil.copytree(built_jaffle, project)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("PATH", f"{Path(dbt).parent}{os.pathsep}{os.environ.get('PATH', '')}")
+        patch.setenv("DBT_SEND_ANONYMOUS_USAGE_STATS", "false")
+        build(load_config(project))
+    return project

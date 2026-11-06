@@ -260,6 +260,8 @@ def test_unparseable_sql_is_reported_not_raised() -> None:
 
 def test_ddl_without_a_query_is_ignored() -> None:
     assert analyse("drop table if exists orders; set search_path = public", dialect="postgres") == []
+    sql = "create schema if not exists reporting; create index ix on orders (id); create function f() returns int as 'select 1' language sql"
+    assert analyse(sql, dialect="postgres") == []
 
 
 def test_strip_templating() -> None:

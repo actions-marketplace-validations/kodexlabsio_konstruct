@@ -321,6 +321,7 @@ def load(project: DbtProject, graph: Graph, *, dialect: str | None) -> DbtLoad |
                     "materialized": config.get("materialized"),
                     "tags": item.get("tags", []),
                     "dbt_name": item["name"],
+                    "checksum": (item.get("checksum") or {}).get("checksum"),
                 },
             )
         )

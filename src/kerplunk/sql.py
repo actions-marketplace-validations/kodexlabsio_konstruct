@@ -213,6 +213,8 @@ def _analyse_statement(
     if isinstance(statement, exp.Query):
         query, kind = statement, "select"
     elif isinstance(statement, exp.Create):
+        if str(statement.args.get("kind") or "").upper() not in ("TABLE", "VIEW"):
+            return None
         this = statement.this
         write = this.this if isinstance(this, exp.Schema) else this
         if isinstance(this, exp.Schema):

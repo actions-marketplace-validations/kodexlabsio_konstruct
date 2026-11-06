@@ -377,7 +377,7 @@ def render_walk(result: dict[str, Any]) -> str:
     title = "Downstream of" if result["direction"] == "downstream" else "Upstream of"
     lines = [f"{title} {target['label']} ({target.get('relation_kind') or target['kind']})"]
     if target.get("description"):
-        lines.append(f"  {target['description']}")
+        lines.append(f"  {_shorten(target['description'])}")
     sections = [
         ("columns", "Columns"),
         ("relations", "Relations"),

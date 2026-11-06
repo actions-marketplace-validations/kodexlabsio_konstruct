@@ -48,7 +48,15 @@ from typing import Any
 import yaml
 
 from kerplunk.dbt import SKIP_DIRS, DbtProject, walk_dirs
-from kerplunk.warehouse import Connector, DuckDBConnector, IcebergConnector, PostgresConnector
+from kerplunk.warehouse import (
+    BigQueryConnector,
+    Connector,
+    DatabricksConnector,
+    DuckDBConnector,
+    IcebergConnector,
+    PostgresConnector,
+    SnowflakeConnector,
+)
 
 
 class ConfigError(Exception):
@@ -96,7 +104,23 @@ class WarehouseConfig:
                 properties=properties,
                 namespaces=options.get("namespaces"),
             )
-        raise ConfigError(f"unknown warehouse type {self.type!r} (expected duckdb, postgres or iceberg)")
+        if self.type == "snowflake":
+            options_only = {k: v for k, v in options.items() if k not in ("databases", "schemas", "type")}
+            return SnowflakeConnector(options_only, databases=options.get("databases"), schemas=schemas)
+        if self.type == "databricks":
+            options_only = {k: v for k, v in options.items() if k not in ("catalogs", "schemas", "type")}
+            return DatabricksConnector(options_only, catalogs=options.get("catalogs"), schemas=schemas)
+        if self.type == "bigquery":
+            return BigQueryConnector(
+                project=str(options.get("project", "")),
+                datasets=options.get("datasets"),
+                location=options.get("location"),
+                endpoint=options.get("endpoint"),
+            )
+        raise ConfigError(
+            f"unknown warehouse type {self.type!r} "
+            "(expected duckdb, postgres, iceberg, snowflake, bigquery or databricks)"
+        )
 
     def describe(self, root: Path | None = None) -> str:
         if self.type == "duckdb":
@@ -306,6 +330,38 @@ def discover_warehouses(config: Config, projects: list[DbtProject]) -> list[Ware
             keys = ("host", "port", "user", "password", "pass", "dbname", "database", "sslmode")
             options = {k: target.get(k) for k in keys}
             found.append(WarehouseConfig("postgres", options, source=f"dbt profile {project.profile}"))
+        elif kind == "snowflake":
+            keys = ("account", "user", "password", "role", "warehouse", "database", "schema", "authenticator")
+            options = {k: target[k] for k in keys if target.get(k)}
+            if target.get("private_key_path"):
+                options["private_key_file"] = target["private_key_path"]
+            found.append(WarehouseConfig("snowflake", options, source=f"dbt profile {project.profile}"))
+        elif kind == "bigquery":
+            found.append(
+                WarehouseConfig(
+                    "bigquery",
+                    {
+                        "project": target.get("project") or target.get("database"),
+                        "location": target.get("location"),
+                    },
+                    source=f"dbt profile {project.profile}",
+                )
+            )
+        elif kind == "databricks":
+            options = {
+                "server_hostname": target.get("host"),
+                "http_path": target.get("http_path"),
+                "access_token": target.get("token"),
+                "catalog": target.get("catalog"),
+                "schema": target.get("schema"),
+            }
+            found.append(
+                WarehouseConfig(
+                    "databricks",
+                    {k: v for k, v in options.items() if v},
+                    source=f"dbt profile {project.profile}",
+                )
+            )
     for path in iter_files(config, ".duckdb"):
         if path.resolve() not in seen_paths:
             seen_paths.add(path.resolve())

@@ -30,6 +30,12 @@ dependencies = [
     "jinja2>=3.1",
 ]
 
+[project.optional-dependencies]
+snowflake = ["snowflake-connector-python>=3.12"]
+bigquery = ["google-cloud-bigquery>=3.25"]
+databricks = ["databricks-sql-connector>=3.4"]
+all = ["kerplunk[snowflake,bigquery,databricks]"]
+
 [project.urls]
 Homepage = "https://github.com/kodexlabsio/kerplunk"
 Issues = "https://github.com/kodexlabsio/kerplunk/issues"
@@ -52,6 +58,8 @@ dev = [
     "pytest-cov>=7.1.0",
     "hypothesis>=6.170.15",
     "dbt-postgres>=1.11.0",
+    "google-cloud-bigquery>=3.47.0",
+    "databricks-sql-connector>=4.9.0",
 ]
 
 [build-system]
@@ -81,7 +89,7 @@ exclude = ["^tests/fixtures/"]
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["pyiceberg.*", "duckdb.*", "airflow.*", "dagster.*", "dagster_dbt.*", "dagster_duckdb.*"]
+module = ["pyiceberg.*", "duckdb.*", "airflow.*", "dagster.*", "dagster_dbt.*", "dagster_duckdb.*", "fakesnow.*", "snowflake.*", "databricks.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -96,6 +104,8 @@ markers = [
     "realworld: clones and builds a public dbt project (KERPLUNK_REALWORLD=1)",
     "airflow_parity: compares the static parser with Airflow itself (needs apache-airflow)",
     "dagster_parity: compares the static parser with Dagster itself (needs dagster)",
+    "snowflake: runs against fakesnow (needs fakesnow and snowflake-connector-python<5)",
+    "bigquery: runs against the BigQuery emulator (KERPLUNK_TEST_BIGQUERY_ENDPOINT)",
     "iceberg_rest: needs an Iceberg REST catalog (KERPLUNK_TEST_ICEBERG_URI)",
 ]
 

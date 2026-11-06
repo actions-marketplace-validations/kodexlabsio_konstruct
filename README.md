@@ -37,7 +37,7 @@ uv run kerplunk build examples/jaffle_shop    # about a second
 uv run kerplunk impact stg_payments.amount -C examples/jaffle_shop
 ```
 
-`kerplunk build` needs no configuration: it finds dbt projects, Airflow DAG files, SQL files, DuckDB files and the warehouse each dbt profile points at, and prints what it found and what it did with each. If a dbt project's `target/manifest.json` is missing or older than the project files and `dbt` is on `PATH`, it runs `dbt docs generate` first. `kerplunk init` writes a commented `kerplunk.toml` recording what discovery found, for when you want to pin or change it.
+`kerplunk build` needs no configuration: it finds dbt projects, Airflow DAG files, Dagster definitions, SQL files, DuckDB files and the warehouse each dbt profile points at (DuckDB, Postgres, Snowflake, BigQuery or Databricks), and prints what it found and what it did with each. If a dbt project's `target/manifest.json` is missing or older than the project files and `dbt` is on `PATH`, it runs `dbt docs generate` first. `kerplunk init` writes a commented `kerplunk.toml` recording what discovery found, for when you want to pin or change it.
 
 ```text
 $ kerplunk build
@@ -64,7 +64,9 @@ kerplunk  /src/jaffle_shop
 | **Postgres** | Tables, views, materialised views, partitioned tables, columns, types, comments and view definitions, read only | v0 |
 | **Iceberg** | Any PyIceberg catalog, REST included: namespaces, tables, columns (nested struct fields as `parent.child`), field ids, identifier fields, partitioning, current snapshot. Metadata only; no data files are read | v0 |
 | **Dagster** | Definition files parsed statically (never imported): `@asset`, `@multi_asset` and `@dbt_assets` (with its dbt selection), keys and prefixes, dependencies from parameters, `ins=` and `deps=`, groups, asset jobs with their selections, and schedules. An asset's data is the dbt model, warehouse table or SQL target of the same name, and SQL an asset runs gets column lineage | v0 |
-| **Snowflake, BigQuery, Databricks** | Warehouse metadata, behind optional extras. Their SQL dialects already work for lineage | v1 |
+| **Snowflake** | Tables, views, columns, types, comments and view definitions from each database's `information_schema`, through `kerplunk[snowflake]`. Tested against fakesnow, an emulator of Snowflake's Python connector | v0 |
+| **BigQuery** | Datasets, tables, views and view queries through the client API, with nested `RECORD` fields and their descriptions, through `kerplunk[bigquery]`. Tested against the BigQuery emulator | v0 |
+| **Databricks** | Unity Catalog `information_schema` for each catalogue, including struct columns, through `kerplunk[databricks]`. Tested against a stub driver only: there is no Databricks emulator | v0 |
 
 ## Commands
 
@@ -177,6 +179,26 @@ schemas = ["raw", "analytics"]
 type = "duckdb"
 path = "data/local.duckdb"
 
+[[warehouse]]                     # needs kerplunk[snowflake]; options go to snowflake.connector.connect
+type = "snowflake"
+account = "acme-xy12345"
+user = "${SNOWFLAKE_USER}"
+password = "${SNOWFLAKE_PASSWORD}"
+database = "ANALYTICS"
+databases = ["RAW", "ANALYTICS"]  # optional: more than one database
+
+[[warehouse]]                     # needs kerplunk[bigquery]; uses application default credentials
+type = "bigquery"
+project = "my-project"
+datasets = ["shop", "marts"]
+
+[[warehouse]]                     # needs kerplunk[databricks]
+type = "databricks"
+server_hostname = "${DATABRICKS_HOST}"
+http_path = "${DATABRICKS_HTTP_PATH}"
+access_token = "${DATABRICKS_TOKEN}"
+catalogs = ["main"]
+
 [[warehouse]]
 type = "iceberg"
 name = "lake"                     # the catalogue name SQL uses, e.g. lake.sales.orders
@@ -265,7 +287,7 @@ Each result is a test in the suite (`test_verify`, `test_realworld`, `test_airfl
 ### Not Yet (v1)
 
 - Dagster op-based jobs (`@op` and `@job` graphs) and sensors.
-- Snowflake, BigQuery and Databricks metadata connectors as optional extras.
+- Testing the Databricks connector against a real workspace.
 - Column-level lineage for dbt Python models and through UDFs.
 - `verify` against sampled remote warehouses (Snowflake, BigQuery, Databricks).
 - Incremental warehouse metadata (it is re-read on every build; it is fast for local warehouses but not for large remote ones).
@@ -360,7 +382,7 @@ uv run pytest --cov                             # everything, with branch covera
 |------|-------|----------------|
 | Unit | `test_graph`, `test_sql`, `test_dbt`, `test_airflow`, `test_report`, `test_skill`, ... | Each module, including lineage through CTEs, joins, aliases, `SELECT *`, unions and window functions |
 | Property-based | `test_properties` | Invariants on generated inputs with Hypothesis: impact and trace are inverse, lineage matches generated CTE chains in seven dialects, Airflow dependencies match generated DAGs, no text crashes the SQL analysis |
-| Integration | `test_warehouse`, `test_build` | DuckDB, Postgres and Iceberg (SQL and REST catalogs) for real; builds of projects with and without dbt |
+| Integration | `test_warehouse`, `test_build`, `test_cloud_warehouses` | DuckDB, Postgres and Iceberg (SQL and REST catalogs) for real; Snowflake against fakesnow and BigQuery against its emulator; Databricks against a stub; builds of projects with and without dbt |
 | End to end | `test_build`, `test_cli`, `test_query`, `test_mcp` | The example built with real dbt, every CLI command, the Python API, and the MCP server in process and over stdio |
 | Golden files | `test_golden`, `tests/golden/` | The exact text of the CLI output and REPORT.md; regenerate with `KERPLUNK_UPDATE_GOLDEN=1` and review the diff |
 | Browser | `test_browser` | graph.html in Chromium: selection, column lineage, search, hostile text, a 400-relation graph |

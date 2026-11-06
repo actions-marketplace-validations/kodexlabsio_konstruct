@@ -24,7 +24,7 @@ from kerplunk.config import (
 )
 from kerplunk.graph import RELATION_KINDS, Graph, Node, relation_key
 from kerplunk.sql import PLACEHOLDER, StatementLineage, analyse, dialect_for, strip_templating
-from kerplunk.warehouse import RelationMeta
+from kerplunk.warehouse import MissingDriver, RelationMeta
 
 log = logging.getLogger(__name__)
 
@@ -295,6 +295,17 @@ class Builder:
                 relations = connector.fetch()
             except ConfigError:
                 raise
+            except MissingDriver as error:
+                self.graph.warn(f"warehouse {warehouse.describe(self.config.root)}: {error}")
+                self.sources.append(
+                    {
+                        "input": warehouse.type,
+                        "name": warehouse.describe(self.config.root),
+                        "status": "failed",
+                        "note": str(error),
+                    }
+                )
+                continue
             except Exception as error:  # any driver error becomes a warning
                 message = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
                 self.graph.warn(f"warehouse {warehouse.describe(self.config.root)}: {message}")

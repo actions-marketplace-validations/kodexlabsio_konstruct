@@ -98,6 +98,7 @@ jobs:
       KERPLUNK_REQUIRE_SERVICES: '1'
       HYPOTHESIS_PROFILE: ci
       KERPLUNK_BROWSER_CHANNEL: chrome
+      KERPLUNK_TEST_BIGQUERY_ENDPOINT: http://localhost:9050
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -110,6 +111,10 @@ jobs:
 
       - name: Install dependencies
         run: uv sync
+
+      # Started by hand because it needs a --project argument, which service containers cannot pass.
+      - name: Start the BigQuery emulator
+        run: docker run -d -p 9050:9050 ghcr.io/goccy/bigquery-emulator:latest --project=test
 
       - name: Wait for the Iceberg REST catalog
         run: |
@@ -269,3 +274,21 @@ jobs:
         run: >-
           uv run --with dagster --with dagster-dbt --with dagster-duckdb
           python -m pytest tests/test_dagster.py -m dagster_parity
+
+  snowflake-emulated:
+    name: Snowflake connector against fakesnow
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Run the Snowflake tests
+        run: >-
+          uv run --with fakesnow --with "snowflake-connector-python<5"
+          python -m pytest tests/test_cloud_warehouses.py -m snowflake

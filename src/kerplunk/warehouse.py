@@ -124,15 +124,15 @@ class DuckDBConnector:
         return relations
 
 
-def _duckdb_struct_fields(name: str, dtype: str | None) -> list[ColumnMeta]:
-    """Fields of a DuckDB STRUCT column as dotted columns (``address.city``), recursively."""
+def struct_fields(name: str, dtype: str | None, dialect: str = "duckdb") -> list[ColumnMeta]:
+    """Fields of a STRUCT column as dotted columns (``address.city``), recursively."""
     if not dtype or not dtype.upper().startswith("STRUCT"):
         return []
     from sqlglot import exp
     from sqlglot.errors import SqlglotError
 
     try:
-        built = exp.DataType.build(dtype, dialect="duckdb")
+        built = exp.DataType.build(dtype, dialect=dialect)
     except (SqlglotError, ValueError):
         return []
     fields: list[ColumnMeta] = []
@@ -140,10 +140,14 @@ def _duckdb_struct_fields(name: str, dtype: str | None) -> list[ColumnMeta]:
         if not isinstance(field_def, exp.ColumnDef) or not isinstance(field_def.kind, exp.DataType):
             continue
         child = f"{name}.{field_def.name}"
-        child_type = field_def.kind.sql(dialect="duckdb")
+        child_type = field_def.kind.sql(dialect=dialect)
         fields.append(ColumnMeta(child, child_type, None, {"nested": True}))
-        fields.extend(_duckdb_struct_fields(child, child_type))
+        fields.extend(struct_fields(child, child_type, dialect))
     return fields
+
+
+def _duckdb_struct_fields(name: str, dtype: str | None) -> list[ColumnMeta]:
+    return struct_fields(name, dtype, "duckdb")
 
 
 @dataclass
@@ -311,3 +315,202 @@ def _flatten_fields(fields: Any, prefix: str, identifier_ids: set[int]) -> Itera
             yield from _flatten_fields(field_type.element_type.fields, f"{name}.element.", identifier_ids)
         elif isinstance(field_type, MapType) and isinstance(field_type.value_type, StructType):
             yield from _flatten_fields(field_type.value_type.fields, f"{name}.value.", identifier_ids)
+
+
+class MissingDriver(Exception):
+    """A warehouse needs an optional extra: pip install 'kerplunk[snowflake]' and so on."""
+
+
+def _driver(module: str, extra: str) -> Any:
+    import importlib
+
+    try:
+        return importlib.import_module(module)
+    except ImportError as error:
+        raise MissingDriver(f"install the {extra} extra: uv tool install 'kerplunk[{extra}]'") from error
+
+
+def _information_schema(
+    cursor: Any,
+    catalog: str,
+    schemas: set[str] | None,
+    dialect: str,
+    column_type: str = "data_type",
+) -> list[RelationMeta]:
+    """Tables, views, columns and comments from one catalogue's information_schema."""
+
+    def rows(sql: str) -> list[tuple[Any, ...]]:
+        cursor.execute(sql)
+        return list(cursor.fetchall())
+
+    prefix = f"{catalog}.information_schema" if catalog else "information_schema"
+    tables = rows(
+        f"select table_catalog, table_schema, table_name, table_type, comment from {prefix}.tables "
+        "where lower(table_schema) <> 'information_schema' order by 1, 2, 3"
+    )
+    columns: dict[tuple[str, str, str], list[ColumnMeta]] = {}
+    for table_catalog, schema, table, name, dtype, comment, _ in rows(
+        f"select table_catalog, table_schema, table_name, column_name, {column_type}, comment, ordinal_position "
+        f"from {prefix}.columns where lower(table_schema) <> 'information_schema' order by 1, 2, 3, 7"
+    ):
+        key = (str(table_catalog), str(schema), str(table))
+        columns.setdefault(key, []).extend(
+            [ColumnMeta(str(name), dtype, comment), *struct_fields(str(name), dtype, dialect)]
+        )
+    views = {
+        (str(c), str(s), str(t)): definition
+        for c, s, t, definition in rows(
+            f"select table_catalog, table_schema, table_name, view_definition from {prefix}.views "
+            "where lower(table_schema) <> 'information_schema'"
+        )
+    }
+    listed = {(str(c), str(s), str(t)) for c, s, t, _, _ in tables}
+    # Some catalogues list views only in information_schema.views.
+    tables += [(c, s, t, "VIEW", None) for (c, s, t) in views if (c, s, t) not in listed]
+    relations = []
+    for table_catalog, schema, table, table_type, comment in tables:
+        key = (str(table_catalog), str(schema), str(table))
+        if schemas and str(schema).lower() not in schemas:
+            continue
+        view = views.get(key)
+        relations.append(
+            RelationMeta(
+                parts=key,
+                kind="view" if "VIEW" in str(table_type).upper() else "table",
+                comment=comment or None,
+                columns=columns.get(key, []),
+                view_sql=_view_statement(key, view),
+            )
+        )
+    return relations
+
+
+def _view_statement(parts: tuple[str, ...], definition: Any) -> str | None:
+    """A CREATE VIEW statement: Snowflake stores the whole statement, others only the query."""
+    if not definition:
+        return None
+    text = str(definition).strip().rstrip(";")
+    if text.lower().startswith("create"):
+        return text
+    return f"create view {'.'.join(parts)} as {text}"
+
+
+@dataclass
+class SnowflakeConnector:
+    """Snowflake through snowflake-connector-python (the ``snowflake`` extra). ``options`` are passed
+    to ``snowflake.connector.connect``; ``databases`` defaults to the connection's database."""
+
+    options: dict[str, Any]
+    databases: list[str] | None = None
+    schemas: list[str] | None = None
+    label: str = "snowflake"
+    dialect: str | None = "snowflake"
+    default_schema: str | None = None
+
+    def fetch(self) -> list[RelationMeta]:
+        connector = _driver("snowflake.connector", "snowflake")
+        connection = connector.connect(**self.options)
+        try:
+            cursor = connection.cursor()
+            databases = self.databases or [str(self.options.get("database") or "")]
+            relations = []
+            for database in databases:
+                relations += _information_schema(cursor, database, _schemas_filter(self.schemas), "snowflake")
+            if relations:
+                self.default_schema = str(self.options.get("schema") or "public")
+            return relations
+        finally:
+            connection.close()
+
+
+@dataclass
+class DatabricksConnector:
+    """Databricks SQL warehouses through databricks-sql-connector (the ``databricks`` extra), reading
+    Unity Catalog's information_schema for each catalogue."""
+
+    options: dict[str, Any]
+    catalogs: list[str] | None = None
+    schemas: list[str] | None = None
+    label: str = "databricks"
+    dialect: str | None = "databricks"
+    default_schema: str | None = None
+
+    def fetch(self) -> list[RelationMeta]:
+        sql = _driver("databricks.sql", "databricks")
+        connection = sql.connect(**self.options)
+        try:
+            cursor = connection.cursor()
+            catalogs = self.catalogs or [str(self.options.get("catalog") or "main")]
+            relations = []
+            for catalog in catalogs:
+                relations += _information_schema(
+                    cursor, catalog, _schemas_filter(self.schemas), "databricks", column_type="full_data_type"
+                )
+            if relations:
+                self.default_schema = str(self.options.get("schema") or "default")
+            return relations
+        finally:
+            connection.close()
+
+
+@dataclass
+class BigQueryConnector:
+    """BigQuery through google-cloud-bigquery (the ``bigquery`` extra), using the client API, which
+    also returns nested RECORD fields and their descriptions. ``endpoint`` points it at an emulator."""
+
+    project: str
+    datasets: list[str] | None = None
+    location: str | None = None
+    endpoint: str | None = None
+    label: str = "bigquery"
+    dialect: str | None = "bigquery"
+    default_schema: str | None = None
+
+    def client(self) -> Any:
+        bigquery = _driver("google.cloud.bigquery", "bigquery")
+        if self.endpoint:
+            from google.api_core.client_options import ClientOptions
+            from google.auth.credentials import AnonymousCredentials
+
+            return bigquery.Client(
+                project=self.project,
+                credentials=AnonymousCredentials(),  # type: ignore[no-untyped-call]
+                client_options=ClientOptions(api_endpoint=self.endpoint),
+            )
+        return bigquery.Client(project=self.project, location=self.location)
+
+    def fetch(self) -> list[RelationMeta]:
+        client = self.client()
+        wanted = _schemas_filter(self.datasets)
+        relations = []
+        for dataset in client.list_datasets(project=self.project):
+            if wanted and dataset.dataset_id.lower() not in wanted:
+                continue
+            for item in client.list_tables(dataset.reference):
+                table = client.get_table(item.reference)
+                kind = "view" if table.table_type in ("VIEW", "MATERIALIZED_VIEW") else "table"
+                parts = (table.project, table.dataset_id, table.table_id)
+                relations.append(
+                    RelationMeta(
+                        parts=parts,
+                        kind=kind,
+                        comment=table.description or None,
+                        columns=list(_bigquery_fields(table.schema, "")),
+                        view_sql=f"create view `{'.'.join(parts)}` as {table.view_query}"
+                        if table.view_query
+                        else None,
+                    )
+                )
+        return relations
+
+
+def _bigquery_fields(fields: Any, prefix: str) -> Iterator[ColumnMeta]:
+    for field_def in fields:
+        name = f"{prefix}{field_def.name}"
+        dtype = field_def.field_type + ("[]" if field_def.mode == "REPEATED" else "")
+        attrs: dict[str, Any] = {"nested": True} if prefix else {}
+        if field_def.mode == "REQUIRED":
+            attrs["required"] = True
+        yield ColumnMeta(name, dtype, field_def.description or None, attrs)
+        if field_def.field_type in ("RECORD", "STRUCT") and field_def.fields:
+            yield from _bigquery_fields(field_def.fields, f"{name}.")

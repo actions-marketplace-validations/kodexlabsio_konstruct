@@ -257,6 +257,26 @@ jobs:
           name: dist
           path: dist
 
+  install-from-github:
+    name: Install as the README describes
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.3
+
+      - name: uv tool install from GitHub
+        run: |
+          uv tool install "git+https://github.com/${{ github.repository }}@${{ github.sha }}"
+          kerplunk --version
+
+      - name: uvx without installing
+        run: uvx --from "git+https://github.com/${{ github.repository }}@${{ github.sha }}" kerplunk --help
+
+      - name: An extra
+        run: uv tool install --force "kerplunk[bigquery] @ git+https://github.com/${{ github.repository }}@${{ github.sha }}"
+
   dagster-parity:
     name: Dagster parser against Dagster
     runs-on: ubuntu-latest

@@ -25,7 +25,7 @@ jobs:
 
       - name: Install kerplunk and dbt
         run: |
-          uv tool install kerplunk
+          uv tool install git+https://github.com/kodexlabsio/kerplunk
           uv tool install dbt-core --with dbt-duckdb
 
       - name: Parse the dbt project

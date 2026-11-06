@@ -1,3 +1,14 @@
+## v0.3.0 (2026-11-06)
+
+### Feat
+
+- **dagster**: Parse Dagster assets, dbt assets, jobs and schedules statically
+- **dbt**: Report dbt YAML changes in kerplunk diff
+
+### Fix
+
+- **graph**: Report the tasks that read changed data in impact
+
 ## v0.2.0 (2026-11-06)
 
 ### Feat

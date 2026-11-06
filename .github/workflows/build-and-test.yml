@@ -106,6 +106,15 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Wait for the Iceberg REST catalog
+        run: |
+          for _ in $(seq 1 30); do
+            curl -fs http://localhost:8181/v1/config >/dev/null && exit 0
+            sleep 2
+          done
+          echo "The Iceberg REST catalog did not start"
+          exit 1
+
       - name: Run tests
         run: uv run pytest
 

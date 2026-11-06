@@ -339,3 +339,69 @@ def test_column_aware_selection_is_sound(built_jaffle: Path, tmp_path: Path) -> 
     assert "stg_customers" in selection.modified_plus
     assert len(selection.models) < len(selection.modified_plus)
     assert "not_null_orders_amount" in selection.tests
+
+
+def test_dbt_yaml_changes() -> None:
+    from kerplunk.diff import compare_yaml
+
+    before = """
+version: 2
+sources:
+  - name: app
+    tables: [{name: events}]
+models:
+  - name: orders
+    description: One row per order
+    data_tests: [{dbt_utils.expression_is_true: {arguments: {expression: "amount >= 0"}}}]
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+      - name: amount
+        description: Order value
+        tests: [not_null]
+exposures:
+  - name: dashboard
+    depends_on: ["ref('orders')", "ref('customers')"]
+"""
+    after = """
+version: 2
+sources:
+  - name: app
+    tables: [{name: events}, {name: sessions}]
+models:
+  - name: orders
+    description: One row per order, excluding returns
+    columns:
+      - name: order_id
+        data_tests: [unique]
+      - name: amount
+        description: Order value
+        tests: [not_null, {accepted_range: {min_value: 0}}]
+exposures:
+  - name: dashboard
+    depends_on: ["ref('customers')"]
+"""
+    change = compare_yaml("models/schema.yml", before, after)
+    assert change.tests_removed == ["orders.order_id: not_null", "orders: dbt_utils.expression_is_true"]
+    assert change.tests_added == ["orders.amount: accepted_range"]
+    assert change.sources_added == ["app.sessions"]
+    assert change.descriptions == ["description changed: orders"]
+    assert change.exposures == [
+        "exposure dashboard now depends on ref('customers') (was ref('customers'), ref('orders'))"
+    ]
+    assert compare_yaml("x.yml", "not: [valid", "models: []").changed is False
+
+
+def test_yaml_changes_appear_in_the_diff(repo: Path) -> None:
+    (repo / "schema.yml").write_text(
+        "version: 2\nmodels:\n  - name: ltv\n    columns:\n      - name: total\n        tests: [not_null]\n"
+    )
+    git(repo, "add", "schema.yml")
+    git(repo, "commit", "-qm", "tests")
+    (repo / "schema.yml").write_text(
+        "version: 2\nmodels:\n  - name: ltv\n    columns:\n      - name: total\n"
+    )
+    result = Project(repo).diff(base="HEAD")
+    assert result.summary() == "1 dbt test removed."
+    assert "test removed: ltv.total: not_null" in str(result)
+    assert "- test removed: ltv.total: not_null" in result.markdown()

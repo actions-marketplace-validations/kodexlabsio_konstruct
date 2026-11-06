@@ -131,6 +131,122 @@ class DagChange:
 
 
 @dataclass
+class YamlChange:
+    """What changed in one dbt YAML file: tests, descriptions, sources and exposures."""
+
+    path: str
+    tests_added: list[str] = field(default_factory=list)
+    tests_removed: list[str] = field(default_factory=list)
+    descriptions: list[str] = field(default_factory=list)
+    sources_added: list[str] = field(default_factory=list)
+    sources_removed: list[str] = field(default_factory=list)
+    exposures: list[str] = field(default_factory=list)
+
+    @property
+    def changed(self) -> bool:
+        return any(
+            (
+                self.tests_added,
+                self.tests_removed,
+                self.descriptions,
+                self.sources_added,
+                self.sources_removed,
+                self.exposures,
+            )
+        )
+
+    def lines(self) -> list[str]:
+        return [
+            *(f"test removed: {t}" for t in self.tests_removed),
+            *(f"test added: {t}" for t in self.tests_added),
+            *(f"source table removed: {s}" for s in self.sources_removed),
+            *(f"source table added: {s}" for s in self.sources_added),
+            *self.exposures,
+            *self.descriptions,
+        ]
+
+
+def _test_names(entries: Any) -> set[str]:
+    names = set()
+    for entry in entries or []:
+        if isinstance(entry, str):
+            names.add(entry)
+        elif isinstance(entry, dict) and entry:
+            key = next(iter(entry))
+            value = entry[key]
+            label = str(entry.get("test_name") or entry.get("name") or key)
+            if isinstance(value, dict) and value.get("name"):
+                label = f"{key} ({value['name']})"
+            names.add(label)
+    return names
+
+
+def _yaml_facts(text: str | None) -> dict[str, Any]:
+    """Tests, descriptions, source tables and exposures declared in a dbt YAML file."""
+    import yaml
+
+    facts: dict[str, Any] = {"tests": set(), "descriptions": {}, "sources": set(), "exposures": {}}
+    try:
+        data = yaml.safe_load(text or "") or {}
+    except yaml.YAMLError:
+        return facts
+    if not isinstance(data, dict):
+        return facts
+    for kind in ("models", "seeds", "snapshots"):
+        for model in data.get(kind) or []:
+            if not isinstance(model, dict) or not model.get("name"):
+                continue
+            name = str(model["name"])
+            facts["descriptions"][name] = (model.get("description") or "").strip()
+            for test in _test_names(model.get("data_tests") or model.get("tests")):
+                facts["tests"].add(f"{name}: {test}")
+            for column in model.get("columns") or []:
+                if not isinstance(column, dict) or not column.get("name"):
+                    continue
+                label = f"{name}.{column['name']}"
+                facts["descriptions"][label] = (column.get("description") or "").strip()
+                for test in _test_names(column.get("data_tests") or column.get("tests")):
+                    facts["tests"].add(f"{label}: {test}")
+    for source in data.get("sources") or []:
+        if isinstance(source, dict):
+            for table in source.get("tables") or []:
+                if isinstance(table, dict) and table.get("name"):
+                    facts["sources"].add(f"{source.get('name')}.{table['name']}")
+    for exposure in data.get("exposures") or []:
+        if isinstance(exposure, dict) and exposure.get("name"):
+            facts["exposures"][str(exposure["name"])] = sorted(map(str, exposure.get("depends_on") or []))
+    return facts
+
+
+def compare_yaml(path: str, before: str | None, after: str | None) -> YamlChange:
+    old, new = _yaml_facts(before), _yaml_facts(after)
+    change = YamlChange(path)
+    change.tests_added = sorted(new["tests"] - old["tests"])
+    change.tests_removed = sorted(old["tests"] - new["tests"])
+    change.sources_added = sorted(new["sources"] - old["sources"])
+    change.sources_removed = sorted(old["sources"] - new["sources"])
+    for name in sorted(set(old["descriptions"]) | set(new["descriptions"])):
+        was, now = old["descriptions"].get(name), new["descriptions"].get(name)
+        if was and now and was != now:
+            change.descriptions.append(f"description changed: {name}")
+        elif now and not was:
+            change.descriptions.append(f"description added: {name}")
+        elif was and not now:
+            change.descriptions.append(f"description removed: {name}")
+    for name in sorted(set(old["exposures"]) | set(new["exposures"])):
+        if name not in old["exposures"]:
+            change.exposures.append(f"exposure added: {name}")
+        elif name not in new["exposures"]:
+            change.exposures.append(f"exposure removed: {name}")
+        elif old["exposures"][name] != new["exposures"][name]:
+            change.exposures.append(
+                f"exposure {name} now depends on {', '.join(new['exposures'][name])} "
+                f"(was {', '.join(old['exposures'][name])})"
+            )
+    return change
+
+
+@dataclass
 class Selection:
     """The dbt nodes a change actually needs rebuilt and tested, column by column, against what
     `state:modified+` would build."""
@@ -179,6 +295,7 @@ class Diff:
     relations: list[RelationChange] = field(default_factory=list)
     dags: list[DagChange] = field(default_factory=list)
     other: list[str] = field(default_factory=list)
+    yaml: list[YamlChange] = field(default_factory=list)
 
     @property
     def source_files(self) -> list[str]:
@@ -207,12 +324,14 @@ class Diff:
             "conditions": sum(1 for r in self.relations if r.conditions_added or r.conditions_removed),
             "breaking": len(self.breaking),
             "dags": len(self.dags),
+            "tests_removed": sum(len(y.tests_removed) for y in self.yaml),
+            "tests_added": sum(len(y.tests_added) for y in self.yaml),
             "exposures": len(exposures),
         }
 
     def summary(self) -> str:
         c = self.counts()
-        if not c["relations"] and not c["dags"]:
+        if not c["relations"] and not c["dags"] and not self.yaml:
             return "No change to models, SQL or DAGs."
         parts = []
         if c["breaking"]:
@@ -226,6 +345,10 @@ class Diff:
             )
         if c["dags"]:
             parts.append(f"{c['dags']} DAG{'s' if c['dags'] != 1 else ''} changed")
+        if c["tests_removed"]:
+            parts.append(f"{c['tests_removed']} dbt test{'s' if c['tests_removed'] != 1 else ''} removed")
+        if c["tests_added"]:
+            parts.append(f"{c['tests_added']} dbt test{'s' if c['tests_added'] != 1 else ''} added")
         if c["exposures"]:
             parts.append(f"{c['exposures']} exposure{'s' if c['exposures'] != 1 else ''} affected")
         text = ", ".join(parts)
@@ -254,6 +377,7 @@ class Diff:
             "relations": [relation(r) for r in self.relations if r.changed or r.note],
             "dags": [d.__dict__ for d in self.dags],
             "other": self.other,
+            "yaml": [y.__dict__ for y in self.yaml if y.changed],
             "dbt": self.selection.to_dict(),
         }
 
@@ -309,6 +433,9 @@ class Diff:
                 ("sql", dag.sql_changed),
             ):
                 lines += [f"  {label:<8} {item}" for item in items]
+        for yaml_change in self.yaml:
+            lines += ["", f"{yaml_change.path}  (dbt YAML)"]
+            lines += [f"  {line}" for line in yaml_change.lines()]
         if self.selection.modified_plus:
             lines += ["", f"dbt: {self.selection.summary()}", f"  {self.selection.command()}"]
         if self.other:
@@ -362,6 +489,8 @@ class Diff:
             ]
             if items:
                 lines += [f"**DAG `{dag.dag}`** ({dag.path})", "", *(f"- {i}" for i in items), ""]
+        for yaml_change in self.yaml:
+            lines += [f"**{yaml_change.path}**", "", *(f"- {line}" for line in yaml_change.lines()), ""]
         if self.selection.modified_plus:
             lines += [f"**dbt:** {self.selection.summary()}", "", f"```\n{self.selection.command()}\n```", ""]
         lines.append(
@@ -459,6 +588,10 @@ def diff(graph: Graph, root: Path, *, base: str | None = None, head: str | None 
                 result.relations.append(_compare_model(context, model, in_project, before, after))
         elif in_project.endswith(".sql") and (nodes or before or after):
             result.relations.extend(_compare_sql_file(context, in_project, before, after))
+        elif in_project.endswith((".yml", ".yaml")) and (before or after):
+            yaml_change = compare_yaml(in_project, before, after)
+            if yaml_change.changed:
+                result.yaml.append(yaml_change)
         elif in_project.endswith(".py") and (
             "DAG" in (before or "") + (after or "") or "@dag" in (before or "") + (after or "")
         ):

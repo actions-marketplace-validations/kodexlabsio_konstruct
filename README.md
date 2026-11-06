@@ -80,7 +80,7 @@ kerplunk  /src/jaffle_shop
 | `kerplunk describe <name>` | Columns, types, descriptions, tests and neighbours of one node; for a task, what it runs and its neighbours in the DAG |
 | `kerplunk list [kind ...]` | Every node of the given kinds (`models`, `tables`, `sources`, `tasks`, ...; default all relations) |
 | `kerplunk open` | Open `graph.html` in a browser |
-| `kerplunk diff [--base REF]` | What the working tree (or `--head REF`) changes compared with the base (default: the merge base with main): columns added, removed or changed with their expressions before and after, changed join and filter conditions, breaking changes, DAG changes, and the downstream impact of each. `--format markdown` for a pull request comment, `--fail-on-breaking` for CI |
+| `kerplunk diff [--base REF]` | What the working tree (or `--head REF`) changes compared with the base (default: the merge base with main): columns added, removed or changed with their expressions before and after, changed join and filter conditions, breaking changes, DAG changes, dbt tests, sources and exposures added or removed in YAML, the downstream impact of each, and a column-aware `dbt build --select` that rebuilds only what the change affects. `--format markdown` for a pull request comment, `--fail-on-breaking` for CI |
 | `kerplunk verify` | Test the column lineage against the data in a local DuckDB warehouse by perturbation; writes `VERIFY.md` and `verify.json` and marks confirmed edges in the graph. `--seed`, `--rows`, `--model`, `--strict` |
 | `kerplunk query "<question>"` | Free-text question: ranks nodes by its words and returns them with their connections, plus impact or lineage when the question asks for it. There is no language model in kerplunk; the agent reads the result |
 | `kerplunk install` | Register the `/kerplunk` skill (see Agent Integration) |
@@ -212,11 +212,13 @@ dags/jaffle_shop_daily.py  (DAG jaffle_shop_daily, modified)
   runs     task `dbt_run_marts`: no longer runs orders
 ```
 
+`diff` also works out what dbt has to rebuild: the changed models, the models whose columns, joins or filters are downstream of a changed column, and the tests on them. It prints that as a `dbt build --select` command (or just the selection, with `--format selector`) and compares it with what `state:modified+` would build: on the example above it builds 3 of the 4 models, because the reformatted `stg_customers` needs nothing. A test builds the project with dbt before and after a change and checks that every model whose data changed is in the selection. It also reads dbt YAML, reporting tests, sources and exposures added or removed and descriptions changed.
+
 dbt models are compared by rendering their Jinja without dbt (see How Lineage Works), so `diff` needs only the manifest from `dbt parse`, not a warehouse. [`docs/kerplunk-pull-request.yml`](docs/kerplunk-pull-request.yml) is a ready-made GitHub Actions workflow that posts the markdown version as a pull request comment and fails the check on breaking changes.
 
 ## How Much to Trust the Lineage
 
-Static column lineage is a claim about SQL that is rarely checked. `kerplunk verify` checks it against the data, using perturbation (the idea behind perturbation-based provenance): for every dbt model and SQL-built table in a local DuckDB warehouse it copies the model's inputs into memory, perturbs one input column at a time, reruns the model's SQL and records which output columns change.
+Static column lineage is a claim about SQL that is rarely checked. `kerplunk verify` checks it against the data, using perturbation (the idea behind perturbation-based provenance): for every dbt model and SQL-built table in a local DuckDB file or a Postgres database it copies the model's inputs into memory, perturbs one input column at a time, reruns the model's SQL and records which output columns change.
 
 - **Perturbations:** each input column, and each field of a struct column, is shifted (`x * a + b`, a suffix on strings, days added to dates), set to NULL, and shuffled between rows with a seeded permutation. The seed is recorded, so a run can be repeated exactly. The warehouse is read but never written.
 - **Detecting change:** an output column changes if its multiset of values changes; if values only moved between rows (a `ROW_NUMBER()` ordered by the input still yields 1..n), it is compared paired with the columns claimed not to depend on that input; and when a column identifies rows, rows are matched across runs, so changes are seen even when a perturbation also adds or removes rows.
@@ -228,6 +230,7 @@ Results (seed 1729):
 |---------|--------|----------------------|-----------|----------------------------------|-------------|
 | `examples/jaffle_shop` | 6 | 36 | 36 (100%) | 33 | 0 |
 | dbt Labs' jaffle-shop (pinned commit) | 13 | 87 | 87 (100%) | 61 | 0 |
+| `examples/jaffle_shop` on Postgres (built with dbt-postgres) | 5 | 31 | 31 (100%) | not counted | 0 |
 | 300 generated queries on generated data (differential test) | 300 | not counted | not counted | not counted | 0 |
 
 The tests also make sure the verifier catches wrong lineage, not just confirms right lineage: a deleted edge is reported as unexplained, a fabricated edge as not exercised, and a deleted filter reference as an unexplained change in row count. Two further results:
@@ -255,16 +258,15 @@ Each result is a test in the suite (`test_verify`, `test_realworld`, `test_airfl
 - Identifiers are matched case-insensitively. Two relations whose names differ only by case are treated as one.
 - `query` ranks by words, not meaning. It finds `customer_lifetime_value` from "lifetime value" but not from "how much a customer is worth"; the agent is expected to follow up with `search` or `describe`.
 - Struct fields are followed, but not elements of lists or values of maps: `items[1].sku` traces to `items`.
-- `verify` needs the models built in a local DuckDB warehouse; it does not run against Postgres or remote warehouses yet. It perturbs columns one at a time, so influences that need two inputs to change together are not observed.
-- `diff` compares SQL and DAGs; changes to YAML (tests, descriptions, sources) are listed as files but not analysed.
+- `verify` runs against a local DuckDB file or a Postgres database (in a transaction that is rolled back); other warehouses are not supported yet. It perturbs columns one at a time, so influences that need two inputs to change together are not observed.
+- `diff` reads dbt YAML for tests, descriptions, sources and exposures, but not for other configuration (materialisation, contracts, meta).
 
 ### Not Yet (v1)
 
 - Dagster assets and jobs.
 - Snowflake, BigQuery and Databricks metadata connectors as optional extras.
 - Column-level lineage for dbt Python models and through UDFs.
-- `verify` against Postgres (on a scratch schema) and sampled remote warehouses.
-- `diff` for YAML: tests and exposures added or removed.
+- `verify` against sampled remote warehouses (Snowflake, BigQuery, Databricks).
 - Incremental warehouse metadata (it is re-read on every build; it is fast for local warehouses but not for large remote ones).
 
 ## CI/CD

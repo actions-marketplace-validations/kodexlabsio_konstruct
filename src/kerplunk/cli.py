@@ -290,6 +290,8 @@ def cmd_diff(args: argparse.Namespace, console: Console) -> int:
         console.print(json.dumps(result.to_dict(), indent=2))
     elif args.format == "markdown":
         console.print(result.markdown().rstrip())
+    elif args.format == "selector":
+        console.print(result.selection.selector)
     else:
         console.print(str(result))
     return 1 if args.fail_on_breaking and result.breaking else 0

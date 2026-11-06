@@ -535,6 +535,11 @@ def _select_atom(atom: str, nodes: list[Node], graph: Graph) -> set[str]:
     return result & valid
 
 
+def downstream_of(graph: Graph, start: set[str]) -> set[str]:
+    """Every node downstream of ``start`` through feeds edges (dbt's ``+`` operator)."""
+    return _relatives(graph, start, None, upstream=False)
+
+
 def _relatives(graph: Graph, start: set[str], depth: int | None, *, upstream: bool) -> set[str]:
     found: set[str] = set()
     frontier = set(start)

@@ -285,3 +285,57 @@ def test_dbt_project_diff(built_jaffle: Path, tmp_path: Path) -> None:
     [orders_change] = [r for r in result.relations if r.label == "orders"]
     assert orders_change.note is None
     assert orders_change.conditions_added == ["WHERE: jaffle_shop.main.stg_orders.status <> 'returned'"]
+
+
+@pytest.mark.dbt
+def test_column_aware_selection_is_sound(built_jaffle: Path, tmp_path: Path) -> None:
+    """Build the project with dbt before and after a change and compare every table: each model
+    whose data changed must be in kerplunk's selection, which must still be smaller than
+    state:modified+ when a change touches nothing downstream."""
+    from .conftest import run_dbt
+
+    root = tmp_path / "shop"
+    shutil.copytree(built_jaffle, root)
+    (root / ".gitignore").write_text("target/\nlogs/\nkerplunk-out/\n*.duckdb\n")
+    git(root, "init", "-q")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "base")
+    run_dbt(root, "build")
+
+    def snapshot() -> dict[str, list[str]]:
+        con = duckdb.connect(str(root / "jaffle_shop.duckdb"), read_only=True)
+        try:
+            names = [
+                r[0]
+                for r in con.execute(
+                    "select table_name from information_schema.tables where table_schema = 'main'"
+                ).fetchall()
+            ]
+            return {
+                name: sorted(map(repr, con.execute(f'select * from main."{name}"').fetchall()))
+                for name in names
+            }
+        finally:
+            con.close()
+
+    before = snapshot()
+    payments = root / "models" / "staging" / "stg_payments.sql"
+    payments.write_text(
+        payments.read_text().replace("amount / 100 as amount", "amount / 100.0 * 1.2 as amount")
+    )
+    customers = root / "models" / "staging" / "stg_customers.sql"
+    customers.write_text(customers.read_text().replace("    select\n", "    SELECT\n"))
+    run_dbt(root, "build")
+    after = snapshot()
+    changed_tables = {name for name in after if before.get(name) != after[name]}
+
+    run_dbt(root, "docs", "generate")
+    project = Project(root)
+    project.build(run_dbt=False)
+    selection = project.diff(base="HEAD").selection
+    assert changed_tables == {"stg_payments", "orders", "customers"}
+    assert changed_tables <= set(selection.models)
+    assert "stg_customers" not in selection.models
+    assert "stg_customers" in selection.modified_plus
+    assert len(selection.models) < len(selection.modified_plus)
+    assert "not_null_orders_amount" in selection.tests

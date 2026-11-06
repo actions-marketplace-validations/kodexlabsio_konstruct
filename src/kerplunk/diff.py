@@ -99,6 +99,7 @@ class RelationChange:
     label: str
     kind: str
     status: str
+    node_id: str | None = None
     columns: list[ColumnChange] = field(default_factory=list)
     conditions_added: list[str] = field(default_factory=list)
     conditions_removed: list[str] = field(default_factory=list)
@@ -129,10 +130,51 @@ class DagChange:
 
 
 @dataclass
+class Selection:
+    """The dbt nodes a change actually needs rebuilt and tested, column by column, against what
+    `state:modified+` would build."""
+
+    models: list[str] = field(default_factory=list)
+    tests: list[str] = field(default_factory=list)
+    modified_plus: list[str] = field(default_factory=list)
+
+    @property
+    def selector(self) -> str:
+        return " ".join([*self.models, *self.tests])
+
+    def command(self) -> str:
+        return f"dbt build --select {self.selector}" if self.selector else "nothing to build"
+
+    def summary(self) -> str:
+        total = len(self.modified_plus)
+        plural = "s" if total != 1 else ""
+        if not total:
+            return "No dbt model changed."
+        if not self.models:
+            return (
+                "Nothing to build: no column or condition changed in a way dbt would see "
+                f"(state:modified+ would build {total} model{plural})."
+            )
+        tests = len(self.tests)
+        return f"Build {len(self.models)} of the {total} model{plural} state:modified+ would, and {tests} test{'s' if tests != 1 else ''}."
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "models": self.models,
+            "tests": self.tests,
+            "selector": self.selector,
+            "command": self.command(),
+            "state_modified_plus": self.modified_plus,
+            "summary": self.summary(),
+        }
+
+
+@dataclass
 class Diff:
     base: str
     head: str
     files: dict[str, str]
+    selection: Selection = field(default_factory=Selection)
     relations: list[RelationChange] = field(default_factory=list)
     dags: list[DagChange] = field(default_factory=list)
     other: list[str] = field(default_factory=list)
@@ -211,6 +253,7 @@ class Diff:
             "relations": [relation(r) for r in self.relations if r.changed or r.note],
             "dags": [d.__dict__ for d in self.dags],
             "other": self.other,
+            "dbt": self.selection.to_dict(),
         }
 
     # Rendering
@@ -265,6 +308,8 @@ class Diff:
                 ("sql", dag.sql_changed),
             ):
                 lines += [f"  {label:<8} {item}" for item in items]
+        if self.selection.modified_plus:
+            lines += ["", f"dbt: {self.selection.summary()}", f"  {self.selection.command()}"]
         if self.other:
             lines += ["", f"Not analysed: {', '.join(self.other)}"]
         return "\n".join(lines)
@@ -316,6 +361,8 @@ class Diff:
             ]
             if items:
                 lines += [f"**DAG `{dag.dag}`** ({dag.path})", "", *(f"- {i}" for i in items), ""]
+        if self.selection.modified_plus:
+            lines += [f"**dbt:** {self.selection.summary()}", "", f"```\n{self.selection.command()}\n```", ""]
         lines.append(
             f"<sub>{c['files']} files compared between `{self.base}` and `{self.head}` by kerplunk. "
             "Expressions are compared with CTEs and aliases inlined, so formatting and renames do not count.</sub>"
@@ -417,7 +464,68 @@ def diff(graph: Graph, root: Path, *, base: str | None = None, head: str | None 
             result.dags.extend(_compare_dag_file(context, repository / path, in_project, before, after))
         else:
             result.other.append(in_project)
+    touched = [n for p in files for n in by_path.get(_in_project(p, prefix), [])]
+    result.selection = select_for(graph, result, touched)
     return result
+
+
+def _in_project(path: str, prefix: Path) -> str:
+    if str(prefix) == ".":
+        return path
+    try:
+        return str(Path(path).relative_to(prefix))
+    except ValueError:
+        return ""
+
+
+def select_for(graph: Graph, result: Diff, touched_nodes: list[Node]) -> Selection:
+    """Column-aware dbt selection: the changed models, the models whose columns, joins or filters
+    are downstream of a changed column (or of changed row logic), and the tests on any of them."""
+
+    def is_dbt(node: Node | None) -> bool:
+        return node is not None and "dbt" in node.origins and node.kind in ("model", "snapshot", "seed")
+
+    def name(node: Node) -> str:
+        return str(node.attrs.get("dbt_name") or node.name)
+
+    modified = {n.id for n in touched_nodes if is_dbt(n)}
+    downstream = dbt.downstream_of(graph, modified)
+    everything = [graph.nodes[i] for i in modified | downstream if i in graph.nodes]
+    selection = Selection(modified_plus=sorted(name(n) for n in everything if is_dbt(n)))
+    models: set[str] = set()
+    tests: set[str] = set()
+
+    def take(steps: list[Any]) -> None:
+        for step in steps:
+            node = step.node
+            if node.kind == "test":
+                tests.add(node.id)
+            elif node.kind == "column":
+                parent = graph.parent_of(node)
+                if parent is not None and is_dbt(parent):
+                    models.add(parent.id)
+                tests.update(e.source for e in graph.in_edges(node.id, "tests"))
+            elif is_dbt(node):
+                models.add(node.id)
+
+    for relation in result.relations:
+        node = graph.nodes.get(relation.node_id or "")
+        if node is None or not is_dbt(node) or relation.status == "removed":
+            continue
+        rows_changed = bool(relation.conditions_added or relation.conditions_removed)
+        if rows_changed:
+            models.add(node.id)
+            take(graph.impact(node))
+        for change in relation.columns:
+            models.add(node.id)
+            column = graph.column(node.id, change.column)
+            if column is not None and change.change != "added":
+                take(graph.impact(column))
+        if relation.columns or rows_changed:
+            tests.update(e.source for e in graph.in_edges(node.id, "tests"))
+    selection.models = sorted(name(graph.nodes[i]) for i in models)
+    selection.tests = sorted(graph.nodes[i].name for i in tests if i in graph.nodes)
+    return selection
 
 
 def _status(before: str | None, after: str | None) -> str:
@@ -432,7 +540,11 @@ def _compare_model(
     context: _Context, node: Node, path: str, before: str | None, after: str | None
 ) -> RelationChange:
     change = RelationChange(
-        path=path, label=context.graph.label(node), kind=node.kind, status=_status(before, after)
+        path=path,
+        label=context.graph.label(node),
+        kind=node.kind,
+        status=_status(before, after),
+        node_id=node.id,
     )
     statements = {}
     for side, text in (("before", before), ("after", after)):

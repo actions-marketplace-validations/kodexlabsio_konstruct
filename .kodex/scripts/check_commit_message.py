@@ -22,6 +22,7 @@ TYPES = {"build", "chore", "ci", "docs", "feat", "fix", "perf", "refactor", "rev
 SCOPES = {
     # Inputs
     "airflow",
+    "dagster",
     "dbt",
     "iceberg",
     "sql",

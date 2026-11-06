@@ -251,3 +251,21 @@ jobs:
         with:
           name: dist
           path: dist
+
+  dagster-parity:
+    name: Dagster parser against Dagster
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Compare static parsing with Dagster's asset graph
+        run: >-
+          uv run --with dagster --with dagster-dbt --with dagster-duckdb
+          python -m pytest tests/test_dagster.py -m dagster_parity

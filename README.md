@@ -63,7 +63,7 @@ kerplunk  /src/jaffle_shop
 | **DuckDB** | Tables, views, columns, types, comments and view definitions, read only | v0 |
 | **Postgres** | Tables, views, materialised views, partitioned tables, columns, types, comments and view definitions, read only | v0 |
 | **Iceberg** | Any PyIceberg catalog, REST included: namespaces, tables, columns (nested struct fields as `parent.child`), field ids, identifier fields, partitioning, current snapshot. Metadata only; no data files are read | v0 |
-| **Dagster** | Assets and jobs | v1 |
+| **Dagster** | Definition files parsed statically (never imported): `@asset`, `@multi_asset` and `@dbt_assets` (with its dbt selection), keys and prefixes, dependencies from parameters, `ins=` and `deps=`, groups, asset jobs with their selections, and schedules. An asset's data is the dbt model, warehouse table or SQL target of the same name, and SQL an asset runs gets column lineage | v0 |
 | **Snowflake, BigQuery, Databricks** | Warehouse metadata, behind optional extras. Their SQL dialects already work for lineage | v1 |
 
 ## Commands
@@ -237,8 +237,9 @@ The tests also make sure the verifier catches wrong lineage, not just confirms r
 
 - **Rendering dbt without dbt:** on jaffle-shop, lineage from kerplunk's own Jinja rendering (used when there is no compiled SQL, and by `diff`) is identical to lineage from dbt's compiled SQL: 113 of 113 column edges and 9 of 9 join and filter references.
 - **Airflow parsing:** the static parser reports exactly the same DAGs, tasks and dependencies as Airflow's own DagBag on every fixture DAG, including TaskGroups, TaskFlow and every dependency syntax.
+- **Dagster parsing:** the static parser gives the same asset keys, dependencies, dbt selection and job selections as Dagster's own asset graph for the fixture definitions.
 
-Each result is a test in the suite (`test_verify`, `test_realworld`, `test_airflow_parity`), so CI checks them on every change.
+Each result is a test in the suite (`test_verify`, `test_realworld`, `test_airflow_parity`, `test_dagster`), so CI checks them on every change.
 
 ## How Lineage Works
 
@@ -263,7 +264,7 @@ Each result is a test in the suite (`test_verify`, `test_realworld`, `test_airfl
 
 ### Not Yet (v1)
 
-- Dagster assets and jobs.
+- Dagster op-based jobs (`@op` and `@job` graphs) and sensors.
 - Snowflake, BigQuery and Databricks metadata connectors as optional extras.
 - Column-level lineage for dbt Python models and through UDFs.
 - `verify` against sampled remote warehouses (Snowflake, BigQuery, Databricks).
@@ -367,6 +368,7 @@ uv run pytest --cov                             # everything, with branch covera
 | Real world | `test_realworld` | dbt Labs' jaffle-shop at a pinned commit (needs network; `KERPLUNK_REALWORLD=1`) |
 | Lineage against data | `test_verify` | `verify` confirms true lineage and catches removed edges, false edges and dropped filters; a differential property test runs generated queries on generated data and requires the static lineage to agree with execution |
 | Change review | `test_diff` | `diff` on real git repositories: formatting and CTE renames are not changes, removed columns still read downstream are breaking, conditions, DAGs, two commits, all output formats, and dbt Jinja rendering |
+| Dagster | `test_dagster` | The Dagster parser, assets joining dbt and warehouse lineage, and parity with Dagster's own asset graph (needs Dagster; see the CI job) |
 | Parity | `test_airflow_parity` | The static Airflow parser against Airflow's own DagBag (needs Airflow; see the file for the command) |
 
 The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end tests build a copy of the example project for real. In CI, `KERPLUNK_REQUIRE_SERVICES=1` turns a missing service or browser into a failure rather than a skip, and `HYPOTHESIS_PROFILE=ci` runs more generated examples.
@@ -380,7 +382,7 @@ The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end 
 
 ### Commits
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/), checked by commitizen and by `.kodex/scripts/check_commit_message.py`, which applies the Kodex Labs rules: a fixed list of scopes, sentence-case subjects, lines of at most 100 characters, and no AI attribution lines. The scopes are `airflow`, `dbt`, `iceberg`, `sql`, `warehouse`, `build`, `graph`, `html`, `lineage`, `query`, `report`, `cli`, `mcp`, `skill`, `examples`, `readme`, `tests`, `ci`, `config`, `deps`, `deps-dev` and `release`.
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/), checked by commitizen and by `.kodex/scripts/check_commit_message.py`, which applies the Kodex Labs rules: a fixed list of scopes, sentence-case subjects, lines of at most 100 characters, and no AI attribution lines. The scopes are `airflow`, `dagster`, `dbt`, `iceberg`, `sql`, `warehouse`, `build`, `graph`, `html`, `lineage`, `query`, `report`, `cli`, `mcp`, `skill`, `examples`, `readme`, `tests`, `ci`, `config`, `deps`, `deps-dev` and `release`.
 
 ### Repository Layout
 

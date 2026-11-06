@@ -81,7 +81,7 @@ exclude = ["^tests/fixtures/"]
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["pyiceberg.*", "duckdb.*", "airflow.*"]
+module = ["pyiceberg.*", "duckdb.*", "airflow.*", "dagster.*", "dagster_dbt.*", "dagster_duckdb.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -95,6 +95,7 @@ markers = [
     "scale: builds a generated project of hundreds of models",
     "realworld: clones and builds a public dbt project (KERPLUNK_REALWORLD=1)",
     "airflow_parity: compares the static parser with Airflow itself (needs apache-airflow)",
+    "dagster_parity: compares the static parser with Dagster itself (needs dagster)",
     "iceberg_rest: needs an Iceberg REST catalog (KERPLUNK_TEST_ICEBERG_URI)",
 ]
 

@@ -139,6 +139,7 @@ class Config:
     run_dbt: bool = True
     dbt_projects: list[Path] | None = None
     dag_paths: list[Path] | None = None
+    dagster_paths: list[Path] | None = None
     sql_paths: list[str] | None = None
     warehouses: list[WarehouseConfig] | None = None
     discover_warehouses: bool = True
@@ -182,6 +183,9 @@ def load_config(root: Path, out_dir: Path | None = None) -> Config:
         run_dbt=bool(dbt.get("run", True)),
         dbt_projects=[root / p for p in dbt["projects"]] if "projects" in dbt else None,
         dag_paths=[root / p for p in airflow["dags"]] if "dags" in airflow else None,
+        dagster_paths=[root / p for p in data.get("dagster", {}).get("paths", [])]
+        if "paths" in data.get("dagster", {})
+        else None,
         sql_paths=list(sql["paths"]) if "paths" in sql else None,
         warehouses=[
             WarehouseConfig(str(w.get("type", "")).lower(), {k: v for k, v in w.items() if k != "type"})
@@ -237,6 +241,28 @@ def discover_dag_files(config: Config) -> list[Path]:
         if looks_like_dag_file(text):
             candidates.append(path)
     return candidates
+
+
+def discover_dagster_files(config: Config) -> list[Path]:
+    from kerplunk.dagster import looks_like_dagster_file
+
+    if config.dagster_paths is not None:
+        files: list[Path] = []
+        for path in config.dagster_paths:
+            if path.is_dir():
+                files.extend(sorted(p for p in path.rglob("*.py") if not set(p.parts) & SKIP_DIRS))
+            elif path.is_file():
+                files.append(path)
+        return files
+    found = []
+    for path in iter_files(config, ".py"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if looks_like_dagster_file(text):
+            found.append(path)
+    return found
 
 
 def discover_sql_files(config: Config, projects: list[DbtProject], used: set[Path]) -> list[Path]:

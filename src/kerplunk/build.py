@@ -13,11 +13,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from kerplunk import __version__, airflow, dbt
+from kerplunk import __version__, airflow, dagster, dbt
 from kerplunk.config import (
     Config,
     ConfigError,
     discover_dag_files,
+    discover_dagster_files,
     discover_sql_files,
     discover_warehouses,
 )
@@ -243,6 +244,7 @@ class Builder:
         schema_key = Cache.key(self.schema_columns())
         self.warehouse_view_lineage(schema_key)
         used_sql = self.load_airflow(schema_key)
+        self.load_dagster(schema_key)
         self.load_sql_files(projects, used_sql, schema_key)
         self.graph.meta["dialect"] = self.dialect
         self.graph.meta["default_catalog"] = self.default_catalog
@@ -590,6 +592,144 @@ class Builder:
                 f"task.{dag.dag_id}.{upstream}", f"task.{dag.dag_id}.{downstream}", "precedes"
             )
 
+    def load_dagster(self, schema_key: str) -> None:
+        files: list[dagster.DagsterFile] = []
+        for path in discover_dagster_files(self.config):
+            self.watch(path)
+            try:
+                content = path.read_bytes()
+            except OSError as error:
+                self.graph.warn(f"dagster: cannot read {self.rel_path(path)}: {error}")
+                continue
+            key = Cache.key("dagster", hashlib.sha256(content).hexdigest(), str(path))
+
+            def compute(path: Path = path) -> Any:
+                try:
+                    return dagster.parse_file(path).to_dict()
+                except SyntaxError as error:
+                    return {"error": f"syntax error on line {error.lineno}: {error.msg}"}
+
+            parsed = self.cache.get_or_compute(key, compute)
+            if "error" in parsed:
+                self.graph.warn(f"dagster: {self.rel_path(path)}: {parsed['error']}")
+                self.sources.append({"input": "dagster", "path": self.rel_path(path), "status": "failed"})
+                continue
+            files.append(dagster.DagsterFile.from_dict(parsed))
+        assets = {a.key: (f, a) for f in files for a in f.assets}
+        data_nodes: dict[str, Node] = {}
+        tasks: dict[str, Node] = {}
+        sql_statements: dict[str, list[StatementLineage]] = {}
+        for file in files:
+            rel = self.rel_path(file.path)
+            for warning in file.warnings:
+                self.graph.warn(f"dagster: {rel}: {warning}")
+            for asset in file.assets:
+                task = self.graph.add_node(
+                    Node(
+                        id=f"task.dagster.{asset.key}",
+                        kind="task",
+                        name=asset.key,
+                        description=asset.description,
+                        path=rel,
+                        origins=["dagster"],
+                        attrs={
+                            k: v
+                            for k, v in {
+                                "dag": asset.group or "dagster",
+                                "orchestrator": "dagster",
+                                "operator": "@dbt_assets" if asset.dbt_select is not None else "@asset",
+                                "function": asset.function,
+                                "line": asset.line,
+                                "kinds": asset.kinds,
+                            }.items()
+                            if v
+                        },
+                    )
+                )
+                tasks[asset.key] = task
+                if asset.dbt_select is not None:
+                    for node in dbt.select_nodes(self.graph, asset.dbt_select, asset.dbt_exclude):
+                        self.graph.add_edge(task.id, node.id, "runs", command="build")
+                    continue
+                statements = (
+                    self.analyse_cached(strip_templating(asset.sql), kind="task", schema_key=schema_key)
+                    if asset.sql
+                    else []
+                )
+                sql_statements[asset.key] = statements
+                # The asset's data is the table its SQL writes, when it writes one.
+                targets = [s.target for s in statements if s.target]
+                data = (
+                    self.relation(targets[-1], "dagster") if targets else self.dagster_data(asset.key, assets)
+                )
+                data_nodes[asset.key] = data
+                self.graph.add_edge(task.id, data.id, "feeds", origin="dagster")
+            self.sources.append(
+                {
+                    "input": "dagster",
+                    "path": rel,
+                    "detail": f"{len(file.assets)} asset{'s' if len(file.assets) != 1 else ''}, "
+                    f"{len(file.jobs)} job{'s' if len(file.jobs) != 1 else ''}",
+                }
+            )
+        for file in files:
+            for asset in file.assets:
+                task = tasks[asset.key]
+                for dep in asset.deps:
+                    upstream = data_nodes.get(dep) or self.dagster_data(dep, assets)
+                    self.graph.add_edge(upstream.id, task.id, "feeds", origin="dagster")
+                    if dep in tasks:
+                        self.graph.add_edge(tasks[dep].id, task.id, "precedes")
+                for statement in sql_statements.get(asset.key, []):
+                    self.task_statement(statement, task, f"dagster asset {asset.key}")
+            for job in file.jobs:
+                dag = self.graph.add_node(
+                    Node(
+                        id=f"dag.{job.name}",
+                        kind="dag",
+                        name=job.name,
+                        description=job.description,
+                        path=self.rel_path(file.path),
+                        origins=["dagster"],
+                        attrs={
+                            k: v
+                            for k, v in {"schedule": job.schedule, "orchestrator": "dagster"}.items()
+                            if v
+                        },
+                    )
+                )
+                for key in _selected_assets(job.selection, assets):
+                    if key in tasks:
+                        self.graph.add_edge(dag.id, tasks[key].id, "runs")
+        self.inputs["dagster_assets"] = sum(len(f.assets) for f in files)
+
+    def dagster_data(
+        self, key: str, assets: dict[str, tuple[dagster.DagsterFile, dagster.AssetInfo]]
+    ) -> Node:
+        """The data an asset key stands for: a dbt node (dagster-dbt keys models by name and sources
+        by source and table), a warehouse table, or else a table node for the asset itself."""
+        parts = key.split("/")
+        if key not in assets or assets[key][1].dbt_select is not None:
+            for node in self.graph.nodes.values():
+                if "dbt" not in node.origins or node.kind not in RELATION_KINDS:
+                    continue
+                if (
+                    node.kind == "source"
+                    and node.attrs.get("source_name") == parts[0]
+                    and node.name == parts[-1]
+                    and len(parts) == 2
+                ):
+                    return node
+                if node.kind != "source" and node.attrs.get("dbt_name") == parts[-1]:
+                    return node
+        found = self.index.find(".".join(parts))
+        if found is not None:
+            return found
+        node = self.graph.add_node(
+            Node(id=f"table.asset:{key}", kind="table", name=key, origins=["dagster"], attrs={"asset": key})
+        )
+        return node
+
     def task_dbt(self, task: airflow.TaskInfo, node: Node, path: str) -> None:
         for invocation in task.dbt:
             if invocation.unsupported:
@@ -675,6 +815,25 @@ class Builder:
                 target.path = target.path or rel
                 self.apply(statement, target=target, origin="sql", label=f"sql {rel}", via=rel)
         self.inputs["sql_files"] = len(files)
+
+
+def _selected_assets(
+    selection: list[str], assets: dict[str, tuple[dagster.DagsterFile, dagster.AssetInfo]]
+) -> list[str]:
+    chosen: list[str] = []
+    for item in selection:
+        if item == "*":
+            chosen.extend(assets)
+        elif item.startswith("group:"):
+            chosen.extend(k for k, (_, a) in assets.items() if a.group == item[6:])
+        elif item.startswith("prefix:"):
+            chosen.extend(k for k in assets if k.startswith(item[7:] + "/"))
+        elif item in assets:
+            chosen.append(item)
+        else:
+            # A dbt model selected by key runs as part of the @dbt_assets function.
+            chosen.extend(k for k, (_, a) in assets.items() if a.dbt_select is not None)
+    return list(dict.fromkeys(chosen))
 
 
 def changed_inputs(graph_path: Path, graph: Graph) -> list[str]:

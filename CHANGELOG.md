@@ -1,3 +1,13 @@
+## v0.9.1 (2026-11-09)
+
+### Fix
+
+- **ci**: Never run dbt in the GitHub Action by default
+
+### Perf
+
+- **lineage**: Build large projects in linear time and update in seconds
+
 ## v0.9.0 (2026-11-09)
 
 ### Feat

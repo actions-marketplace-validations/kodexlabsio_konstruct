@@ -1,6 +1,6 @@
 # Konstruct report
 
-Built <time> from `<root>` by Konstruct 0.11.0 in <seconds>s. SQL dialect: duckdb.
+Built <time> from `<root>` by Konstruct <version> in <seconds>s. SQL dialect: duckdb.
 
 ## Summary
 

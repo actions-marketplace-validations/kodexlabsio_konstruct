@@ -25,7 +25,7 @@ def normalise(text: str, root: Path) -> str:
     text = text.replace(str(root), '<root>').replace(str(root.resolve()), '<root>')
     text = re.sub(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+\-]\d\d:\d\d', '<time>', text)
     text = re.sub(r'in \d+(\.\d+)?s', 'in <seconds>s', text)
-    text = text.replace(f'konstruct {__version__}', 'konstruct <version>')
+    text = re.sub(rf'([Kk]onstruct) {re.escape(__version__)}', r'\1 <version>', text)
     return text
 
 

@@ -161,6 +161,21 @@ class Project:
             )
         return explain(self.graph, node)
 
+    def export(
+        self,
+        fmt: str,
+        *,
+        select: str | None = None,
+        columns: bool = False,
+        namespace: str | None = None,
+    ) -> str:
+        """The graph as OpenLineage JSON lines, Mermaid, Graphviz DOT or CSV (see kerplunk.export),
+        optionally only the lineage of ``select``."""
+        from kerplunk.export import export
+
+        node = query.resolve_one(self.graph, select) if select else None
+        return export(self.graph, fmt, select=node, columns=columns, namespace=namespace)
+
     def list(self, kinds: list[str] | None = None) -> query.Listing:
         return query.list_nodes(self.graph, kinds)
 

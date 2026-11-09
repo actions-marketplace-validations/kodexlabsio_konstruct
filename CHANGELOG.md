@@ -1,3 +1,10 @@
+## v0.11.0 (2026-11-09)
+
+### Refactor
+
+- **html**: Rebuild the graph viewer in Svelte and TypeScript
+- Rename the project to konstruct and flatten the package layout
+
 ## v0.10.2 (2026-11-09)
 
 ### Feat

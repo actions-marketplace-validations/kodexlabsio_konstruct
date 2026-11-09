@@ -1,3 +1,9 @@
+## v0.9.0 (2026-11-09)
+
+### Feat
+
+- **lineage**: Export the graph as OpenLineage, Mermaid, DOT and CSV
+
 ## v0.8.0 (2026-11-09)
 
 ### Feat

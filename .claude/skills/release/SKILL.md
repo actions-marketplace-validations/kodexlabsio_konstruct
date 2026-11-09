@@ -27,6 +27,9 @@ description: Understand or change how Konstruct is versioned and released (prepa
   tags that. Tags are pushed only after the build succeeds. Each release moves `v0` and publishes
   the changelog section, wheel and sdist. A release made from a detached commit reaches main's
   `CHANGELOG.md` with the next prepared pull request, which copies its section from the tag.
+- A run by hand (workflow_dispatch) only finishes a half-done release or tags a prepared version; it
+  never releases from main's head. A run with nothing to release re-points `v0` at the latest
+  release if it lags.
 - **PyPI** is a separate job, off until the `PUBLISH_TO_PYPI` repository variable is `true` and a
   `pypi` environment with trusted publishing exists. Never turn it on without Dom's go-ahead.
 - Never delete or move a published release tag other than `v0`.

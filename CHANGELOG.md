@@ -1,3 +1,11 @@
+## v0.11.2 (2026-11-09)
+
+### Fix
+
+- **sql**: Order a column's sources the same way in every process
+- **graph**: Choose the same path between equal routes on every build
+- Skip fetching the base branch when the repository has no origin
+
 ## v0.11.1 (2026-11-09)
 
 ### Refactor

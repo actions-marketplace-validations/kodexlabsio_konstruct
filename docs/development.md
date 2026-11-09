@@ -103,7 +103,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/), che
 
 ## CI/CD
 
-Build and Test runs on every push to `main` and on pull requests: Ruff and mypy, a commit message check on pull requests, the test suite on Python 3.11, 3.12 and 3.13 against Postgres and Iceberg REST catalog service containers, an end-to-end build of the jaffle_shop example that fails if it takes a minute or more, an install of the built wheel with `uv tool install`, an install from GitHub exactly as this README describes, the real-world jaffle-shop test, and the Airflow parity test. The test job also runs the browser tests in Chromium and fails below 90% branch coverage. Create Release runs automatically after Build and Test passes on a push to `main`, and releases the commit that was tested. commitizen reads the Conventional Commits since the last tag (`fix` gives a patch release, `feat` a minor one, a breaking change the next major, or minor while the version is 0.x), updates `pyproject.toml`, `konstruct/__init__.py`, `uv.lock` and `CHANGELOG.md`, commits `chore(release): Release X.Y.Z`, tags `vX.Y.Z` and publishes a GitHub release with the changelog, wheel and sdist. A push with nothing releasable (only `docs`, `ci`, `test` or `chore` commits) makes no release. It can also be run by hand from the Actions tab to force a patch, minor or major release. Publishing to PyPI is a separate job that stays off until the `PUBLISH_TO_PYPI` repository variable is `true` and a `pypi` environment with trusted publishing exists.
+Build and Test runs on every push to `main` and on pull requests: Ruff and mypy, a commit message check on pull requests, the test suite on Python 3.11, 3.12 and 3.13 against Postgres and Iceberg REST catalog service containers, an end-to-end build of the jaffle_shop example that fails if it takes a minute or more, an install of the built wheel with `uv tool install`, an install from GitHub exactly as this README describes, the real-world jaffle-shop test, and the Airflow parity test. The test job also runs the browser tests in Chromium and fails below 90% branch coverage. main is protected, so a release's version arrives in the pull request that releases: before opening a pull request with a `feat`, `fix`, `perf` or `refactor` change, run `uv run python .kodex/scripts/prepare_release.py --title "<the pull request's title>"`. It reads the releasable commits on `main` since the last tag, adds the title, and sets the next version in `pyproject.toml`, `uv.lock` and `konstruct/__init__.py`, with its section at the top of `CHANGELOG.md` (while the version is 0.x, a patch, or the next minor for a breaking change; from 1.0, `fix` gives a patch, `feat` a minor and a breaking change the major). Create Release runs after Build and Test passes on a push to `main`: when the tested commit carries a version with no tag, it tags `vX.Y.Z`, moves the `v0` tag, and publishes a GitHub release with the changelog section, wheel and sdist. It pushes only tags. A push whose version is already released makes no release, and the next prepared pull request includes its changes. Publishing to PyPI is a separate job that stays off until the `PUBLISH_TO_PYPI` repository variable is `true` and a `pypi` environment with trusted publishing exists.
 
 ```mermaid
 graph LR
@@ -125,7 +125,7 @@ graph LR
     end
 
     subgraph "Release Workflow"
-        Bump[commitizen bump<br/>and changelog]
+        Bump[Tag the version<br/>a pull request set]
         Release[GitHub release]
         PyPI[PyPI<br/>off by default]
     end

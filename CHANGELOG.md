@@ -1,3 +1,13 @@
+## v0.10.1 (2026-11-09)
+
+### Feat
+
+- **lineage**: Find columns that compute the same business idea differently
+
+### Fix
+
+- **release**: Only treat a real breaking-change footer as breaking
+
 ## v0.10.0 (2026-11-09)
 
 ### Feat

@@ -62,7 +62,7 @@ def embedded_json(page: str) -> str:
 
 
 def inline_script(page: str) -> str:
-    match = re.search(r"<script>(.*?)</script>", page, re.S)
+    match = re.search(r'<script type="module">(.*?)</script>', page, re.S)
     assert match is not None
     return match.group(1)
 
@@ -88,18 +88,18 @@ def test_embedded_data_cannot_break_out_of_its_script_tag(tmp_path: Path) -> Non
 
 
 def test_page_references_no_external_resources(tmp_path: Path) -> None:
+    """No attribute, stylesheet rule or import points off the page. (The script contains URLs as
+    plain strings, such as namespace URIs and links in Svelte's error messages; the browser test
+    checks that the page makes no requests at all.)"""
     page = write_html(sample_graph(), tmp_path / "graph.html").read_text(encoding="utf-8")
-    remainder = page.replace(SVG_NAMESPACE, "")
-    assert "http://" not in remainder
-    assert "https://" not in remainder
-    # In-page links only (the skip link), and fonts embedded as data URLs.
-    assert re.findall(r"\b(?:src|href)\s*=\s*\"([^\"]*)\"", remainder) == ["#search"]
-    assert "@import" not in remainder
-    fonts = re.findall(r"url\(data:font/woff2;base64,[A-Za-z0-9+/=]+\)", remainder)
-    assert len(fonts) == 4
-    for font in fonts:
-        remainder = remainder.replace(font, "")
-    assert "url(" not in re.sub(r"url\(#arrow(-hl)?\)", "", remainder)
+    assert re.findall(r"""\b(?:src|href)\s*=\s*["']([^"']*)["']""", page) == ["#search"]
+    assert "@import" not in page
+    urls = re.findall(r"url\(([^)]*)\)", page)
+    assert len([u for u in urls if u.startswith("data:font/woff2;base64,")]) == 4
+    assert all(u.startswith(("data:", "#")) for u in urls), [
+        u[:40] for u in urls if not u.startswith("data:")
+    ]
+    assert "fetch(" not in page and "XMLHttpRequest" not in page
 
 
 def test_column_formulas_and_conditions_are_embedded(tmp_path: Path) -> None:
@@ -123,16 +123,18 @@ def test_column_formulas_and_conditions_are_embedded(tmp_path: Path) -> None:
 
 
 def test_the_viewer_assets_follow_the_design_rules() -> None:
-    """DESIGN.md: Manrope and JetBrains Mono, no text below 14px, no em dashes in copy."""
+    """DESIGN.md: Manrope and JetBrains Mono, no text below 14px (13.5px eyebrows), no em dashes."""
     from konstruct.html import template
 
     page = template()
-    assert 'font-family: "Manrope"' in page and 'font-family: "JetBrains Mono"' in page
-    sizes = [
+    assert re.search(r'font-family:\s*"?Manrope"?', page) and re.search(
+        r'font-family:\s*"?JetBrains Mono"?', page
+    )
+    sizes = [float(size) for size in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", page)]
+    sizes += [
         float(size)
-        for size in re.findall(r"(?<![\w-])(\d+(?:\.\d+)?)px (?:var\(--font|Manrope|'JetBrains)", page)
+        for size in re.findall(r"(?<![\w.-])(\d+(?:\.\d+)?)px (?:var\(--font|Manrope|'JetBrains)", page)
     ]
-    sizes += [float(size) for size in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", page)]
     assert sizes and min(sizes) >= 13.5
     assert "\u2014" not in page and "\u2013" not in page
 
@@ -142,7 +144,7 @@ def test_inline_script_is_valid_javascript(tmp_path: Path) -> None:
     if node is None:
         pytest.skip("node is not installed")
     page = write_html(sample_graph(), tmp_path / "graph.html").read_text(encoding="utf-8")
-    script = tmp_path / "viewer.js"
+    script = tmp_path / "viewer.mjs"
     script.write_text(inline_script(page), encoding="utf-8")
     result = subprocess.run([node, "--check", str(script)], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr

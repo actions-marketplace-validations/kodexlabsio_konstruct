@@ -360,6 +360,48 @@ jobs:
         if: env.KONSTRUCT_TEST_DATABRICKS_TOKEN == ''
         run: echo "Set the KONSTRUCT_TEST_DATABRICKS_* repository secrets to run these tests."
 
+  viewer:
+    name: Viewer (Svelte and TypeScript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: viewer
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6.1.1
+        with:
+          package_json_file: viewer/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: viewer/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Format
+        run: pnpm format:check
+
+      - name: Type check
+        run: pnpm check
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # konstruct ships the built page so installing it needs no Node.js; it must match the source.
+      - name: The committed build is up to date
+        run: git diff --exit-code -- ../konstruct/viewer/index.html
+
   dagster-parity:
     name: Dagster parser against Dagster
     runs-on: ubuntu-latest

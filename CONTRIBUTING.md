@@ -33,7 +33,8 @@ A pull request is ready when:
 2. **The checks pass.** `uv run ruff check`, `uv run ruff format --check` and `uv run mypy` (strict) are clean, and the pre-push hook has run the tests.
 3. **Output changes are reviewed.** If the CLI's text or `REPORT.md` changes, regenerate the golden files with `KONSTRUCT_UPDATE_GOLDEN=1 uv run pytest tests/test_golden.py` and check the diff is what you meant.
 4. **Performance is no worse.** For changes to the build, SQL analysis or formulas, run `uv run .kodex/scripts/benchmark.py 500` before and after.
-5. **The README says what changed**, if a user would notice it: a new command, option, input or limitation.
+5. **The viewer is rebuilt.** Changes under `viewer/` pass `pnpm check` and `pnpm test`, and the rebuilt `konstruct/viewer/index.html` is committed with them (the pre-commit hook does the rebuild).
+6. **The README says what changed**, if a user would notice it: a new command, option, input or limitation.
 
 ## Commits
 
@@ -41,7 +42,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/) with
 
 ## Code Style
 
-- Typed Python 3.11+, checked by mypy in strict mode.
+- Typed Python 3.11+, checked by mypy in strict mode; the viewer in strict TypeScript and Svelte 5, formatted by Prettier.
 - Prefer small, plain functions to frameworks. konstruct has few dependencies, and new ones need a good reason.
 - Never import or execute user code (DAGs, Dagster definitions, Python models). Parse it.
 - Comments explain why, not what.

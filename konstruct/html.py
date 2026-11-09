@@ -1,14 +1,15 @@
 """Write graph.html: one self-contained, offline, interactive viewer of the graph.
 
-The page is assembled from ``konstruct/viewer`` (``index.html``, ``viewer.css``, ``viewer.js`` and
-the Manrope and JetBrains Mono fonts, both under the SIL Open Font License, embedded as data
-URLs). It embeds ``Graph.to_dict()`` as JSON, plus each column's formula and each relation's
-conditions as computed by :mod:`konstruct.explain`, and loads nothing from the network.
+The viewer is a Svelte and TypeScript app in ``viewer/`` at the root of the repository. Its build
+(``pnpm build``) writes ``konstruct/viewer/index.html``: one file with the script, the styles and
+the Manrope and JetBrains Mono fonts (SIL Open Font License; the licences are in
+``konstruct/viewer/fonts``) inlined. konstruct fills its two placeholders with
+``Graph.to_dict()`` and each column's formula and each relation's conditions from
+:mod:`konstruct.explain`. The page loads nothing from the network.
 """
 
 from __future__ import annotations
 
-import base64
 import json
 from functools import cache
 from importlib import resources
@@ -28,36 +29,14 @@ _JSON_ESCAPES = str.maketrans(
 
 VIEWER_FORMULA_LIMIT = 800
 
-_FONTS = (
-    ("Manrope", 500, "manrope-latin-500-normal.woff2"),
-    ("Manrope", 700, "manrope-latin-700-normal.woff2"),
-    ("Manrope", 800, "manrope-latin-800-normal.woff2"),
-    ("JetBrains Mono", 500, "jetbrains-mono-latin-500-normal.woff2"),
-)
-
-
-def _asset(name: str) -> resources.abc.Traversable:
-    return resources.files("konstruct").joinpath("viewer", name)
-
-
-def _font_faces() -> str:
-    faces = []
-    for family, weight, filename in _FONTS:
-        encoded = base64.b64encode(_asset(f"fonts/{filename}").read_bytes()).decode("ascii")
-        faces.append(
-            f'@font-face {{ font-family: "{family}"; font-weight: {weight}; font-style: normal; '
-            f'font-display: swap; src: url(data:font/woff2;base64,{encoded}) format("woff2"); }}'
-        )
-    return "\n".join(faces)
-
 
 @cache
 def template() -> str:
-    """The page with styles, fonts and script in place, and the data placeholders still open."""
-    style = _asset("viewer.css").read_text(encoding="utf-8").replace("__FONTS__", _font_faces())
-    script = _asset("viewer.js").read_text(encoding="utf-8")
-    page = _asset("index.html").read_text(encoding="utf-8")
-    return page.replace("__STYLE__", style).replace("__SCRIPT__", script)
+    """The built viewer page, with the data placeholders still open."""
+    page = resources.files("konstruct").joinpath("viewer", "index.html").read_text(encoding="utf-8")
+    if _DATA_PLACEHOLDER not in page or _EXPLAIN_PLACEHOLDER not in page:
+        raise RuntimeError("konstruct/viewer/index.html is not a viewer build; run `pnpm build` in viewer/")
+    return page
 
 
 def _embed_json(data: Any) -> str:

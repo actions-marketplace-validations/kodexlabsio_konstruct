@@ -42,12 +42,19 @@ def browser() -> Iterator[Any]:
 def open_page(browser: Any) -> Iterator[Any]:
     pages = []
 
-    def opener(path: Path) -> Any:
+    def opener(path: Path, fragment: str = "") -> Any:
         page = browser.new_page(viewport={"width": 1400, "height": 900})
         page.problems = []
         page.on("pageerror", lambda error: page.problems.append(str(error)))
         page.on("console", lambda m: page.problems.append(m.text) if m.type in ("error", "warning") else None)
-        page.goto(path.as_uri())
+        # The page is offline: anything it requests beyond the file itself is a problem.
+        page.on(
+            "request",
+            lambda r: (
+                page.problems.append(f"request {r.url}") if not r.url.startswith(("file:", "data:")) else None
+            ),
+        )
+        page.goto(path.as_uri() + fragment)
         page.wait_for_selector("#nodes [data-id]")
         pages.append(page)
         return page
@@ -109,6 +116,11 @@ def test_example_graph(jaffle_built_graph: Path, open_page: Any) -> None:
 @pytest.mark.dbt
 def test_deep_links_direction_and_isolate(jaffle_built_graph: Path, open_page: Any) -> None:
     graph = jaffle_built_graph / "konstruct-out" / "graph.html"
+    # A link opened fresh, as from a pull request comment or a bookmark.
+    fresh = open_page(graph, "#term.order_amount")
+    fresh.wait_for_selector("#panel:not([hidden])")
+    assert "Order amount" in fresh.inner_text("#panel h2")
+    assert fresh.evaluate("location.hash") == "#term.order_amount"
     page = open_page(graph)
     page.goto(graph.as_uri() + "#model.jaffle_shop.stg_payments%23amount")
     page.wait_for_selector("#panel:not([hidden])")

@@ -1,0 +1,185 @@
+// Layered layout: layers by longest path over feeds (cycles broken by depth-first search), order
+// within layers by barycentre sweeps, then cards stacked by their heights.
+
+import { byName, type GraphModel, type LayoutEdge } from "./model";
+import type { Point } from "./types";
+
+export const W = 268;
+export const HEAD = 46;
+export const ROW = 28;
+export const PAD = 6;
+export const COL_GAP = 104;
+export const ROW_GAP = 22;
+const SWEEPS = 8;
+
+function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+    const list = map.get(key);
+    if (list) list.push(value);
+    else map.set(key, [value]);
+}
+
+export function computeLayers(ids: string[], links: LayoutEdge[]): Map<string, number> {
+    const succ = new Map(ids.map((id) => [id, [] as string[]]));
+    const hasInput = new Set<string>();
+    for (const e of links) {
+        succ.get(e.source)?.push(e.target);
+        hasInput.add(e.target);
+    }
+    // Edges that close cycles are found by DFS from nodes without inputs, and ignored.
+    const state = new Map<string, number>();
+    const back = new Set<string>();
+    for (const root of ids.filter((id) => !hasInput.has(id)).concat(ids)) {
+        if (state.has(root)) continue;
+        state.set(root, 1);
+        const stack: [string, number][] = [[root, 0]];
+        while (stack.length) {
+            const top = stack[stack.length - 1]!;
+            const next = succ.get(top[0]) ?? [];
+            if (top[1] < next.length) {
+                const t = next[top[1]++]!;
+                const s = state.get(t);
+                if (s === 1) back.add(`${top[0]}\u0000${t}`);
+                else if (!s) {
+                    state.set(t, 1);
+                    stack.push([t, 0]);
+                }
+            } else {
+                state.set(top[0], 2);
+                stack.pop();
+            }
+        }
+    }
+    const indegree = new Map(ids.map((id) => [id, 0]));
+    const forward = new Map(ids.map((id) => [id, [] as string[]]));
+    for (const e of links) {
+        if (back.has(`${e.source}\u0000${e.target}`)) continue;
+        forward.get(e.source)?.push(e.target);
+        indegree.set(e.target, (indegree.get(e.target) ?? 0) + 1);
+    }
+    const layer = new Map(ids.map((id) => [id, 0]));
+    const queue = ids.filter((id) => indegree.get(id) === 0);
+    for (let i = 0; i < queue.length; i++) {
+        const id = queue[i]!;
+        for (const t of forward.get(id) ?? []) {
+            layer.set(t, Math.max(layer.get(t) ?? 0, (layer.get(id) ?? 0) + 1));
+            indegree.set(t, (indegree.get(t) ?? 0) - 1);
+            if (indegree.get(t) === 0) queue.push(t);
+        }
+    }
+    return layer;
+}
+
+/** The visible relations in layers, each layer ordered to reduce crossings. */
+export function computeOrder(model: GraphModel, visible: Set<string>): string[][] {
+    const ids = model.viewNodes
+        .filter((n) => visible.has(n.id))
+        .sort(byName)
+        .map((n) => n.id);
+    const links = model.layoutEdges.filter((e) => visible.has(e.source) && visible.has(e.target));
+    const feeds = links.filter((e) => e.kind === "feeds");
+    const layer = computeLayers(ids, feeds);
+    const at = (id: string): number => layer.get(id) ?? 0;
+    // A node with nothing upstream sits just before the earliest node it feeds.
+    const hasInput = new Set(feeds.map((e) => e.target));
+    const feedsTo = new Map<string, number[]>();
+    for (const e of feeds) if (!hasInput.has(e.source)) push(feedsTo, e.source, at(e.target));
+    for (const [id, targets] of feedsTo) layer.set(id, Math.max(0, Math.min(...targets) - 1));
+    // A task linked only by runs edges sits just before the earliest node it runs.
+    const linked = new Set<string>();
+    for (const e of feeds) {
+        linked.add(e.source);
+        linked.add(e.target);
+    }
+    const runsFrom = new Map<string, number[]>();
+    for (const e of links)
+        if (e.kind === "runs" && !linked.has(e.source)) push(runsFrom, e.source, at(e.target));
+    let shift = 0;
+    for (const targets of runsFrom.values()) if (Math.min(...targets) === 0) shift = 1;
+    if (shift) for (const id of ids) layer.set(id, at(id) + shift);
+    for (const [id, targets] of runsFrom) layer.set(id, Math.min(...targets) + shift - 1);
+    let depth = 0;
+    for (const id of ids) depth = Math.max(depth, at(id));
+    const layers: string[][] = Array.from({ length: depth + 1 }, () => []);
+    for (const id of ids) layers[at(id)]!.push(id);
+    const before = new Map(ids.map((id) => [id, [] as string[]]));
+    const after = new Map(ids.map((id) => [id, [] as string[]]));
+    for (const e of links) {
+        const ls = at(e.source);
+        const lt = at(e.target);
+        if (ls < lt) {
+            after.get(e.source)?.push(e.target);
+            before.get(e.target)?.push(e.source);
+        } else if (ls > lt) {
+            after.get(e.target)?.push(e.source);
+            before.get(e.source)?.push(e.target);
+        }
+    }
+    const pos = new Map<string, number>();
+    const place = (row: string[]): void => row.forEach((id, i) => pos.set(id, i - (row.length - 1) / 2));
+    layers.forEach(place);
+    for (let sweep = 0; sweep < SWEEPS; sweep++) {
+        const down = sweep % 2 === 0;
+        const order = down ? layers : layers.slice().reverse();
+        const neighbours = down ? before : after;
+        for (const row of order) {
+            const centre = new Map<string, number>();
+            for (const id of row) {
+                const list = neighbours.get(id) ?? [];
+                let sum = 0;
+                for (const other of list) sum += pos.get(other) ?? 0;
+                centre.set(id, list.length ? sum / list.length : (pos.get(id) ?? 0));
+            }
+            row.sort((a, b) => (centre.get(a) ?? 0) - (centre.get(b) ?? 0));
+            place(row);
+        }
+    }
+    return layers.filter((row) => row.length);
+}
+
+/** Cards stacked in each layer, centred on zero, given each card's height. */
+export function place(order: string[][], heightOf: (id: string) => number): Map<string, Point> {
+    const coords = new Map<string, Point>();
+    order.forEach((row, layer) => {
+        const heights = row.map(heightOf);
+        const total = heights.reduce((a, b) => a + b, 0) + ROW_GAP * (row.length - 1);
+        let y = -total / 2;
+        row.forEach((id, i) => {
+            const h = heights[i]!;
+            coords.set(id, { x: layer * (W + COL_GAP), y, h });
+            y += h + ROW_GAP;
+        });
+    });
+    return coords;
+}
+
+export interface Bounds {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+}
+
+export function bounds(at: Map<string, Point>): Bounds | null {
+    if (!at.size) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const c of at.values()) {
+        minX = Math.min(minX, c.x);
+        minY = Math.min(minY, c.y);
+        maxX = Math.max(maxX, c.x + W);
+        maxY = Math.max(maxY, c.y + c.h);
+    }
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/** A cubic edge between two anchors; backwards edges loop beneath. */
+export function curve(a: { x: number; y: number }, b: { x: number; y: number }): string {
+    if (b.x <= a.x) {
+        const drop = 40;
+        return `M${a.x},${a.y} C${a.x + 60},${a.y + drop} ${b.x - 60},${b.y + drop} ${b.x},${b.y}`;
+    }
+    const dx = Math.max(40, (b.x - a.x) / 2);
+    return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
+}

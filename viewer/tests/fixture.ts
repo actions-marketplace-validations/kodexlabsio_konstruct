@@ -1,0 +1,53 @@
+import type { GraphData } from "../src/lib/types";
+
+/** raw.orders -> stg_orders -> orders (with a filter on status), a task, and a business term. */
+export const graph: GraphData = {
+    meta: { root: "/work/shop", konstruct_version: "0.11.0", dialect: "duckdb" },
+    nodes: [
+        { id: "source.raw.orders", kind: "source", name: "orders", attrs: { source_name: "raw" } },
+        { id: "source.raw.orders#amount", kind: "column", name: "amount", parent: "source.raw.orders" },
+        { id: "source.raw.orders#status", kind: "column", name: "status", parent: "source.raw.orders" },
+        { id: "model.stg_orders", kind: "model", name: "stg_orders" },
+        { id: "model.stg_orders#amount", kind: "column", name: "amount", parent: "model.stg_orders" },
+        { id: "model.orders", kind: "model", name: "orders" },
+        { id: "model.orders#revenue", kind: "column", name: "revenue", parent: "model.orders" },
+        { id: "model.orders#customer_id", kind: "column", name: "customer_id", parent: "model.orders" },
+        { id: "task.nightly.run", kind: "task", name: "run", attrs: { dag: "nightly" } },
+        {
+            id: "term.revenue",
+            kind: "term",
+            name: "Revenue",
+            description: "Money in.",
+            attrs: { synonyms: ["sales", "turnover"], status: "approved" },
+        },
+    ],
+    edges: [
+        { source: "source.raw.orders", target: "source.raw.orders#amount", kind: "contains" },
+        { source: "source.raw.orders", target: "source.raw.orders#status", kind: "contains" },
+        { source: "model.stg_orders", target: "model.stg_orders#amount", kind: "contains" },
+        { source: "model.orders", target: "model.orders#revenue", kind: "contains" },
+        { source: "model.orders", target: "model.orders#customer_id", kind: "contains" },
+        { source: "source.raw.orders", target: "model.stg_orders", kind: "feeds" },
+        { source: "model.stg_orders", target: "model.orders", kind: "feeds" },
+        {
+            source: "model.stg_orders#amount",
+            target: "source.raw.orders#amount",
+            kind: "derived_from",
+            attrs: { transform: "direct" },
+        },
+        {
+            source: "model.orders#revenue",
+            target: "model.stg_orders#amount",
+            kind: "derived_from",
+            attrs: { transform: "transformed", verified: "confirmed" },
+        },
+        {
+            source: "source.raw.orders#status",
+            target: "model.stg_orders",
+            kind: "feeds",
+            attrs: { role: "reference" },
+        },
+        { source: "task.nightly.run", target: "model.orders", kind: "runs" },
+        { source: "term.revenue", target: "model.orders#revenue", kind: "defines" },
+    ],
+};

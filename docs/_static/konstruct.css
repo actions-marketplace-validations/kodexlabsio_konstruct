@@ -94,4 +94,13 @@ a:hover { color: var(--link-hover); }
     font-weight: 500;
 }
 
-.wy-side-nav-search img.logo { max-width: 72px; padding: 6px 0 2px; }
+/* The theme sizes the logo to the full sidebar (.wy-side-nav-search > a img.logo, max-width
+   100%); this selector is as specific and comes later, so it wins. */
+.wy-side-nav-search > a img.logo,
+.wy-side-nav-search .wy-dropdown > a img.logo {
+    display: block;
+    width: 64px;
+    max-width: 64px;
+    height: auto;
+    margin: 10px auto 4px;
+}

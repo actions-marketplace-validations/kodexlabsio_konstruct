@@ -277,6 +277,62 @@ jobs:
       - name: An extra
         run: uv tool install --force "kerplunk[bigquery] @ git+https://github.com/${{ github.repository }}@${{ github.sha }}"
 
+  action:
+    name: GitHub Action on a breaking and a safe change
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Make a SQL repository with a change to review
+        run: |
+          mkdir -p "$RUNNER_TEMP/shop/sql" && cd "$RUNNER_TEMP/shop"
+          git init -q -b main
+          printf '%s\n' "create table main.ltv as select customer_id, sum(amount) as total" \
+            "from raw.orders where status <> 'void' group by customer_id" > sql/ltv.sql
+          printf '%s\n' "create table main.report as select customer_id, total from main.ltv" > sql/report.sql
+          git add -A && git -c user.name=ci -c user.email=ci@example.com commit -qm base
+          sed -i 's/as total/as revenue/' sql/ltv.sql
+          echo "SHOP=$RUNNER_TEMP/shop" >> "$GITHUB_ENV"
+
+      - name: Review the breaking change
+        id: breaking
+        uses: ./
+        continue-on-error: true
+        with:
+          working-directory: ${{ env.SHOP }}
+          base: HEAD
+          comment: "false"
+
+      - name: The breaking change fails the check
+        env:
+          OUTCOME: ${{ steps.breaking.outcome }}
+          BREAKING: ${{ steps.breaking.outputs.breaking }}
+          SUMMARY: ${{ steps.breaking.outputs.summary }}
+          REPORT: ${{ steps.breaking.outputs.report }}
+        run: |
+          test "$OUTCOME" = failure
+          test "$BREAKING" = 1
+          test "$SUMMARY" = "1 breaking change, 1 column removed, 1 column added."
+          grep -q 'ltv.total. is removed but still read by .report' "$REPORT"
+
+      - name: Update the reader in the same change
+        run: sed -i 's/total/revenue/g' "$SHOP/sql/report.sql"
+
+      - name: Review the safe change
+        id: safe
+        uses: ./
+        with:
+          working-directory: ${{ env.SHOP }}
+          base: HEAD
+          comment: "false"
+
+      - name: The safe change passes
+        env:
+          BREAKING: ${{ steps.safe.outputs.breaking }}
+        run: test "$BREAKING" = 0
+
   dagster-parity:
     name: Dagster parser against Dagster
     runs-on: ubuntu-latest

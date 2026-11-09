@@ -110,6 +110,11 @@ jobs:
         run: |
           git push origin HEAD:main
           git push origin "${{ steps.bump.outputs.tag }}"
+          # GitHub Action users pin the major version (`uses: kodexlabsio/kerplunk@v0`): move it.
+          tag="${{ steps.bump.outputs.tag }}"
+          major="${tag%%.*}"
+          git tag -f "$major" "$tag"
+          git push -f origin "refs/tags/${major}"
 
       - name: Build the sdist and wheel
         if: steps.bump.outputs.released == 'true'

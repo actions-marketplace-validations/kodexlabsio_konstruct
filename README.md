@@ -285,7 +285,37 @@ dags/jaffle_shop_daily.py  (DAG jaffle_shop_daily, modified)
 
 `diff` also works out what dbt has to rebuild: the changed models, the models whose columns, joins or filters are downstream of a changed column, and the tests on them. It prints that as a `dbt build --select` command (or just the selection, with `--format selector`) and compares it with what `state:modified+` would build: on the example above it builds 3 of the 4 models, because the reformatted `stg_customers` needs nothing. A test builds the project with dbt before and after a change and checks that every model whose data changed is in the selection. It also reads dbt YAML, reporting tests, sources and exposures added or removed and descriptions changed.
 
-dbt models are compared by rendering their Jinja without dbt (see How Lineage Works), so `diff` needs only the manifest from `dbt parse`, not a warehouse. [`docs/kerplunk-pull-request.yml`](docs/kerplunk-pull-request.yml) is a ready-made GitHub Actions workflow that posts the markdown version as a pull request comment and fails the check on breaking changes.
+dbt models are compared by rendering their Jinja without dbt (see How Lineage Works), so `diff` needs no warehouse and no credentials. `--json-file` writes the result as JSON beside any format, including the list of breaking changes, for scripts.
+
+### On Pull Requests
+
+kerplunk is also a GitHub Action. It reviews every pull request column by column, posts the review as a comment (updated in place on each push), writes it to the job summary, annotates each breaking change, and fails the check when a change removes a column that something downstream still reads:
+
+```yaml
+# .github/workflows/kerplunk.yml
+name: kerplunk
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  lineage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: kodexlabsio/kerplunk@v0
+```
+
+| Input | Default | Purpose |
+|-------|---------|---------|
+| `working-directory` | `.` | Where the dbt project, SQL or DAGs are |
+| `base` | the pull request's base branch | Commit to compare with |
+| `comment` | `true` | Post the review on the pull request |
+| `fail-on-breaking` | `true` | Fail the check on a breaking change |
+| `build-args` | `--no-warehouse` | Arguments for `kerplunk build` |
+| `extras` | none | kerplunk extras, such as `snowflake` |
+
+The outputs `breaking`, `summary`, `report` (markdown) and `json` let later steps act on the result. CI runs the action against a breaking change and a safe one on every commit. Pin a release (`@v0.7.0`) for a fixed version; `@v0` moves to each new 0.x release. [`docs/kerplunk-pull-request.yml`](docs/kerplunk-pull-request.yml) shows the same steps written out, for adding a `dbt parse` or other setup first.
 
 ## How Much to Trust the Lineage
 

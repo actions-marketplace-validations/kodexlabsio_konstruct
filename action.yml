@@ -1,0 +1,165 @@
+name: kerplunk lineage review
+description: Column-level review of dbt, SQL and DAG changes on pull requests, with breaking changes flagged.
+author: Kodex Labs
+branding:
+  icon: git-pull-request
+  color: blue
+
+inputs:
+  base:
+    description: >-
+      Commit to compare with. Defaults to the pull request's base branch, or the merge base with
+      main outside a pull request.
+    required: false
+    default: ""
+  working-directory:
+    description: The directory holding the dbt project, SQL or DAGs (the repository root by default).
+    required: false
+    default: "."
+  comment:
+    description: Post the review as a pull request comment, updated in place on each push.
+    required: false
+    default: "true"
+  fail-on-breaking:
+    description: Fail the check when the change removes a column that something downstream still reads.
+    required: false
+    default: "true"
+  build-args:
+    description: >-
+      Arguments for `kerplunk build`. The default reads no warehouse, so no credentials are needed;
+      lineage then comes from dbt artefacts, kerplunk's own rendering of dbt models, and the SQL.
+    required: false
+    default: "--no-warehouse"
+  extras:
+    description: kerplunk extras to install, for example `snowflake` or `bigquery,databricks`.
+    required: false
+    default: ""
+  python-version:
+    description: Python version to run kerplunk with.
+    required: false
+    default: "3.12"
+  token:
+    description: Token used to post the comment.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  breaking:
+    description: Number of breaking changes.
+    value: ${{ steps.diff.outputs.breaking }}
+  summary:
+    description: One-line summary of the change.
+    value: ${{ steps.diff.outputs.summary }}
+  report:
+    description: Path to the markdown review.
+    value: ${{ steps.diff.outputs.report }}
+  json:
+    description: Path to the review as JSON.
+    value: ${{ steps.diff.outputs.json }}
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v10.3.3
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install kerplunk
+      shell: bash
+      env:
+        EXTRAS: ${{ inputs.extras }}
+      run: |
+        # The action's own checkout is the kerplunk version to run, so a pinned `@v0.7.0` runs 0.7.0.
+        if [ -n "$EXTRAS" ]; then
+          uv tool install --quiet "kerplunk[${EXTRAS}] @ file://${GITHUB_ACTION_PATH}"
+        else
+          uv tool install --quiet "kerplunk @ file://${GITHUB_ACTION_PATH}"
+        fi
+        kerplunk --version
+
+    - name: Fetch the base branch
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BASE_REF: ${{ github.base_ref }}
+      run: |
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          git fetch --quiet --no-tags --unshallow origin || true
+        fi
+        if [ -n "$BASE_REF" ]; then
+          git fetch --quiet --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+        fi
+
+    - name: Build the graph
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BUILD_ARGS: ${{ inputs.build-args }}
+      run: |
+        # shellcheck disable=SC2086
+        kerplunk build $BUILD_ARGS
+
+    - name: Compare with the base
+      id: diff
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        BASE_REF: ${{ github.base_ref }}
+      run: |
+        base="$INPUT_BASE"
+        if [ -z "$base" ] && [ -n "$BASE_REF" ]; then
+          base="origin/${BASE_REF}"
+        fi
+        report="${RUNNER_TEMP}/kerplunk-diff.md"
+        json="${RUNNER_TEMP}/kerplunk-diff.json"
+        rm -f "$json"
+        set +e
+        kerplunk diff ${base:+--base "$base"} --format markdown --json-file "$json" -q > "$report"
+        status=$?
+        set -e
+        if [ ! -f "$json" ]; then
+          echo "::error::kerplunk diff failed (exit status ${status})"
+          cat "$report"
+          exit 1
+        fi
+        breaking=$(jq '.breaking | length' "$json")
+        summary=$(jq -r '.summary' "$json")
+        {
+          echo "breaking=${breaking}"
+          echo "summary=${summary}"
+          echo "report=${report}"
+          echo "json=${json}"
+        } >> "$GITHUB_OUTPUT"
+        cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        if [ "$breaking" -gt 0 ]; then
+          jq -r '.breaking[] | "::error title=Breaking change::\(.relation).\(.column) is removed but \(.breaks | join(", ")) still reads it"' "$json"
+        fi
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPORT: ${{ steps.diff.outputs.report }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        marker="<!-- kerplunk-lineage-review -->"
+        body="$(printf '%s\n\n%s\n' "$marker" "$(cat "$REPORT")")"
+        existing=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
+          --jq "[.[] | select(.body | startswith(\"${marker}\"))][0].id // empty")
+        if [ -n "$existing" ]; then
+          gh api --method PATCH "repos/${REPO}/issues/comments/${existing}" -f body="$body" > /dev/null
+        else
+          gh api --method POST "repos/${REPO}/issues/${PR}/comments" -f body="$body" > /dev/null
+        fi
+
+    - name: Fail on breaking changes
+      if: inputs.fail-on-breaking == 'true' && steps.diff.outputs.breaking != '0'
+      shell: bash
+      env:
+        BREAKING: ${{ steps.diff.outputs.breaking }}
+      run: |
+        echo "::error::${BREAKING} breaking change(s); see the job summary or the pull request comment."
+        exit 1

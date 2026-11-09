@@ -1,3 +1,9 @@
+## v0.11.1 (2026-11-09)
+
+### Refactor
+
+- Capitalise Konstruct, build the viewer to one file, match the house formatting
+
 ## v0.11.0 (2026-11-09)
 
 ### Refactor

@@ -99,8 +99,8 @@ a:hover { color: var(--link-hover); }
 .wy-side-nav-search > a img.logo,
 .wy-side-nav-search .wy-dropdown > a img.logo {
     display: block;
-    width: 64px;
-    max-width: 64px;
+    width: 160px;
+    max-width: 160px;
     height: auto;
     margin: 10px auto 4px;
 }

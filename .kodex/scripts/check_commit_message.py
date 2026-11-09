@@ -2,7 +2,8 @@
 
 commitizen (`cz check`) enforces the Conventional Commits structure. This script adds the rules
 the Kodex Labs commitlint configuration layers on top: a fixed scope list, sentence-case
-subjects, line limits and no AI attribution. It runs as a pre-commit `commit-msg` hook and in CI.
+subjects, line limits, no AI attribution and no business language. It runs as a pre-commit
+`commit-msg` hook and in CI.
 
 Usage:
     python .kodex/scripts/check_commit_message.py <commit-message-file>
@@ -58,6 +59,13 @@ AI_TOOL = re.compile(
     r'|devin|aider|codewhisperer|tabnine|cline|deepseek|grok|qwen|opencode|amazon q)\b',
     re.IGNORECASE,
 )
+# The repository describes what Konstruct does and how to use it; business, market and
+# fundraising material belongs elsewhere (AGENTS.md, Rules).
+BUSINESS_WORDS = re.compile(
+    r'\b(ventures?|investors?|valuations?|fundrais(e|es|ed|er|ers|ing)|pitch decks?|pricing)\b',
+    re.IGNORECASE,
+)
+BUSINESS_ACRONYMS = re.compile(r'\b(VCs?|ARR|TAM)\b')
 TRAILER = re.compile(r'^([A-Za-z][\w-]*):\s*(.+)$')
 HEADER = re.compile(r'^(?P<type>\w+)(?:\((?P<scope>[^()]*)\))?(?P<breaking>!)?: (?P<subject>.*)$')
 SCISSORS = re.compile(r'^# -+ >8 -+$', re.MULTILINE)
@@ -128,6 +136,13 @@ def check(raw: str) -> list[str]:
         for number, line in enumerate(lines[1:], start=2)
         if len(line) > MAX_LINE and not re.match(r'^\s*(https?://|\[\d+\]:)', line)
     )
+
+    words = sorted(
+        {m.group(0) for line in lines for m in BUSINESS_WORDS.finditer(line)}
+        | {m.group(0) for line in lines for m in BUSINESS_ACRONYMS.finditer(line)}
+    )
+    if words:
+        errors.append(f'keep business and fundraising language out of the repository: {", ".join(words)}')
 
     found = [line.strip() for line in lines if line.strip() and is_ai_attribution(line.strip())]
     if found:

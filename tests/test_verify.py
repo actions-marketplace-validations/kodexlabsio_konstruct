@@ -10,9 +10,9 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from kerplunk import Project
-from kerplunk.graph import Graph, column_id
-from kerplunk.verify import Verification, annotate, claims, verify
+from konstruct import Project
+from konstruct.graph import Graph, column_id
+from konstruct.verify import Verification, annotate, claims, verify
 
 REPORT_SQL = """
 create table main.report as
@@ -166,7 +166,7 @@ def test_text_and_markdown(project: Project) -> None:
     assert "claimed column edges confirmed by perturbation" in text
     assert "report" in text
     markdown = result.markdown()
-    assert markdown.startswith("# kerplunk lineage verification")
+    assert markdown.startswith("# konstruct lineage verification")
     assert "| `report` | 178 |" in markdown
 
 
@@ -201,7 +201,7 @@ def queries(draw: st.DrawFn) -> str:
 
 
 @settings(
-    max_examples=int(os.environ.get("KERPLUNK_DIFFERENTIAL_EXAMPLES", "25")),
+    max_examples=int(os.environ.get("KONSTRUCT_DIFFERENTIAL_EXAMPLES", "25")),
     deadline=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
@@ -238,12 +238,12 @@ def test_verify_on_postgres_with_dbt(tmp_path: Path) -> None:
     from .conftest import EXAMPLE, run_dbt
     from .test_warehouse import require
 
-    dsn = require("KERPLUNK_TEST_PG_DSN")
+    dsn = require("KONSTRUCT_TEST_PG_DSN")
     url = urlparse(dsn)
     schema = f"kp_{uuid.uuid4().hex[:8]}"
     root = tmp_path / "shop"
     shutil.copytree(
-        EXAMPLE, root, ignore=shutil.ignore_patterns("target", "logs", "kerplunk-out", "*.duckdb", "dags")
+        EXAMPLE, root, ignore=shutil.ignore_patterns("target", "logs", "konstruct-out", "*.duckdb", "dags")
     )
     (root / "profiles.yml").write_text(
         "jaffle_shop:\n  target: dev\n  outputs:\n    dev:\n      type: postgres\n"

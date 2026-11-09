@@ -2,12 +2,12 @@
 
 Skipped unless these are set (CI sets them from repository secrets in its own job):
 
-    KERPLUNK_TEST_DATABRICKS_HOST       server hostname, e.g. dbc-1234.cloud.databricks.com
-    KERPLUNK_TEST_DATABRICKS_HTTP_PATH  a SQL warehouse's HTTP path
-    KERPLUNK_TEST_DATABRICKS_TOKEN      a token for a principal that can create schemas
-    KERPLUNK_TEST_DATABRICKS_CATALOG    a catalog it may create a scratch schema in (default: main)
+    KONSTRUCT_TEST_DATABRICKS_HOST       server hostname, e.g. dbc-1234.cloud.databricks.com
+    KONSTRUCT_TEST_DATABRICKS_HTTP_PATH  a SQL warehouse's HTTP path
+    KONSTRUCT_TEST_DATABRICKS_TOKEN      a token for a principal that can create schemas
+    KONSTRUCT_TEST_DATABRICKS_CATALOG    a catalog it may create a scratch schema in (default: main)
 
-The test creates a uniquely named schema with a table and a view, checks that kerplunk reads
+The test creates a uniquely named schema with a table and a view, checks that konstruct reads
 them as the stub test in test_cloud_warehouses expects (struct fields, comments, the view's SQL
 and the view's column lineage), and drops the schema whatever happens. It costs a few seconds of
 SQL warehouse time.
@@ -23,15 +23,15 @@ from typing import Any
 
 import pytest
 
-from kerplunk import Project
-from kerplunk.warehouse import DatabricksConnector
+from konstruct import Project
+from konstruct.warehouse import DatabricksConnector
 
 pytestmark = pytest.mark.databricks
 
-HOST = os.environ.get("KERPLUNK_TEST_DATABRICKS_HOST")
-HTTP_PATH = os.environ.get("KERPLUNK_TEST_DATABRICKS_HTTP_PATH")
-TOKEN = os.environ.get("KERPLUNK_TEST_DATABRICKS_TOKEN")
-CATALOG = os.environ.get("KERPLUNK_TEST_DATABRICKS_CATALOG", "main")
+HOST = os.environ.get("KONSTRUCT_TEST_DATABRICKS_HOST")
+HTTP_PATH = os.environ.get("KONSTRUCT_TEST_DATABRICKS_HTTP_PATH")
+TOKEN = os.environ.get("KONSTRUCT_TEST_DATABRICKS_TOKEN")
+CATALOG = os.environ.get("KONSTRUCT_TEST_DATABRICKS_CATALOG", "main")
 
 if not (HOST and HTTP_PATH and TOKEN):
     pytest.skip("Databricks workspace credentials are not set", allow_module_level=True)
@@ -41,7 +41,7 @@ if not (HOST and HTTP_PATH and TOKEN):
 def schema() -> Iterator[str]:
     from databricks import sql
 
-    name = f"kerplunk_ci_{uuid.uuid4().hex[:10]}"
+    name = f"konstruct_ci_{uuid.uuid4().hex[:10]}"
     connection = sql.connect(server_hostname=HOST, http_path=HTTP_PATH, access_token=TOKEN)
     cursor = connection.cursor()
 
@@ -98,12 +98,12 @@ def test_metadata_matches_the_stub(schema: str) -> None:
 
 
 def test_build_and_view_lineage(schema: str, tmp_path: Path) -> None:
-    (tmp_path / "kerplunk.toml").write_text(
+    (tmp_path / "konstruct.toml").write_text(
         "[[warehouse]]\n"
         'type = "databricks"\n'
         f'server_hostname = "{HOST}"\n'
         f'http_path = "{HTTP_PATH}"\n'
-        'access_token = "${KERPLUNK_TEST_DATABRICKS_TOKEN}"\n'
+        'access_token = "${KONSTRUCT_TEST_DATABRICKS_TOKEN}"\n'
         f'catalogs = ["{CATALOG}"]\n'
         f'schemas = ["{schema}"]\n'
     )
@@ -118,7 +118,7 @@ def test_build_and_view_lineage(schema: str, tmp_path: Path) -> None:
 
 def test_usage_from_system_tables(schema: str, tmp_path: Path) -> None:
     """Reads system.access.column_lineage when the principal may; skips if it may not."""
-    from kerplunk.usage import UsageSettings, databricks_usage
+    from konstruct.usage import UsageSettings, databricks_usage
 
     try:
         rows = databricks_usage(DatabricksConnector(_options()), UsageSettings(days=1))

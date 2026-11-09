@@ -1,4 +1,4 @@
-kerplunk  <root>
+konstruct  <root>
 
   dbt        jaffle_shop (.)  5 models, 3 seeds, 20 tests, 1 exposure  (artefacts up to date)
   duckdb     duckdb jaffle_shop.duckdb  9 relations  (dbt profile jaffle_shop)
@@ -9,4 +9,4 @@ kerplunk  <root>
   lineage    32 of 32 columns of models and built tables (100%)
   reused     7 of 7 cached analyses
   warnings   none
-  wrote      graph.json, REPORT.md, graph.html to <root>/kerplunk-out in <seconds>s
+  wrote      graph.json, REPORT.md, graph.html to <root>/konstruct-out in <seconds>s

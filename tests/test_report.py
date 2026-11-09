@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kerplunk.graph import Graph, Node
-from kerplunk.report import analyse, render, write_report
+from konstruct.graph import Graph, Node
+from konstruct.report import analyse, render, write_report
 
 
 def graph() -> Graph:
@@ -11,7 +11,7 @@ def graph() -> Graph:
     g.meta = {
         "generated_at": "2026-11-06T00:00:00+00:00",
         "root": "/x",
-        "kerplunk_version": "0.1.0",
+        "konstruct_version": "0.1.0",
         "inputs": {"dbt_projects": 1},
     }
     src = g.add_node(Node("source.p.raw.a", "source", "a", relation="db.raw.a"))
@@ -52,7 +52,7 @@ def test_findings() -> None:
 
 def test_render_and_write(tmp_path: Path) -> None:
     text = render(graph())
-    assert text.startswith("# kerplunk report\n")
+    assert text.startswith("# konstruct report\n")
     assert "| dbt projects | 1 |" in text
     assert "Column lineage covers 2 of 3 columns" in text
     assert "- `lonely` (table)" in text

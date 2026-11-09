@@ -14,8 +14,8 @@ htmlcov/
 # Node (commit tooling only)
 /node_modules
 
-# kerplunk output
-kerplunk-out/
+# konstruct output
+konstruct-out/
 
 # dbt
 target/

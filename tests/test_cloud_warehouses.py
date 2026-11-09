@@ -3,7 +3,7 @@
 * Snowflake runs against fakesnow, an emulator of snowflake-connector-python backed by DuckDB:
   `uv run --with fakesnow --with "snowflake-connector-python<5" python -m pytest -m snowflake`.
 * BigQuery runs against the BigQuery emulator (ghcr.io/goccy/bigquery-emulator) at
-  KERPLUNK_TEST_BIGQUERY_ENDPOINT, through the official client.
+  KONSTRUCT_TEST_BIGQUERY_ENDPOINT, through the official client.
 * Databricks has no emulator, so its connector is tested against a stub driver that returns
   information_schema rows in the shape Unity Catalog does.
 """
@@ -18,10 +18,10 @@ from typing import Any
 
 import pytest
 
-from kerplunk import Project
-from kerplunk.config import load_config
-from kerplunk.dbt import read_project
-from kerplunk.warehouse import BigQueryConnector, DatabricksConnector, MissingDriver, SnowflakeConnector
+from konstruct import Project
+from konstruct.config import load_config
+from konstruct.dbt import read_project
+from konstruct.warehouse import BigQueryConnector, DatabricksConnector, MissingDriver, SnowflakeConnector
 
 from .test_warehouse import require
 
@@ -113,7 +113,7 @@ def test_databricks_metadata(databricks_stub: list[str]) -> None:
 
 
 def test_databricks_build_and_view_lineage(databricks_stub: list[str], tmp_path: Path) -> None:
-    (tmp_path / "kerplunk.toml").write_text(
+    (tmp_path / "konstruct.toml").write_text(
         '[[warehouse]]\ntype = "databricks"\nserver_hostname = "x"\ncatalogs = ["main"]\n'
     )
     project = Project(tmp_path)
@@ -126,15 +126,15 @@ def test_databricks_build_and_view_lineage(databricks_stub: list[str], tmp_path:
 def test_missing_drivers_are_reported(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setitem(sys.modules, "databricks", None)
     monkeypatch.setitem(sys.modules, "databricks.sql", None)
-    with pytest.raises(MissingDriver, match=r"kerplunk\[databricks\]"):
+    with pytest.raises(MissingDriver, match=r"konstruct\[databricks\]"):
         DatabricksConnector({}).fetch()
-    (tmp_path / "kerplunk.toml").write_text('[[warehouse]]\ntype = "databricks"\n')
+    (tmp_path / "konstruct.toml").write_text('[[warehouse]]\ntype = "databricks"\n')
     graph = Project(tmp_path).build().graph
     assert any("install the databricks extra" in w for w in graph.warnings)
 
 
 def test_dbt_profiles_for_cloud_warehouses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from kerplunk.config import discover_warehouses
+    from konstruct.config import discover_warehouses
 
     monkeypatch.setenv("SF_PASSWORD", "secret")
     for name, target in {
@@ -183,7 +183,7 @@ def test_snowflake_with_fakesnow(tmp_path: Path) -> None:
         assert [(c.name, c.comment) for c in relations["ORDERS"].columns][1] == ("AMOUNT", "Order value")
         assert relations["BIG_ORDERS"].kind == "view"
 
-        (tmp_path / "kerplunk.toml").write_text(
+        (tmp_path / "konstruct.toml").write_text(
             '[[warehouse]]\ntype = "snowflake"\ndatabase = "SHOP"\nschema = "RAW"\n'
         )
         (tmp_path / "report.sql").write_text(
@@ -201,7 +201,7 @@ def test_snowflake_with_fakesnow(tmp_path: Path) -> None:
 
 @pytest.mark.bigquery
 def test_bigquery_with_the_emulator(tmp_path: Path) -> None:
-    endpoint = require("KERPLUNK_TEST_BIGQUERY_ENDPOINT")
+    endpoint = require("KONSTRUCT_TEST_BIGQUERY_ENDPOINT")
     from google.cloud import bigquery
 
     dataset = f"kp_{uuid.uuid4().hex[:8]}"
@@ -241,7 +241,7 @@ def test_bigquery_with_the_emulator(tmp_path: Path) -> None:
         assert orders.columns[0].attrs == {"required": True}
         assert relations["big_orders"].kind == "view"
 
-        (tmp_path / "kerplunk.toml").write_text(
+        (tmp_path / "konstruct.toml").write_text(
             f'[[warehouse]]\ntype = "bigquery"\nproject = "test"\ndatasets = ["{dataset}"]\nendpoint = "{endpoint}"\n'
         )
         project = Project(tmp_path)

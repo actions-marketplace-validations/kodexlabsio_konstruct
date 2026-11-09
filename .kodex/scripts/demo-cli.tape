@@ -12,14 +12,14 @@ Set Theme "Builtin Dark"
 Set TypingSpeed 40ms
 
 Hide
-Type "export PATH=$PWD/.venv/bin:$PATH PS1='$ ' && cd examples/jaffle_shop && rm -rf kerplunk-out && clear"
+Type "export PATH=$PWD/.venv/bin:$PATH PS1='$ ' && cd examples/jaffle_shop && rm -rf konstruct-out && clear"
 Enter
 Show
 
-Type "kerplunk build"
+Type "konstruct build"
 Enter
 Sleep 4s
 
-Type "kerplunk impact stg_payments.amount"
+Type "konstruct impact stg_payments.amount"
 Enter
 Sleep 7s

@@ -1,4 +1,4 @@
-name: kerplunk lineage review
+name: konstruct lineage review
 description: Column-level review of dbt, SQL and DAG changes on pull requests, with breaking changes flagged.
 author: Kodex Labs
 branding:
@@ -26,17 +26,17 @@ inputs:
     default: "true"
   build-args:
     description: >-
-      Arguments for `kerplunk build`. The default reads no warehouse and never runs dbt, so no
+      Arguments for `konstruct build`. The default reads no warehouse and never runs dbt, so no
       credentials are needed and a pull request's own macros never run; lineage then comes from
-      committed dbt artefacts, kerplunk's own sandboxed rendering of dbt models, and the SQL.
+      committed dbt artefacts, konstruct's own sandboxed rendering of dbt models, and the SQL.
     required: false
     default: "--no-warehouse --no-dbt"
   extras:
-    description: kerplunk extras to install, for example `snowflake` or `bigquery,databricks`.
+    description: konstruct extras to install, for example `snowflake` or `bigquery,databricks`.
     required: false
     default: ""
   python-version:
-    description: Python version to run kerplunk with.
+    description: Python version to run konstruct with.
     required: false
     default: "3.12"
   token:
@@ -65,18 +65,18 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
-    - name: Install kerplunk
+    - name: Install konstruct
       shell: bash
       env:
         EXTRAS: ${{ inputs.extras }}
       run: |
-        # The action's own checkout is the kerplunk version to run, so a pinned `@v0.7.0` runs 0.7.0.
+        # The action's own checkout is the konstruct version to run, so a pinned `@v0.7.0` runs 0.7.0.
         if [ -n "$EXTRAS" ]; then
-          uv tool install --quiet "kerplunk[${EXTRAS}] @ file://${GITHUB_ACTION_PATH}"
+          uv tool install --quiet "konstruct[${EXTRAS}] @ file://${GITHUB_ACTION_PATH}"
         else
-          uv tool install --quiet "kerplunk @ file://${GITHUB_ACTION_PATH}"
+          uv tool install --quiet "konstruct @ file://${GITHUB_ACTION_PATH}"
         fi
-        kerplunk --version
+        konstruct --version
 
     - name: Fetch the base branch
       shell: bash
@@ -98,7 +98,7 @@ runs:
         BUILD_ARGS: ${{ inputs.build-args }}
       run: |
         # shellcheck disable=SC2086
-        kerplunk build $BUILD_ARGS
+        konstruct build $BUILD_ARGS
 
     - name: Compare with the base
       id: diff
@@ -112,15 +112,15 @@ runs:
         if [ -z "$base" ] && [ -n "$BASE_REF" ]; then
           base="origin/${BASE_REF}"
         fi
-        report="${RUNNER_TEMP}/kerplunk-diff.md"
-        json="${RUNNER_TEMP}/kerplunk-diff.json"
+        report="${RUNNER_TEMP}/konstruct-diff.md"
+        json="${RUNNER_TEMP}/konstruct-diff.json"
         rm -f "$json"
         set +e
-        kerplunk diff ${base:+--base "$base"} --format markdown --json-file "$json" -q > "$report"
+        konstruct diff ${base:+--base "$base"} --format markdown --json-file "$json" -q > "$report"
         status=$?
         set -e
         if [ ! -f "$json" ]; then
-          echo "::error::kerplunk diff failed (exit status ${status})"
+          echo "::error::konstruct diff failed (exit status ${status})"
           cat "$report"
           exit 1
         fi
@@ -146,7 +146,7 @@ runs:
         PR: ${{ github.event.pull_request.number }}
         REPO: ${{ github.repository }}
       run: |
-        marker="<!-- kerplunk-lineage-review -->"
+        marker="<!-- konstruct-lineage-review -->"
         body="$(printf '%s\n\n%s\n' "$marker" "$(cat "$REPORT")")"
         existing=$(gh api "repos/${REPO}/issues/${PR}/comments" --paginate \
           --jq "[.[] | select(.body | startswith(\"${marker}\"))][0].id // empty")

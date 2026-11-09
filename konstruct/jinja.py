@@ -1,8 +1,8 @@
 """Render dbt model SQL without dbt: Jinja with ref, source, var, config, the project's macros and
 its packages' macros, and adapter.dispatch.
 
-kerplunk uses dbt's compiled SQL when it has it. This renderer is for SQL dbt has not compiled: the
-other side of a `kerplunk diff`, or a project whose artefacts are missing. It runs in a sandbox, never
+konstruct uses dbt's compiled SQL when it has it. This renderer is for SQL dbt has not compiled: the
+other side of a `konstruct diff`, or a project whose artefacts are missing. It runs in a sandbox, never
 touches a database, and stands in for anything that would (run_query, statement, load_result) with
 an empty result.
 """
@@ -53,7 +53,7 @@ class _Lenient(Undefined):
 
     def __call__(self, *args: Any, **kwargs: Any) -> str:  # type: ignore[override]
         values = [*args, *kwargs.values()]
-        return f"kerplunk_macro({', '.join(_sql_argument(v) for v in values)})" if values else ""
+        return f"konstruct_macro({', '.join(_sql_argument(v) for v in values)})" if values else ""
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("__"):

@@ -1,4 +1,4 @@
-"""kerplunk conflicts: one business idea computed in more than one way."""
+"""konstruct conflicts: one business idea computed in more than one way."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from kerplunk import Project
-from kerplunk.cli import main
-from kerplunk.conflicts import core
+from konstruct import Project
+from konstruct.cli import main
+from konstruct.conflicts import core
 
 FINANCE = """\
 create table finance.daily_revenue as
@@ -142,7 +142,7 @@ def test_terms_group_columns_named_differently(tmp_path: Path) -> None:
 @pytest.mark.dbt
 def test_no_noise_on_the_example(jaffle_built_graph: Path, tmp_path: Path) -> None:
     copy = tmp_path / "jaffle_shop"
-    shutil.copytree(jaffle_built_graph / "kerplunk-out", copy / "kerplunk-out")
+    shutil.copytree(jaffle_built_graph / "konstruct-out", copy / "konstruct-out")
     result = Project(copy).conflicts()
     assert result.conflicts == []
     assert result.candidates > 10
@@ -157,7 +157,7 @@ def test_command_files_and_formats(tmp_path: Path, capsys: pytest.CaptureFixture
         "filter only in daily_revenue.revenue: WHERE: orders.status = 'completed'  (finance/revenue.sql)"
         in out
     )
-    report = (tmp_path / "kerplunk-out" / "CONFLICTS.md").read_text()
+    report = (tmp_path / "konstruct-out" / "CONFLICTS.md").read_text()
     assert report.startswith("# Conflicting definitions")
     assert "## 1. revenue: `daily_performance.total_revenue` and `daily_revenue.revenue`" in report or (
         "## 1. revenue: `daily_revenue.revenue` and `daily_performance.total_revenue`" in report
@@ -166,7 +166,7 @@ def test_command_files_and_formats(tmp_path: Path, capsys: pytest.CaptureFixture
         "- filter (only in " in report
         and "`WHERE: orders.status = 'completed'`, in `finance/revenue.sql`" in report
     )
-    data = json.loads((tmp_path / "kerplunk-out" / "conflicts.json").read_text())
+    data = json.loads((tmp_path / "konstruct-out" / "conflicts.json").read_text())
     assert data["conflicts"][0]["differences"][0]["path"] == "finance/revenue.sql"
     assert main(["conflicts", "-C", str(tmp_path), "--fail-on-conflict", "--no-write", "-q"]) == 1
     capsys.readouterr()

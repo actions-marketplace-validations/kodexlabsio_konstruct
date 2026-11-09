@@ -11,4 +11,4 @@ Verified against jaffle_shop.duckdb (seed 1729, strategies shift, null, shuffle,
 36 of 36 claimed column edges confirmed by perturbation (100%) across 6 models.
 33 influences through joins, filters or grouping, all predicted as references; 0 unexplained.
 
-Wrote VERIFY.md and verify.json to <root>/kerplunk-out; graph.json now marks confirmed edges.
+Wrote VERIFY.md and verify.json to <root>/konstruct-out; graph.json now marks confirmed edges.

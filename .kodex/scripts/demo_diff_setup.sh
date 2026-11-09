@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Prepares /tmp/kerplunk-diff-demo for demo-diff.tape: a git copy of the jaffle_shop example
+# Prepares /tmp/konstruct-diff-demo for demo-diff.tape: a git copy of the jaffle_shop example
 # with a branch that changes an expression, renames a column still read downstream, adds a
 # filter and reformats a model. Run from the repository root after prepare_example.py.
 set -euo pipefail
-DEMO=/tmp/kerplunk-diff-demo
+DEMO=/tmp/konstruct-diff-demo
 rm -rf "$DEMO"
 cp -R examples/jaffle_shop "$DEMO"
 cd "$DEMO"
-rm -rf kerplunk-out logs
-printf 'target/\nlogs/\nkerplunk-out/\n*.duckdb\n' > .gitignore
+rm -rf konstruct-out logs
+printf 'target/\nlogs/\nkonstruct-out/\n*.duckdb\n' > .gitignore
 git init -q -b main
 git add -A
 git -c user.name=demo -c user.email=demo@example.com -c commit.gpgsign=false commit -qm "base"
-"$OLDPWD/.venv/bin/kerplunk" build -q > /dev/null
+"$OLDPWD/.venv/bin/konstruct" build -q > /dev/null
 python3 - <<'PY'
 from pathlib import Path
 payments = Path("models/staging/stg_payments.sql")

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Literal
 
-from kerplunk.graph import RELATION_KINDS, Graph, Node, Step
+from konstruct.graph import RELATION_KINDS, Graph, Node, Step
 
 
 class QueryError(Exception):
@@ -23,7 +23,7 @@ class QueryError(Exception):
 def load_graph(out_dir: Path) -> Graph:
     path = out_dir / "graph.json"
     if not path.is_file():
-        raise QueryError(f"no graph at {path}; run `kerplunk build` first")
+        raise QueryError(f"no graph at {path}; run `konstruct build` first")
     return Graph.read(path)
 
 
@@ -418,7 +418,7 @@ class Description:
     after: list[str] = field(default_factory=list)
     before: list[str] = field(default_factory=list)
     expression: str | None = None
-    """For a column, its SQL over physical columns (see ``kerplunk explain``)."""
+    """For a column, its SQL over physical columns (see ``konstruct explain``)."""
     conditions: list[str] = field(default_factory=list)
     """For a relation, the joins, filters and grouping that shape its rows."""
 
@@ -528,7 +528,7 @@ def describe(graph: Graph, ref: str) -> Description:
         },
     )
     if node.attrs.get("expression") or node.attrs.get("conditions"):
-        from kerplunk.explain import short_sql
+        from konstruct.explain import short_sql
 
         if isinstance(node.attrs.get("expression"), str):
             result.expression = short_sql(graph, node.attrs["expression"])
@@ -620,7 +620,7 @@ class TermDefinition:
 
 @dataclass
 class Definitions:
-    """The answer to `kerplunk define`: the terms a name or column refers to, approved first."""
+    """The answer to `konstruct define`: the terms a name or column refers to, approved first."""
 
     query: str
     terms: list[TermDefinition] = field(default_factory=list)
@@ -822,7 +822,7 @@ class QueryResult:
         if not self.matches:
             return (
                 f"Nothing in the graph matches {self.question!r}. "
-                "Try `kerplunk search` with a table or column name."
+                "Try `konstruct search` with a table or column name."
             )
         lines = []
         if self.definitions:
@@ -845,7 +845,7 @@ class QueryResult:
 def query(graph: Graph, question: str, limit: int = 8, depth: int = 1) -> QueryResult:
     """Answer a free-text question with the most relevant nodes and their neighbourhood.
 
-    There is no language model here: kerplunk ranks nodes by the question's words and returns
+    There is no language model here: konstruct ranks nodes by the question's words and returns
     the matching nodes, the edges around them, and impact or lineage when the question asks.
     """
     words = set(_TOKEN.findall(question.lower()))

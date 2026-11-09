@@ -1,5 +1,5 @@
 [project]
-name = "kerplunk"
+name = "konstruct"
 version = "0.10.2"
 description = "Turn a data stack (dbt, SQL, Airflow, warehouse and Iceberg metadata) into a queryable graph with column-level lineage for coding agents."
 readme = "README.md"
@@ -34,14 +34,14 @@ dependencies = [
 snowflake = ["snowflake-connector-python>=3.12"]
 bigquery = ["google-cloud-bigquery>=3.25"]
 databricks = ["databricks-sql-connector>=3.4"]
-all = ["kerplunk[snowflake,bigquery,databricks]"]
+all = ["konstruct[snowflake,bigquery,databricks]"]
 
 [project.urls]
-Homepage = "https://github.com/kodexlabsio/kerplunk"
-Issues = "https://github.com/kodexlabsio/kerplunk/issues"
+Homepage = "https://github.com/kodexlabsio/konstruct"
+Issues = "https://github.com/kodexlabsio/konstruct/issues"
 
 [project.scripts]
-kerplunk = "kerplunk.cli:main"
+konstruct = "konstruct.cli:main"
 
 [dependency-groups]
 dev = [
@@ -69,12 +69,12 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kerplunk"]
+packages = ["konstruct"]
 
 [tool.ruff]
 line-length = 110
 target-version = "py311"
-src = ["src", "tests"]
+src = [".", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PTH", "C4"]
@@ -86,7 +86,7 @@ quote-style = "double"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src/kerplunk", "tests"]
+files = ["konstruct", "tests"]
 exclude = ["^tests/fixtures/"]
 warn_unreachable = true
 
@@ -98,18 +98,18 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 addopts = "-ra"
 markers = [
-    "postgres: needs a Postgres server (KERPLUNK_TEST_PG_DSN)",
+    "postgres: needs a Postgres server (KONSTRUCT_TEST_PG_DSN)",
     "dbt: needs dbt-core and dbt-duckdb installed",
     "iceberg: uses PyIceberg with a local SQL catalog",
     "browser: drives graph.html in Chromium through Playwright",
     "scale: builds a generated project of hundreds of models",
-    "realworld: clones and builds a public dbt project (KERPLUNK_REALWORLD=1)",
+    "realworld: clones and builds a public dbt project (KONSTRUCT_REALWORLD=1)",
     "airflow_parity: compares the static parser with Airflow itself (needs apache-airflow)",
     "dagster_parity: compares the static parser with Dagster itself (needs dagster)",
     "snowflake: runs against fakesnow (needs fakesnow and snowflake-connector-python<5)",
-    "bigquery: runs against the BigQuery emulator (KERPLUNK_TEST_BIGQUERY_ENDPOINT)",
-    "iceberg_rest: needs an Iceberg REST catalog (KERPLUNK_TEST_ICEBERG_URI)",
-    "databricks: runs against a real Databricks workspace (KERPLUNK_TEST_DATABRICKS_*)",
+    "bigquery: runs against the BigQuery emulator (KONSTRUCT_TEST_BIGQUERY_ENDPOINT)",
+    "iceberg_rest: needs an Iceberg REST catalog (KONSTRUCT_TEST_ICEBERG_URI)",
+    "databricks: runs against a real Databricks workspace (KONSTRUCT_TEST_DATABRICKS_*)",
 ]
 
 [tool.commitizen]
@@ -120,12 +120,12 @@ version_scheme = "pep440"
 major_version_zero = true
 update_changelog_on_bump = true
 changelog_file = "CHANGELOG.md"
-version_files = ["src/kerplunk/__init__.py:__version__"]
+version_files = ["konstruct/__init__.py:__version__"]
 bump_message = "chore(release): Release $new_version"
 
 [tool.coverage.run]
 branch = true
-source = ["kerplunk"]
+source = ["konstruct"]
 
 [tool.coverage.report]
 fail_under = 90

@@ -1,9 +1,9 @@
 """Conflicts: the same business idea computed in more than one way.
 
-``kerplunk conflicts`` finds columns that look like the same measure (by name, by synonyms from
+``konstruct conflicts`` finds columns that look like the same measure (by name, by synonyms from
 definitions.yml, or by being bound to the same business term) and compares how each is computed:
 
-* the formula in terms of source columns (from :mod:`kerplunk.explain`);
+* the formula in terms of source columns (from :mod:`konstruct.explain`);
 * the source columns it reads;
 * the filters and joins on its route back to source, with the file each lives in;
 * the aggregation at the top of the formula.
@@ -25,8 +25,8 @@ from typing import Any
 import sqlglot
 from sqlglot import exp
 
-from kerplunk.explain import Explainer, short_sql
-from kerplunk.graph import RELATION_KINDS, Graph, Node
+from konstruct.explain import Explainer, short_sql
+from konstruct.graph import RELATION_KINDS, Graph, Node
 
 # Words that qualify a measure without changing which measure it is.
 MODIFIERS = frozenset(

@@ -40,7 +40,7 @@
 
 ### Feat
 
-- **ci**: Make kerplunk a GitHub Action for pull request lineage review
+- **ci**: Make konstruct a GitHub Action for pull request lineage review
 
 ### Fix
 
@@ -64,7 +64,7 @@
 
 ### Fix
 
-- **readme**: Install from GitHub, since kerplunk is not on PyPI yet
+- **readme**: Install from GitHub, since konstruct is not on PyPI yet
 
 ## v0.5.0 (2026-11-06)
 
@@ -83,7 +83,7 @@
 ### Feat
 
 - **dagster**: Parse Dagster assets, dbt assets, jobs and schedules statically
-- **dbt**: Report dbt YAML changes in kerplunk diff
+- **dbt**: Report dbt YAML changes in konstruct diff
 
 ### Fix
 
@@ -95,7 +95,7 @@
 
 - **lineage**: Verify lineage against Postgres as well as DuckDB
 - **dbt**: Select only the dbt nodes a change affects, column by column
-- **lineage**: Add kerplunk diff for column-level change review
+- **lineage**: Add konstruct diff for column-level change review
 - **dbt**: Render dbt Jinja without dbt, matching compiled lineage
 - **lineage**: Follow lineage into struct fields
 - **lineage**: Verify column lineage against the data by perturbation
@@ -116,9 +116,9 @@
 
 - **skill**: Tell agents about --refresh, status and list
 - **cli**: Rework the command line and add a typed Python API
-- **skill**: Install a /kerplunk skill for Claude Code and Cursor
+- **skill**: Install a /konstruct skill for Claude Code and Cursor
 - **mcp**: Add a stdio MCP server with impact, trace, search, describe and path
-- **cli**: Add the kerplunk command line
+- **cli**: Add the konstruct command line
 - **query**: Add impact, trace, path, search, describe and query
 - **html**: Add a single-file interactive graph viewer
 - **build**: Build the graph, report and viewer from every input

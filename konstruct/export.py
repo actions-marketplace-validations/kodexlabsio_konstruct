@@ -28,13 +28,13 @@ from typing import Any, Literal
 import sqlglot
 from sqlglot import exp
 
-from kerplunk import __version__
-from kerplunk.graph import RELATION_KINDS, Graph, Node
+from konstruct import __version__
+from konstruct.graph import RELATION_KINDS, Graph, Node
 
 Format = Literal["openlineage", "mermaid", "dot", "csv"]
 FORMATS: tuple[str, ...] = ("openlineage", "mermaid", "dot", "csv")
 
-PRODUCER = f"https://github.com/kodexlabsio/kerplunk/tree/v{__version__}"
+PRODUCER = f"https://github.com/kodexlabsio/konstruct/tree/v{__version__}"
 SPEC = "https://openlineage.io/spec/2-0-2/OpenLineage.json"
 SCHEMA_FACET = "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet"
 LINEAGE_FACET = (
@@ -55,7 +55,7 @@ def export(
     select: Node | None = None,
     columns: bool = False,
     namespace: str | None = None,
-    job_namespace: str = "kerplunk",
+    job_namespace: str = "konstruct",
     event_time: str | None = None,
 ) -> str:
     """The graph (or the lineage of ``select``) in ``fmt``; see the module docstring."""
@@ -183,12 +183,12 @@ def openlineage(
     keep: set[str] | None = None,
     *,
     namespace: str | None = None,
-    job_namespace: str = "kerplunk",
+    job_namespace: str = "konstruct",
     event_time: str | None = None,
 ) -> str:
     dialect = graph.meta.get("dialect")
     dialect = dialect if isinstance(dialect, str) else None
-    namespace = namespace or f"{dialect or 'sql'}://kerplunk"
+    namespace = namespace or f"{dialect or 'sql'}://konstruct"
     when = event_time or str(graph.meta.get("generated_at") or datetime.now(UTC).isoformat())
     lines = []
     for node in _relations(graph, keep, RELATION_KINDS):
@@ -345,7 +345,7 @@ def dot(graph: Graph, keep: set[str] | None = None, *, columns: bool = False) ->
     present = {n.id for n in nodes}
     shapes = {"source": "cylinder", "seed": "note", "task": "cds", "exposure": "hexagon", "snapshot": "box3d"}
     lines = [
-        "digraph kerplunk {",
+        "digraph konstruct {",
         '  graph [rankdir=LR, fontname="Manrope", bgcolor="#1F2A2E", fontcolor="#FFFFFF"];',
         '  node [shape=box, style="rounded,filled", fillcolor="#273338", color="#7DC3FF", '
         'fontcolor="#FFFFFF", fontname="Manrope"];',

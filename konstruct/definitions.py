@@ -18,7 +18,7 @@ A definitions file records what the business means by a term and which columns h
         related: [Order amount]
         exceptions: Gift card payments made before 2024 are excluded.
 
-``columns`` and the columns in ``filters`` use the names the rest of kerplunk accepts
+``columns`` and the columns in ``filters`` use the names the rest of konstruct accepts
 (``table.column``, ``schema.table.column``, a dbt source). The build attaches each term to the
 graph as a ``term`` node with ``defines`` edges to its columns and ``relates_to`` edges to related
 terms, and warns about anything that no longer matches the data stack.

@@ -11,10 +11,10 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from kerplunk import Project, QueryError
-from kerplunk.cli import main
-from kerplunk.definitions import Owner, Term, parse, slug, validate
-from kerplunk.diff import compare_definitions
+from konstruct import Project, QueryError
+from konstruct.cli import main
+from konstruct.definitions import Owner, Term, parse, slug, validate
+from konstruct.diff import compare_definitions
 
 FULL = """\
 version: 1
@@ -146,7 +146,7 @@ def test_checks_across_terms() -> None:
 @pytest.fixture
 def project(jaffle_built_graph: Path, tmp_path: Path) -> Project:
     copy = tmp_path / "jaffle_shop"
-    shutil.copytree(jaffle_built_graph / "kerplunk-out", copy / "kerplunk-out")
+    shutil.copytree(jaffle_built_graph / "konstruct-out", copy / "konstruct-out")
     return Project(copy)
 
 
@@ -304,7 +304,7 @@ def test_duplicate_ids_and_configured_paths(tmp_path: Path) -> None:
     project = _shop(tmp_path, "terms:\n  - {name: Revenue!, definition: a}\n")
     (tmp_path / "glossary").mkdir()
     (tmp_path / "glossary" / "definitions.yaml").write_text("terms:\n  - {name: revenue, definition: b}\n")
-    (tmp_path / "kerplunk.toml").write_text('[definitions]\npaths = ["definitions.yml", "glossary"]\n')
+    (tmp_path / "konstruct.toml").write_text('[definitions]\npaths = ["definitions.yml", "glossary"]\n')
     graph = project.build().graph
     assert any("has the same id as another term (term.revenue); skipped" in w for w in graph.warnings)
     assert sum(1 for n in graph.nodes.values() if n.kind == "term") == 1
@@ -359,7 +359,7 @@ def test_diff_reports_definitions_files(tmp_path: Path) -> None:
             capture_output=True,
         )
 
-    (root / ".gitignore").write_text("kerplunk-out/\n*.duckdb\n")
+    (root / ".gitignore").write_text("konstruct-out/\n*.duckdb\n")
     git("init", "-q", "-b", "main")
     git("add", "-A")
     git("commit", "-qm", "base")

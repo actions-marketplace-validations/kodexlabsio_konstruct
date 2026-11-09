@@ -10,7 +10,7 @@ import anyio
 import pytest
 from mcp import Client, StdioServerParameters
 
-from kerplunk.mcp_server import build_server
+from konstruct.mcp_server import build_server
 
 pytestmark = pytest.mark.dbt
 
@@ -79,7 +79,9 @@ def test_in_process(jaffle_built_graph: Path) -> None:
 def test_over_stdio(jaffle_built_graph: Path) -> None:
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src")}
     params = StdioServerParameters(
-        command=sys.executable, args=["-m", "kerplunk.cli", "mcp", "--path", str(jaffle_built_graph)], env=env
+        command=sys.executable,
+        args=["-m", "konstruct.cli", "mcp", "--path", str(jaffle_built_graph)],
+        env=env,
     )
 
     async def main() -> None:
@@ -91,14 +93,14 @@ def test_over_stdio(jaffle_built_graph: Path) -> None:
 
 def test_reloads_a_rebuilt_graph_and_reports_a_missing_one(jaffle_built_graph: Path, tmp_path: Path) -> None:
     project = tmp_path / "p"
-    (project / "kerplunk-out").mkdir(parents=True)
+    (project / "konstruct-out").mkdir(parents=True)
 
     async def main() -> None:
         async with Client(build_server(project)) as client:
             missing = await client.call_tool("describe", {"ref": "orders"})
-            assert missing.is_error and "kerplunk build" in str(missing.content)
+            assert missing.is_error and "konstruct build" in str(missing.content)
             shutil.copy(
-                jaffle_built_graph / "kerplunk-out" / "graph.json", project / "kerplunk-out" / "graph.json"
+                jaffle_built_graph / "konstruct-out" / "graph.json", project / "konstruct-out" / "graph.json"
             )
             found = structured(await client.call_tool("describe", {"ref": "orders"}))
             assert found["kind"] == "model"

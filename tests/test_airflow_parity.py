@@ -1,6 +1,6 @@
 """The static parser against Airflow itself: the same DAGs, tasks and dependencies.
 
-Needs Apache Airflow, which kerplunk does not depend on. Run with:
+Needs Apache Airflow, which konstruct does not depend on. Run with:
 
     uv run --with "apache-airflow>=3" --with apache-airflow-providers-standard \
         --with apache-airflow-providers-common-sql pytest tests/test_airflow_parity.py
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from kerplunk.airflow import parse_file
+from konstruct.airflow import parse_file
 
 pytestmark = pytest.mark.airflow_parity
 

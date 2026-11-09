@@ -9,15 +9,15 @@ from typing import Any
 import duckdb
 import pytest
 
-from kerplunk.warehouse import DuckDBConnector, IcebergConnector, PostgresConnector, RelationMeta
+from konstruct.warehouse import DuckDBConnector, IcebergConnector, PostgresConnector, RelationMeta
 
 
 def require(variable: str) -> str:
     """The value of a service variable; skip without it, unless CI says services must exist."""
     value = os.environ.get(variable)
     if not value:
-        if os.environ.get("KERPLUNK_REQUIRE_SERVICES"):
-            pytest.fail(f"{variable} is not set but KERPLUNK_REQUIRE_SERVICES is")
+        if os.environ.get("KONSTRUCT_REQUIRE_SERVICES"):
+            pytest.fail(f"{variable} is not set but KONSTRUCT_REQUIRE_SERVICES is")
         pytest.skip(f"{variable} is not set")
     return value
 
@@ -81,7 +81,7 @@ def test_duckdb_schema_filter_and_read_only(duck: Path) -> None:
 def postgres_schema() -> Iterator[tuple[str, str]]:
     import psycopg
 
-    dsn = require("KERPLUNK_TEST_PG_DSN")
+    dsn = require("KONSTRUCT_TEST_PG_DSN")
     schema = f"kp_{uuid.uuid4().hex[:8]}"
     with psycopg.connect(dsn, autocommit=True) as con:
         con.execute(f"create schema {schema}")
@@ -130,7 +130,7 @@ def test_postgres_metadata(postgres_schema: tuple[str, str]) -> None:
 
 @pytest.mark.postgres
 def test_postgres_view_sql_parses_to_lineage(postgres_schema: tuple[str, str]) -> None:
-    from kerplunk.sql import analyse
+    from konstruct.sql import analyse
 
     dsn, schema = postgres_schema
     relations = by_name(PostgresConnector(dsn, schemas=[schema]).fetch())
@@ -229,7 +229,7 @@ def test_iceberg_sql_catalog(tmp_path: Path) -> None:
 def test_iceberg_rest_catalog() -> None:
     from pyiceberg.catalog import load_catalog
 
-    uri = require("KERPLUNK_TEST_ICEBERG_URI")
+    uri = require("KONSTRUCT_TEST_ICEBERG_URI")
     name = f"rest_{uuid.uuid4().hex[:6]}"
     namespace = f"kp_{uuid.uuid4().hex[:8]}"
     properties = {"type": "rest", "uri": uri, "py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO"}
@@ -256,6 +256,6 @@ def test_iceberg_rest_catalog() -> None:
     ],
 )
 def test_struct_fields(dtype: str, dialect: str, expected: list[str]) -> None:
-    from kerplunk.warehouse import struct_fields
+    from konstruct.warehouse import struct_fields
 
     assert [c.name for c in struct_fields("x", dtype, dialect)] == expected

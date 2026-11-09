@@ -1,4 +1,4 @@
-"""The query API, through kerplunk.Project, on the built jaffle_shop example."""
+"""The query API, through konstruct.Project, on the built jaffle_shop example."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-import kerplunk
-from kerplunk import Item, Project, QueryError, Walk
+import konstruct
+from konstruct import Item, Project, QueryError, Walk
 
 pytestmark = pytest.mark.dbt
 
@@ -17,7 +17,7 @@ pytestmark = pytest.mark.dbt
 @pytest.fixture
 def project(jaffle_built_graph: Path, tmp_path: Path) -> Project:
     copy = tmp_path / "jaffle_shop"
-    shutil.copytree(jaffle_built_graph / "kerplunk-out", copy / "kerplunk-out")
+    shutil.copytree(jaffle_built_graph / "konstruct-out", copy / "konstruct-out")
     return Project(copy)
 
 
@@ -26,13 +26,13 @@ def labels(items: list[Item]) -> list[str]:
 
 
 def test_package_exports_the_api() -> None:
-    assert kerplunk.Project is Project
-    assert set(kerplunk.__all__) >= {"Project", "Walk", "Item", "QueryError", "Graph"}
+    assert konstruct.Project is Project
+    assert set(konstruct.__all__) >= {"Project", "Walk", "Item", "QueryError", "Graph"}
 
 
 def test_project_finds_the_graph_from_a_subdirectory(jaffle_built_graph: Path) -> None:
     nested = Project(jaffle_built_graph / "models" / "staging")
-    assert nested.out_dir == jaffle_built_graph / "kerplunk-out"
+    assert nested.out_dir == jaffle_built_graph / "konstruct-out"
     assert nested.root == jaffle_built_graph
     assert repr(nested).startswith("Project(")
 
@@ -179,7 +179,7 @@ def test_errors_suggest_and_disambiguate(project: Project) -> None:
         project.impact("payment")
     with pytest.raises(QueryError, match="nothing in the graph"):
         project.trace("zzz")
-    project.graph.add_node(kerplunk.Node("table.x.y.orders", "table", "orders", relation="x.y.orders"))
+    project.graph.add_node(konstruct.Node("table.x.y.orders", "table", "orders", relation="x.y.orders"))
     with pytest.raises(QueryError, match="ambiguous"):
         project.describe("orders")
 
@@ -198,7 +198,7 @@ def test_no_graph(tmp_path: Path) -> None:
     project = Project(tmp_path)
     assert not project.has_graph()
     assert project.changed_inputs() == []
-    with pytest.raises(QueryError, match="run `kerplunk build` first"):
+    with pytest.raises(QueryError, match="run `konstruct build` first"):
         project.impact("x")
 
 
@@ -206,7 +206,7 @@ def test_build_through_the_api(tmp_path: Path) -> None:
     (tmp_path / "x.sql").write_text("create table t2 as select a * 2 as b from t1")
     project = Project(tmp_path)
     result = project.build(dialect="duckdb", warehouses=False, run_dbt=False)
-    assert result.outputs[0] == tmp_path / "kerplunk-out" / "graph.json"
+    assert result.outputs[0] == tmp_path / "konstruct-out" / "graph.json"
     assert project.has_graph()
     assert project.trace("t2.b").columns[0].label == "t1.a"
     again = project.build(update=True, dialect="duckdb", warehouses=False, run_dbt=False)

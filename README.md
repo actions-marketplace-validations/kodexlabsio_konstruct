@@ -2,20 +2,20 @@
 <a target="_blank" href="https://kodexlabs.io/"><img width="150" height="150" src="./docs/logo-icon.svg"></a>
 </p>
 <p align="center">
-<a href="https://github.com/kodexlabsio/kerplunk/actions/workflows/build-and-test.yml"><img src="https://github.com/kodexlabsio/kerplunk/actions/workflows/build-and-test.yml/badge.svg" alt="Build and Test"></a>&nbsp;<a href="https://github.com/kodexlabsio/kerplunk/actions/workflows/release.yml"><img src="https://github.com/kodexlabsio/kerplunk/actions/workflows/release.yml/badge.svg" alt="Create Release"></a>&nbsp;<a href="./LICENSE"><img src="https://img.shields.io/badge/licence-MIT-blue" alt="MIT licence"></a>&nbsp;<img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.11 to 3.13">
+<a href="https://github.com/kodexlabsio/konstruct/actions/workflows/build-and-test.yml"><img src="https://github.com/kodexlabsio/konstruct/actions/workflows/build-and-test.yml/badge.svg" alt="Build and Test"></a>&nbsp;<a href="https://github.com/kodexlabsio/konstruct/actions/workflows/release.yml"><img src="https://github.com/kodexlabsio/konstruct/actions/workflows/release.yml/badge.svg" alt="Create Release"></a>&nbsp;<a href="./LICENSE"><img src="https://img.shields.io/badge/licence-MIT-blue" alt="MIT licence"></a>&nbsp;<img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.11 to 3.13">
 <br />
 <a href="https://kodexlabs.io/" target="_blank">Kodex Labs</a> Ltd.
 </p>
 
 **Column-level lineage for dbt, SQL, Airflow and Dagster: explained as formulas, checked against the data, and reviewed on every pull request.**
 
-kerplunk reads a data repository and its warehouse and builds a graph of every table, column, model, task, test and dashboard, with column-level lineage parsed from the SQL that connects them. It runs locally in one command, with no server and no account, and answers from the command line, a Python API, an MCP server and `/kerplunk` skill for coding agents, a GitHub Action, and a single offline HTML page.
+konstruct reads a data repository and its warehouse and builds a graph of every table, column, model, task, test and dashboard, with column-level lineage parsed from the SQL that connects them. It runs locally in one command, with no server and no account, and answers from the command line, a Python API, an MCP server and `/konstruct` skill for coding agents, a GitHub Action, and a single offline HTML page.
 
 What it does that lineage tools usually leave out:
 
-- **It shows how a column is calculated.** `kerplunk explain` composes a column's SQL through every model upstream, so `customer_ltv.lifetime_value` reads as `SUM(raw_payments.amount / 100)`, with the joins and filters of each step listed beside it. A test evaluates composed formulas on the data and checks they give the model's values row for row. [Explaining a Column](#explaining-a-column)
-- **It checks its lineage against the data.** `kerplunk verify` perturbs each input column, reruns each model and records which outputs change. On dbt Labs' jaffle-shop all 87 claimed column edges are confirmed, and nothing changed that the graph did not predict. [How Much to Trust the Lineage](#how-much-to-trust-the-lineage)
-- **It reviews pull requests column by column.** `uses: kodexlabsio/kerplunk@v0` comments with what a change does to each column, ignoring formatting and renamed CTEs, and fails the check when a removed column is still read downstream. It also prints a `dbt build --select` for only what the change affects. [Reviewing Changes](#reviewing-changes)
+- **It shows how a column is calculated.** `konstruct explain` composes a column's SQL through every model upstream, so `customer_ltv.lifetime_value` reads as `SUM(raw_payments.amount / 100)`, with the joins and filters of each step listed beside it. A test evaluates composed formulas on the data and checks they give the model's values row for row. [Explaining a Column](#explaining-a-column)
+- **It checks its lineage against the data.** `konstruct verify` perturbs each input column, reruns each model and records which outputs change. On dbt Labs' jaffle-shop all 87 claimed column edges are confirmed, and nothing changed that the graph did not predict. [How Much to Trust the Lineage](#how-much-to-trust-the-lineage)
+- **It reviews pull requests column by column.** `uses: kodexlabsio/konstruct@v0` comments with what a change does to each column, ignoring formatting and renamed CTEs, and fails the check when a removed column is still read downstream. It also prints a `dbt build --select` for only what the change affects. [Reviewing Changes](#reviewing-changes)
 - **One chain across tools.** A column computed in dbt, copied by an Airflow SQL task, written by a Dagster asset and shown on a dashboard is one lineage chain, through DuckDB, Postgres, Snowflake, BigQuery, Databricks and Iceberg.
 - **It handles large projects.** 2,000 models and 52,000 column edges build in 26 seconds and update in 4; queries answer in milliseconds. [Performance](#performance)
 - **It exports open formats.** OpenLineage events validated against the specification, Mermaid, Graphviz and CSV. [Exporting](#exporting)
@@ -24,49 +24,49 @@ What it does that lineage tools usually leave out:
 
 ## Quick Start
 
-kerplunk is not on PyPI yet, so install it from GitHub with [uv](https://docs.astral.sh/uv/):
+konstruct is not on PyPI yet, so install it from GitHub with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install git+https://github.com/kodexlabsio/kerplunk
+uv tool install git+https://github.com/kodexlabsio/konstruct
 ```
 
 Or run it without installing anything, each time:
 
 ```bash
-uvx --from git+https://github.com/kodexlabsio/kerplunk kerplunk build
+uvx --from git+https://github.com/kodexlabsio/konstruct konstruct build
 ```
 
 For a warehouse extra, name it in the requirement, for example
-`uv tool install "kerplunk[snowflake] @ git+https://github.com/kodexlabsio/kerplunk"` (or `[bigquery]`, `[databricks]`, `[all]`).
-To pin a release, add its tag: `git+https://github.com/kodexlabsio/kerplunk@v0.8.0`. Each [release](https://github.com/kodexlabsio/kerplunk/releases) also has the wheel attached.
+`uv tool install "konstruct[snowflake] @ git+https://github.com/kodexlabsio/konstruct"` (or `[bigquery]`, `[databricks]`, `[all]`).
+To pin a release, add its tag: `git+https://github.com/kodexlabsio/konstruct@v0.8.0`. Each [release](https://github.com/kodexlabsio/konstruct/releases) also has the wheel attached.
 
 Then, in a repository with dbt models, SQL, DAGs or a warehouse:
 
 ```bash
 cd your-data-repo
-kerplunk status                 # what kerplunk finds here, before building anything
-kerplunk build                  # writes kerplunk-out/graph.json, REPORT.md and graph.html
-kerplunk impact orders.amount   # everything downstream of a column
-kerplunk open                   # the interactive graph in a browser
-kerplunk install                # adds the /kerplunk skill to Claude Code and Cursor
+konstruct status                 # what konstruct finds here, before building anything
+konstruct build                  # writes konstruct-out/graph.json, REPORT.md and graph.html
+konstruct impact orders.amount   # everything downstream of a column
+konstruct open                   # the interactive graph in a browser
+konstruct install                # adds the /konstruct skill to Claude Code and Cursor
 ```
 
-![kerplunk impact analysis on the jaffle_shop example](docs/demo-cli.gif)
+![konstruct impact analysis on the jaffle_shop example](docs/demo-cli.gif)
 
 To try it on the bundled example (jaffle_shop on DuckDB, with an Airflow DAG), from a clone of this repository:
 
 ```bash
 uv sync
 uv run .kodex/scripts/prepare_example.py      # builds the example's DuckDB warehouse with dbt
-uv run kerplunk build examples/jaffle_shop    # about a second
-uv run kerplunk impact stg_payments.amount -C examples/jaffle_shop
+uv run konstruct build examples/jaffle_shop    # about a second
+uv run konstruct impact stg_payments.amount -C examples/jaffle_shop
 ```
 
-`kerplunk build` needs no configuration: it finds dbt projects, Airflow DAG files, Dagster definitions, SQL files, DuckDB files and the warehouse each dbt profile points at (DuckDB, Postgres, Snowflake, BigQuery or Databricks), and prints what it found and what it did with each. If a dbt project's `target/manifest.json` is missing or older than the project files and `dbt` is on `PATH`, it runs `dbt docs generate` first. `kerplunk init` writes a commented `kerplunk.toml` recording what discovery found, for when you want to pin or change it.
+`konstruct build` needs no configuration: it finds dbt projects, Airflow DAG files, Dagster definitions, SQL files, DuckDB files and the warehouse each dbt profile points at (DuckDB, Postgres, Snowflake, BigQuery or Databricks), and prints what it found and what it did with each. If a dbt project's `target/manifest.json` is missing or older than the project files and `dbt` is on `PATH`, it runs `dbt docs generate` first. `konstruct init` writes a commented `konstruct.toml` recording what discovery found, for when you want to pin or change it.
 
 ```text
-$ kerplunk build
-kerplunk  /src/jaffle_shop
+$ konstruct build
+konstruct  /src/jaffle_shop
 
   dbt        jaffle_shop (.)  5 models, 3 seeds, 20 tests, 1 exposure  (artefacts up to date)
   duckdb     duckdb jaffle_shop.duckdb  9 relations  (dbt profile jaffle_shop)
@@ -75,12 +75,12 @@ kerplunk  /src/jaffle_shop
   graph      1 dag, 1 exposure, 5 models, 3 seeds, 1 table, 6 tasks, 20 tests; 44 columns
   lineage    32 of 32 columns of models and built tables (100%)
   warnings   none
-  wrote      graph.json, REPORT.md, graph.html to kerplunk-out in 0.7s
+  wrote      graph.json, REPORT.md, graph.html to konstruct-out in 0.7s
 ```
 
 ## Supported Inputs
 
-| Input | What kerplunk reads | Status |
+| Input | What konstruct reads | Status |
 |-------|---------------------|--------|
 | **dbt** | `target/manifest.json` and `catalog.json`: models, seeds, snapshots, sources, tests (attached to columns), exposures, descriptions, column types. Compiled SQL for lineage; `ref()` and `source()` are resolved from the manifest when only raw SQL is available | v0 |
 | **SQL** | Column-level lineage with [sqlglot](https://github.com/tobymao/sqlglot) for dbt models, warehouse views, Airflow SQL and standalone `.sql` files (`CREATE ... AS`, `INSERT ... SELECT`, `MERGE`, `UPDATE`, `DELETE`, `COPY`). Dialect from the dbt adapter or configuration | v0 |
@@ -90,44 +90,44 @@ kerplunk  /src/jaffle_shop
 | **Iceberg** | Any PyIceberg catalog, REST included: namespaces, tables, columns (nested struct fields as `parent.child`), field ids, identifier fields, partitioning, current snapshot. Metadata only; no data files are read | v0 |
 | **Dagster** | Definition files parsed statically (never imported): `@asset`, `@multi_asset` and `@dbt_assets` (with its dbt selection), keys and prefixes, dependencies from parameters, `ins=` and `deps=`, groups, asset jobs with their selections, and schedules. An asset's data is the dbt model, warehouse table or SQL target of the same name, and SQL an asset runs gets column lineage. Op-based jobs: `@op`, `@graph` and `@job` (nested graphs, `.alias()`, fan-in, `.map()`/`.collect()`, `graph.to_job()`), one task per op invocation named by its Dagster handle, with column lineage from each op's SQL and dbt runs from `dbt.cli([...])`. `@schedule` and sensors (`@sensor`, `@asset_sensor`, `@multi_asset_sensor`, `@run_status_sensor`, `@run_failure_sensor`): an asset sensor orders its job after the asset, a success sensor after the monitored job | v0 |
 | **Business definitions** | `definitions.yml` files: each term's name, synonyms, definition, owner, status (draft, agreed, approved, retired), approval date, grain, bound columns, required filters, unit, currency, related terms and exceptions. Terms become `term` nodes with `defines` edges to their columns, and the build warns when a bound column or filter column no longer exists (see [Business Definitions](#business-definitions)) | v0 |
-| **Snowflake** | Tables, views, columns, types, comments and view definitions from each database's `information_schema`, through `kerplunk[snowflake]`. Tested against fakesnow, an emulator of Snowflake's Python connector | v0 |
-| **BigQuery** | Datasets, tables, views and view queries through the client API, with nested `RECORD` fields and their descriptions, through `kerplunk[bigquery]`. Tested against the BigQuery emulator | v0 |
-| **Databricks** | Unity Catalog `information_schema` for each catalogue, including struct columns, through `kerplunk[databricks]`. Tested against a stub driver only: there is no Databricks emulator | v0 |
+| **Snowflake** | Tables, views, columns, types, comments and view definitions from each database's `information_schema`, through `konstruct[snowflake]`. Tested against fakesnow, an emulator of Snowflake's Python connector | v0 |
+| **BigQuery** | Datasets, tables, views and view queries through the client API, with nested `RECORD` fields and their descriptions, through `konstruct[bigquery]`. Tested against the BigQuery emulator | v0 |
+| **Databricks** | Unity Catalog `information_schema` for each catalogue, including struct columns, through `konstruct[databricks]`. Tested against a stub driver only: there is no Databricks emulator | v0 |
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `kerplunk build [path] [-u]` | Build `kerplunk-out/`. `-u/--update` reuses cached analyses of anything unchanged (keyed by file hashes, compiled SQL, manifest checksums and the upstream columns each model sees). `--no-dbt`, `--no-warehouse`, `--dialect`, `--out`, `--json` (a machine-readable summary), `--strict` (exit 1 on warnings) |
-| `kerplunk status` | What kerplunk finds (configuration, dbt projects and whether their artefacts are current, warehouses, DAG and SQL files), whether the graph is out of date and which inputs changed, and whether the skill is installed |
-| `kerplunk init` | Write a commented `kerplunk.toml` from what discovery found (`--stdout` to print it) |
-| `kerplunk impact <table.column>` | Everything downstream: derived columns, relations, models that join, filter or group on it, tests, exposures and the DAG tasks that run them |
-| `kerplunk trace <table.column>` | Everything upstream, each step marked `direct` (passed through or renamed) or `transformed` |
-| `kerplunk path <a> <b>` | Shortest connection between two tables or columns |
-| `kerplunk search <words>` | Find nodes by name or description, optionally `--kind model` |
-| `kerplunk conflicts` | Columns that compute the same business idea in different ways, with the sources, filters, joins and aggregations that differ and the file each is in, ranked by downstream reach. Writes `CONFLICTS.md` and `conflicts.json`. `--format markdown`, `--fail-on-conflict`, `-n N` (see [Finding Conflicting Definitions](#finding-conflicting-definitions)) |
-| `kerplunk define <term>` | What a business term means: its definition, owner, status, grain, required filters and the columns that hold it. Takes a term, a synonym or a column (to list the terms that define it). Exit status 3 when no term matches |
-| `kerplunk explain <table.column>` | How a column is calculated: its expression as SQL with CTEs and aliases inlined, the same formula composed down to source columns, and step by step each column on the way with the joins, filters and grouping that shape its rows (see [Explaining a Column](#explaining-a-column)) |
-| `kerplunk describe <name>` | Columns, types, descriptions, tests and neighbours of one node; for a task, what it runs and its neighbours in the DAG |
-| `kerplunk list [kind ...]` | Every node of the given kinds (`models`, `tables`, `sources`, `tasks`, ...; default all relations) |
-| `kerplunk open` | Open `graph.html` in a browser |
-| `kerplunk export <format>` | The graph as OpenLineage events, Mermaid, Graphviz DOT or CSV (see [Exporting](#exporting)). `-s NAME` for the lineage of one table or column, `--columns` to draw columns, `-o FILE` |
-| `kerplunk diff [--base REF]` | What the working tree (or `--head REF`) changes compared with the base (default: the merge base with main): columns added, removed or changed with their expressions before and after, changed join and filter conditions, breaking changes, DAG changes, dbt tests, sources and exposures added or removed in YAML, the downstream impact of each, and a column-aware `dbt build --select` that rebuilds only what the change affects. `--format markdown` for a pull request comment, `--fail-on-breaking` for CI |
-| `kerplunk verify` | Test the column lineage against the data in a local DuckDB warehouse by perturbation; writes `VERIFY.md` and `verify.json` and marks confirmed edges in the graph. `--seed`, `--rows`, `--model`, `--strict` |
-| `kerplunk query "<question>"` | Free-text question: ranks nodes by its words and returns them with their connections, plus impact or lineage when the question asks for it. There is no language model in kerplunk; the agent reads the result |
-| `kerplunk install` | Register the `/kerplunk` skill (see Agent Integration) |
-| `kerplunk mcp` | Run the MCP server on stdio |
+| `konstruct build [path] [-u]` | Build `konstruct-out/`. `-u/--update` reuses cached analyses of anything unchanged (keyed by file hashes, compiled SQL, manifest checksums and the upstream columns each model sees). `--no-dbt`, `--no-warehouse`, `--dialect`, `--out`, `--json` (a machine-readable summary), `--strict` (exit 1 on warnings) |
+| `konstruct status` | What konstruct finds (configuration, dbt projects and whether their artefacts are current, warehouses, DAG and SQL files), whether the graph is out of date and which inputs changed, and whether the skill is installed |
+| `konstruct init` | Write a commented `konstruct.toml` from what discovery found (`--stdout` to print it) |
+| `konstruct impact <table.column>` | Everything downstream: derived columns, relations, models that join, filter or group on it, tests, exposures and the DAG tasks that run them |
+| `konstruct trace <table.column>` | Everything upstream, each step marked `direct` (passed through or renamed) or `transformed` |
+| `konstruct path <a> <b>` | Shortest connection between two tables or columns |
+| `konstruct search <words>` | Find nodes by name or description, optionally `--kind model` |
+| `konstruct conflicts` | Columns that compute the same business idea in different ways, with the sources, filters, joins and aggregations that differ and the file each is in, ranked by downstream reach. Writes `CONFLICTS.md` and `conflicts.json`. `--format markdown`, `--fail-on-conflict`, `-n N` (see [Finding Conflicting Definitions](#finding-conflicting-definitions)) |
+| `konstruct define <term>` | What a business term means: its definition, owner, status, grain, required filters and the columns that hold it. Takes a term, a synonym or a column (to list the terms that define it). Exit status 3 when no term matches |
+| `konstruct explain <table.column>` | How a column is calculated: its expression as SQL with CTEs and aliases inlined, the same formula composed down to source columns, and step by step each column on the way with the joins, filters and grouping that shape its rows (see [Explaining a Column](#explaining-a-column)) |
+| `konstruct describe <name>` | Columns, types, descriptions, tests and neighbours of one node; for a task, what it runs and its neighbours in the DAG |
+| `konstruct list [kind ...]` | Every node of the given kinds (`models`, `tables`, `sources`, `tasks`, ...; default all relations) |
+| `konstruct open` | Open `graph.html` in a browser |
+| `konstruct export <format>` | The graph as OpenLineage events, Mermaid, Graphviz DOT or CSV (see [Exporting](#exporting)). `-s NAME` for the lineage of one table or column, `--columns` to draw columns, `-o FILE` |
+| `konstruct diff [--base REF]` | What the working tree (or `--head REF`) changes compared with the base (default: the merge base with main): columns added, removed or changed with their expressions before and after, changed join and filter conditions, breaking changes, DAG changes, dbt tests, sources and exposures added or removed in YAML, the downstream impact of each, and a column-aware `dbt build --select` that rebuilds only what the change affects. `--format markdown` for a pull request comment, `--fail-on-breaking` for CI |
+| `konstruct verify` | Test the column lineage against the data in a local DuckDB warehouse by perturbation; writes `VERIFY.md` and `verify.json` and marks confirmed edges in the graph. `--seed`, `--rows`, `--model`, `--strict` |
+| `konstruct query "<question>"` | Free-text question: ranks nodes by its words and returns them with their connections, plus impact or lineage when the question asks for it. There is no language model in konstruct; the agent reads the result |
+| `konstruct install` | Register the `/konstruct` skill (see Agent Integration) |
+| `konstruct mcp` | Run the MCP server on stdio |
 
-Tables and columns can be named as `orders`, `main.orders`, `orders.amount`, `jaffle_shop.main.orders.amount`, `ecom.raw_orders` for a dbt source, `dag_id.task_id` for a task, or by dbt unique id. When nothing matches, kerplunk suggests close names; when a name is ambiguous, it lists the candidates.
+Tables and columns can be named as `orders`, `main.orders`, `orders.amount`, `jaffle_shop.main.orders.amount`, `ecom.raw_orders` for a dbt source, `dag_id.task_id` for a task, or by dbt unique id. When nothing matches, konstruct suggests close names; when a name is ambiguous, it lists the candidates.
 
-Every command takes `-C DIR` (before or after the command name) to work on another directory; query commands also find `kerplunk-out` in any parent directory. Query commands build the graph if there is none, warn when inputs changed since the last build, and take `--refresh` to update it first, `--json` for structured output and `--graph FILE` to read a specific graph. Output is coloured on a terminal unless `NO_COLOR` is set or `--no-color` is given. Exit status is 0 on success, 1 on an error, 2 on a usage error and 3 when `path` finds no connection.
+Every command takes `-C DIR` (before or after the command name) to work on another directory; query commands also find `konstruct-out` in any parent directory. Query commands build the graph if there is none, warn when inputs changed since the last build, and take `--refresh` to update it first, `--json` for structured output and `--graph FILE` to read a specific graph. Output is coloured on a terminal unless `NO_COLOR` is set or `--no-color` is given. Exit status is 0 on success, 1 on an error, 2 on a usage error and 3 when `path` finds no connection.
 
 ## Python API
 
 ```python
-import kerplunk
+import konstruct
 
-project = kerplunk.Project("path/to/repo")
+project = konstruct.Project("path/to/repo")
 project.build(update=True)
 
 walk = project.impact("stg_payments.amount")
@@ -148,7 +148,7 @@ project.diff(base="origin/main").breaking  # removed columns still read downstre
 project.verify(seed=7).totals()  # {"claimed": 36, "confirmed": 36, "unexplained": 0, ...}
 ```
 
-Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult` made of `Item`s, plus `Definitions` of `TermDefinition`s, `Explanation`, `Diff` and `Verification`). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `kerplunk.QueryError` with suggestions. `project.graph` is the underlying `kerplunk.Graph` for anything the API does not cover.
+Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult` made of `Item`s, plus `Definitions` of `TermDefinition`s, `Explanation`, `Diff` and `Verification`). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `konstruct.QueryError` with suggestions. `project.graph` is the underlying `konstruct.Graph` for anything the API does not cover.
 
 ## Outputs
 
@@ -156,7 +156,7 @@ Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `L
 |------|----------|
 | `graph.json` | Nodes (`source`, `table`, `column`, `model`, `seed`, `snapshot`, `dag`, `task`, `test`, `exposure`, `term`) and edges (below), with descriptions, types, file paths and the inputs each came from |
 | `REPORT.md` | Summary and coverage, the most queried columns (with usage on), business terms, the most used columns, orphans, untested models, columns with no lineage, columns documented in dbt but missing from the warehouse, and warnings |
-| `graph.html` | A single offline file (open it with `kerplunk open`): tables, models and tasks in dependency order; cards that expand to their columns; column lineage drawn between columns, isolated and fitted to the screen; each column's formula in terms of its sources; the conditions that shape each model; verification results; search, deep links to any table or column, dark and light themes |
+| `graph.html` | A single offline file (open it with `konstruct open`): tables, models and tasks in dependency order; cards that expand to their columns; column lineage drawn between columns, isolated and fitted to the screen; each column's formula in terms of its sources; the conditions that shape each model; verification results; search, deep links to any table or column, dark and light themes |
 
 | Edge | Direction | Meaning |
 |------|-----------|---------|
@@ -175,7 +175,7 @@ With **Columns** on, graph.html is a column-level map of the whole project:
 
 ## Exporting
 
-`kerplunk export` hands the lineage to other tools:
+`konstruct export` hands the lineage to other tools:
 
 | Format | What it writes | Use |
 |--------|----------------|-----|
@@ -185,35 +185,35 @@ With **Columns** on, graph.html is a column-level map of the whole project:
 | `csv` | One row per column edge: relation, column, upstream relation and column, transform, verification and expression | Spreadsheets, or a lineage table in the warehouse |
 
 ```bash
-kerplunk export openlineage -o lineage.jsonl --namespace duckdb://analytics
-kerplunk export mermaid -s orders.amount --columns > docs/orders-amount.mmd
+konstruct export openlineage -o lineage.jsonl --namespace duckdb://analytics
+konstruct export mermaid -s orders.amount --columns > docs/orders-amount.mmd
 ```
 
 The tests validate every OpenLineage event, and its column lineage and schema facets, against the OpenLineage 2-0-2 JSON schemas.
 
 ## Agent Integration
 
-`kerplunk install` writes `~/.claude/skills/kerplunk/SKILL.md`. Claude Code and Cursor both read that location, so `/kerplunk what breaks if I change stg_payments.amount?` works in either. The skill tells the agent to keep the graph current with `--refresh`, to run `impact` before changing a model or column, and how to read the output. It pre-approves `kerplunk` shell commands for the turn it runs in. `kerplunk status` shows where it is installed.
+`konstruct install` writes `~/.claude/skills/konstruct/SKILL.md`. Claude Code and Cursor both read that location, so `/konstruct what breaks if I change stg_payments.amount?` works in either. The skill tells the agent to keep the graph current with `--refresh`, to run `impact` before changing a model or column, and how to read the output. It pre-approves `konstruct` shell commands for the turn it runs in. `konstruct status` shows where it is installed.
 
 | Option | Effect |
 |--------|--------|
 | `--agent claude\|cursor\|both` | `cursor` writes `~/.cursor/skills` instead. Default `both` |
 | `--target <dir>` | Install into a repository (`.claude/skills`) rather than the home directory, so the team shares it |
-| `--mcp` | With `--target`, also register `kerplunk mcp` in `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor), keeping any other servers |
-| `--force` | Replace a skill that was edited by hand; otherwise a reinstall only replaces kerplunk's own earlier versions |
+| `--mcp` | With `--target`, also register `konstruct mcp` in `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor), keeping any other servers |
+| `--force` | Replace a skill that was edited by hand; otherwise a reinstall only replaces konstruct's own earlier versions |
 
 The MCP server exposes `impact`, `trace`, `search`, `describe`, `conflicts`, `define`, `explain`, `path`, `query` and `diff`, returns the same structured results as `--json`, and rereads `graph.json` when a build changes it.
 
 ## Configuration
 
-Configuration is optional. Put it in `kerplunk.toml` at the project root, or under `[tool.kerplunk]` in `pyproject.toml`. `${VAR}` and `${VAR:-default}` read the environment, so credentials stay out of the file.
+Configuration is optional. Put it in `konstruct.toml` at the project root, or under `[tool.konstruct]` in `pyproject.toml`. `${VAR}` and `${VAR:-default}` read the environment, so credentials stay out of the file.
 
 ```toml
 dialect = "postgres"              # default: the dbt adapter, then the first warehouse
 default_catalog = "analytics"     # for unqualified tables in Airflow and SQL files
 default_schema = "public"
 exclude = ["scratch/**"]
-out_dir = "kerplunk-out"
+out_dir = "konstruct-out"
 
 [dbt]
 projects = ["transform"]          # default: every dbt_project.yml found
@@ -242,7 +242,7 @@ schemas = ["raw", "analytics"]
 type = "duckdb"
 path = "data/local.duckdb"
 
-[[warehouse]]                     # needs kerplunk[snowflake]; options go to snowflake.connector.connect
+[[warehouse]]                     # needs konstruct[snowflake]; options go to snowflake.connector.connect
 type = "snowflake"
 account = "acme-xy12345"
 user = "${SNOWFLAKE_USER}"
@@ -250,12 +250,12 @@ password = "${SNOWFLAKE_PASSWORD}"
 database = "ANALYTICS"
 databases = ["RAW", "ANALYTICS"]  # optional: more than one database
 
-[[warehouse]]                     # needs kerplunk[bigquery]; uses application default credentials
+[[warehouse]]                     # needs konstruct[bigquery]; uses application default credentials
 type = "bigquery"
 project = "my-project"
 datasets = ["shop", "marts"]
 
-[[warehouse]]                     # needs kerplunk[databricks]
+[[warehouse]]                     # needs konstruct[databricks]
 type = "databricks"
 server_hostname = "${DATABRICKS_HOST}"
 http_path = "${DATABRICKS_HTTP_PATH}"
@@ -296,7 +296,7 @@ terms:
 The build attaches each term to the columns it names, so the definition travels with the lineage:
 
 ```text
-$ kerplunk define lifetime value
+$ konstruct define lifetime value
 Customer lifetime value  [approved, Priya Shah (Head of Finance), approved 2026-10-30]
   Total value of every payment a customer has made, across all orders and payment methods, in Australian dollars.
   also called: lifetime value, LTV, CLV
@@ -313,13 +313,13 @@ Customer lifetime value  [approved, Priya Shah (Head of Finance), approved 2026-
 - **Agents get the agreed answer.** The `define` MCP tool returns the approved definition, owner, required filters and columns for a term or a column, and `query` puts definitions first, so an agent asked "what is our lifetime value?" starts from the wording the business approved.
 - **Changes show what they touch.** `impact` lists the business terms a change reaches, so changing `stg_payments.amount` names *Customer lifetime value* and *Order amount*. `describe` shows the terms that define a column. graph.html searches terms by name and synonym and highlights their columns.
 - **Definitions cannot drift silently.** The build warns, and fails under `--strict`, when a bound column or a column in a required filter no longer exists (naming the likely rename), when an approved term has no owner or approval date, when an agreed or approved term is bound to nothing, when two terms share a name or synonym, and when a related term is not defined. `REPORT.md` lists every term with its status, owner and columns.
-- **Pull requests review them.** `kerplunk diff` reports terms added, removed and changed field by field, and flags an approved term whose definition, grain, columns or filters changed while it stayed approved with the same date.
+- **Pull requests review them.** `konstruct diff` reports terms added, removed and changed field by field, and flags an approved term whose definition, grain, columns or filters changed while it stayed approved with the same date.
 
-kerplunk reads every `definitions.yml` (or `.yaml`) in the repository; `[definitions] paths` in `kerplunk.toml` pins the files. The example project has five terms in [`examples/jaffle_shop/definitions.yml`](examples/jaffle_shop/definitions.yml).
+konstruct reads every `definitions.yml` (or `.yaml`) in the repository; `[definitions] paths` in `konstruct.toml` pins the files. The example project has five terms in [`examples/jaffle_shop/definitions.yml`](examples/jaffle_shop/definitions.yml).
 
 ## Column Usage from Query History
 
-The graph knows what depends on what; it does not know what people actually read. With usage on, kerplunk reads the warehouse's query history, counts the queries and distinct users that read each column over a window, and adds that to the graph: a usage score on each column (0 to 100 on a log scale), a "Most queried columns" table in `REPORT.md`, a line in `describe`, and a tag in graph.html. It reads metadata only, once a day, and nothing is sent anywhere.
+The graph knows what depends on what; it does not know what people actually read. With usage on, konstruct reads the warehouse's query history, counts the queries and distinct users that read each column over a window, and adds that to the graph: a usage score on each column (0 to 100 on a log scale), a "Most queried columns" table in `REPORT.md`, a line in `describe`, and a tag in graph.html. It reads metadata only, once a day, and nothing is sent anywhere.
 
 ```toml
 [usage]
@@ -332,17 +332,17 @@ exclude_users = ["DBT_SERVICE"] # leave out pipeline and orchestrator accounts
 | Warehouse | Source | Columns from | History | Access needed |
 |-----------|--------|--------------|---------|---------------|
 | Snowflake | [`SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY`](https://docs.snowflake.com/en/sql-reference/account-usage/access_history) | The columns recorded for each object the query named (`DIRECT_OBJECTS_ACCESSED`), or with `objects = "base"` the underlying tables' columns, including those used only in filters and joins | 365 days; up to 3 hours behind; Enterprise Edition or higher | The `SNOWFLAKE.GOVERNANCE_VIEWER` database role, or `IMPORTED PRIVILEGES` on the SNOWFLAKE database ([access](https://docs.snowflake.com/en/sql-reference/account-usage)) |
-| BigQuery | [`region-REGION.INFORMATION_SCHEMA.JOBS`](https://cloud.google.com/bigquery/docs/information-schema-jobs) | The view records tables but not columns, so kerplunk parses each distinct query text with its own SQL analysis, counting output columns' sources and the columns used in joins, filters and grouping | 180 days | `bigquery.jobs.listAll` on the project (BigQuery Resource Viewer) |
+| BigQuery | [`region-REGION.INFORMATION_SCHEMA.JOBS`](https://cloud.google.com/bigquery/docs/information-schema-jobs) | The view records tables but not columns, so konstruct parses each distinct query text with its own SQL analysis, counting output columns' sources and the columns used in joins, filters and grouping | 180 days | `bigquery.jobs.listAll` on the project (BigQuery Resource Viewer) |
 | Databricks | [`system.access.column_lineage`](https://docs.databricks.com/aws/en/admin/system-tables/lineage) | Every column a query read, including reads with no target table | 395 days | `USE CATALOG` on `system`, `USE SCHEMA` and `SELECT` on `system.access` ([system tables](https://docs.databricks.com/aws/en/admin/system-tables/)) |
 
 The view names, retention and permissions above were checked against each vendor's documentation in November 2026. Without the access, the build carries on and warns `cannot read query history` with the warehouse's message. BigQuery takes the region from the warehouse's `location` (default `us`).
 
 ## Finding Conflicting Definitions
 
-Most data stacks compute their key measures more than once: revenue in a finance mart, again in a marketing table, again in a dashboard extract. `kerplunk conflicts` finds those columns and shows exactly how they disagree, before the numbers do.
+Most data stacks compute their key measures more than once: revenue in a finance mart, again in a marketing table, again in a dashboard extract. `konstruct conflicts` finds those columns and shows exactly how they disagree, before the numbers do.
 
 ```text
-$ kerplunk conflicts
+$ konstruct conflicts
 1 conflicting definition among 5 computed columns.
 
 revenue
@@ -363,10 +363,10 @@ revenue
 
 ## Explaining a Column
 
-Lineage says which columns a value comes from. `kerplunk explain` says how it is calculated. Each column's SQL is kept with its CTEs, subqueries and aliases inlined, then composed through every model and SQL task upstream, so the formula is stated in terms of the source columns:
+Lineage says which columns a value comes from. `konstruct explain` says how it is calculated. Each column's SQL is kept with its CTEs, subqueries and aliases inlined, then composed through every model and SQL task upstream, so the formula is stated in terms of the source columns:
 
 ```text
-$ kerplunk explain customer_ltv.lifetime_value
+$ konstruct explain customer_ltv.lifetime_value
 customer_ltv.lifetime_value  (DOUBLE)
 
   = customers.customer_lifetime_value
@@ -391,12 +391,12 @@ That chain crosses an Airflow SQL file, a dbt mart and a dbt staging model. The 
 
 ## Reviewing Changes
 
-`kerplunk diff` answers "what does this branch do to the data?" For each dbt model, SQL file and DAG file that changed, it analyses the base and current versions and compares each output column's canonical expression: the expression with every CTE, subquery and alias inlined down to physical columns. Reformatting, renaming a CTE or reordering columns is therefore not a change, and a real change is shown in full. Join, filter and grouping conditions are compared the same way. A removed column is breaking when a downstream model's current SQL still reads it, so a change that also updates its consumers is not flagged.
+`konstruct diff` answers "what does this branch do to the data?" For each dbt model, SQL file and DAG file that changed, it analyses the base and current versions and compares each output column's canonical expression: the expression with every CTE, subquery and alias inlined down to physical columns. Reformatting, renaming a CTE or reordering columns is therefore not a change, and a real change is shown in full. Join, filter and grouping conditions are compared the same way. A removed column is breaking when a downstream model's current SQL still reads it, so a change that also updates its consumers is not flagged.
 
-![kerplunk diff on a branch of the example project](docs/demo-diff.gif)
+![konstruct diff on a branch of the example project](docs/demo-diff.gif)
 
 ```text
-$ kerplunk diff
+$ konstruct diff
 1 breaking change, 1 column changed, 1 column removed, 1 column added, row logic changed in 1 relation, 1 DAG changed, 1 exposure affected.
 
 models/orders.sql  (model orders, modified)
@@ -423,11 +423,11 @@ dbt models are compared by rendering their Jinja without dbt (see How Lineage Wo
 
 ### On Pull Requests
 
-kerplunk is also a GitHub Action. It reviews every pull request column by column, posts the review as a comment (updated in place on each push), writes it to the job summary, annotates each breaking change, and fails the check when a change removes a column that something downstream still reads:
+konstruct is also a GitHub Action. It reviews every pull request column by column, posts the review as a comment (updated in place on each push), writes it to the job summary, annotates each breaking change, and fails the check when a change removes a column that something downstream still reads:
 
 ```yaml
-# .github/workflows/kerplunk.yml
-name: kerplunk
+# .github/workflows/konstruct.yml
+name: konstruct
 on: pull_request
 permissions:
   contents: read
@@ -437,7 +437,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: kodexlabsio/kerplunk@v0
+      - uses: kodexlabsio/konstruct@v0
 ```
 
 | Input | Default | Purpose |
@@ -446,14 +446,14 @@ jobs:
 | `base` | the pull request's base branch | Commit to compare with |
 | `comment` | `true` | Post the review on the pull request |
 | `fail-on-breaking` | `true` | Fail the check on a breaking change |
-| `build-args` | `--no-warehouse --no-dbt` | Arguments for `kerplunk build`. The default needs no credentials and never runs the pull request's dbt macros |
-| `extras` | none | kerplunk extras, such as `snowflake` |
+| `build-args` | `--no-warehouse --no-dbt` | Arguments for `konstruct build`. The default needs no credentials and never runs the pull request's dbt macros |
+| `extras` | none | konstruct extras, such as `snowflake` |
 
-The outputs `breaking`, `summary`, `report` (markdown) and `json` let later steps act on the result. CI runs the action against a breaking change and a safe one on every commit. Pin a release (`@v0.7.0`) for a fixed version; `@v0` moves to each new 0.x release. [`docs/kerplunk-pull-request.yml`](docs/kerplunk-pull-request.yml) shows the same steps written out, for adding a `dbt parse` or other setup first.
+The outputs `breaking`, `summary`, `report` (markdown) and `json` let later steps act on the result. CI runs the action against a breaking change and a safe one on every commit. Pin a release (`@v0.7.0`) for a fixed version; `@v0` moves to each new 0.x release. [`docs/konstruct-pull-request.yml`](docs/konstruct-pull-request.yml) shows the same steps written out, for adding a `dbt parse` or other setup first.
 
 ## How Much to Trust the Lineage
 
-Static column lineage is a claim about SQL that is rarely checked. `kerplunk verify` checks it against the data, using perturbation (the idea behind perturbation-based provenance): for every dbt model and SQL-built table in a local DuckDB file or a Postgres database it copies the model's inputs into memory, perturbs one input column at a time, reruns the model's SQL and records which output columns change.
+Static column lineage is a claim about SQL that is rarely checked. `konstruct verify` checks it against the data, using perturbation (the idea behind perturbation-based provenance): for every dbt model and SQL-built table in a local DuckDB file or a Postgres database it copies the model's inputs into memory, perturbs one input column at a time, reruns the model's SQL and records which output columns change.
 
 - **Perturbations:** each input column, and each field of a struct column, is shifted (`x * a + b`, a suffix on strings, days added to dates), set to NULL, and shuffled between rows with a seeded permutation. The seed is recorded, so a run can be repeated exactly. The warehouse is read but never written.
 - **Detecting change:** an output column changes if its multiset of values changes; if values only moved between rows (a `ROW_NUMBER()` ordered by the input still yields 1..n), it is compared paired with the columns claimed not to depend on that input; and when a column identifies rows, rows are matched across runs, so changes are seen even when a perturbation also adds or removes rows.
@@ -470,7 +470,7 @@ Results (seed 1729):
 
 The tests also make sure the verifier catches wrong lineage, not just confirms right lineage: a deleted edge is reported as unexplained, a fabricated edge as not exercised, and a deleted filter reference as an unexplained change in row count. Two further results:
 
-- **Rendering dbt without dbt:** on jaffle-shop, lineage from kerplunk's own Jinja rendering (used when there is no compiled SQL, and by `diff`) is identical to lineage from dbt's compiled SQL: 113 of 113 column edges and 9 of 9 join and filter references.
+- **Rendering dbt without dbt:** on jaffle-shop, lineage from konstruct's own Jinja rendering (used when there is no compiled SQL, and by `diff`) is identical to lineage from dbt's compiled SQL: 113 of 113 column edges and 9 of 9 join and filter references.
 - **Airflow parsing:** the static parser reports exactly the same DAGs, tasks and dependencies as Airflow's own DagBag on every fixture DAG, including TaskGroups, TaskFlow and every dependency syntax.
 - **Dagster parsing:** the static parser gives the same asset keys, dependencies, dbt selection and job selections as Dagster's own asset graph for the fixture definitions, the same op handles and op-to-op dependencies as Dagster's job graph (nested graphs and aliases included), and the same sensor and schedule targets.
 
@@ -491,18 +491,18 @@ Time grows linearly with the size of the project. Query times are medians over f
 
 ## How Lineage Works
 
-- kerplunk qualifies each statement against the columns it knows (from the dbt catalog, the warehouse, or the lineage of upstream models, processed in dependency order), so `SELECT *` expands. sqlglot then follows every output column through CTEs, subqueries, aliases, unions and window functions to physical columns.
+- konstruct qualifies each statement against the columns it knows (from the dbt catalog, the warehouse, or the lineage of upstream models, processed in dependency order), so `SELECT *` expands. sqlglot then follows every output column through CTEs, subqueries, aliases, unions and window functions to physical columns.
 - A path made only of column references and renames is `direct`; anything else (arithmetic, functions, aggregates, `CASE`, window functions) is `transformed`.
 - Columns that change which rows a model returns, without being selected (join keys, filters, GROUP BY, HAVING, QUALIFY), are recorded as `feeds` edges with `role: reference`, traced through CTEs. Impact reports the relations that use them but does not then mark every downstream column, which would bury the answer.
 - Nested data is followed: `o.customer.address.city`, `customer['country']`, `items[1].sku`, `unnest(items)` and `FROM t, UNNEST(t.items) AS i` with `i.sku` trace to the nested column (`orders.items.sku`), in outputs and in conditions, through CTEs; reading a field or unnesting a list counts as a direct pass-through. Struct columns, and the structs inside lists and map values, are listed field by field for every engine, named the way SQL reads them.
-- Without compiled SQL, dbt models are rendered by kerplunk in a sandbox: loops, variables, `ref`, `source`, `config`, the project's and packages' macros (`dbt_utils.*`), `adapter.dispatch` and dbt's cross-database macros (`dbt.date_trunc`, `dbt.cast`, `dbt.concat`, `dbt.hash`, `dbt.date_spine` and others). An unknown macro becomes a function call that keeps its arguments, so the columns passed to it stay in the lineage.
+- Without compiled SQL, dbt models are rendered by konstruct in a sandbox: loops, variables, `ref`, `source`, `config`, the project's and packages' macros (`dbt_utils.*`), `adapter.dispatch` and dbt's cross-database macros (`dbt.date_trunc`, `dbt.cast`, `dbt.concat`, `dbt.hash`, `dbt.date_spine` and others). An unknown macro becomes a function call that keeps its arguments, so the columns passed to it stay in the lineage.
 - dbt models, warehouse tables with the same relation name, Airflow SQL targets and Iceberg tables merge into one node, so lineage crosses tools: a column computed in dbt, copied into a reporting table by an Airflow task, and used by a dashboard is one chain.
 
 ## Limitations
 
 - Lineage is static. SQL built at runtime, Jinja that dbt has not compiled, Python models, stored procedures and UDF internals are not followed; each gap is listed under Warnings in `REPORT.md`.
 - Without compiled SQL, macros that query the warehouse while compiling (`run_query`, introspective `dbt_utils.get_column_values`) render as empty results, so models that depend on them may differ from dbt's compiled SQL.
-- `SELECT *` over a relation whose columns kerplunk cannot learn (no warehouse, no catalog) still gets lineage for the columns the query goes on to use, and is reported as a warning; columns passed straight through by the star to the output are not known.
+- `SELECT *` over a relation whose columns konstruct cannot learn (no warehouse, no catalog) still gets lineage for the columns the query goes on to use, and is reported as a warning; columns passed straight through by the star to the output are not known.
 - Dagster ops compose statically only: a graph body built in a loop is counted once (with a warning), ops created by factories are not seen, and sensors that choose a job at run time (`RunRequest(job_name=...)` without `job=`) are not linked. Op inputs and outputs are not tracked as data; lineage comes from the SQL an op runs.
 - Airflow parsing covers the common ways of writing DAGs. Task ids or SQL built in loops or from runtime values, dynamic task mapping over computed lists, and DAG factories are skipped with a warning. Selections by `--selector`, `state:`, `result:` and `source_status:` are not resolved.
 - Identifiers are matched case-insensitively. Two relations whose names differ only by case are treated as one.
@@ -513,14 +513,14 @@ Time grows linearly with the size of the project. Query times are medians over f
 
 ### Not Yet (v1)
 
-- Testing the Databricks connector against a real workspace. The tests are written (`tests/test_databricks_live.py`: metadata, struct fields, view lineage and system-table usage, in a scratch schema that is dropped afterwards) and a CI job runs them when the `KERPLUNK_TEST_DATABRICKS_*` repository secrets are set; they have not yet run against a workspace.
+- Testing the Databricks connector against a real workspace. The tests are written (`tests/test_databricks_live.py`: metadata, struct fields, view lineage and system-table usage, in a scratch schema that is dropped afterwards) and a CI job runs them when the `KONSTRUCT_TEST_DATABRICKS_*` repository secrets are set; they have not yet run against a workspace.
 - Column-level lineage for dbt Python models and through UDFs.
 - `verify` against sampled remote warehouses (Snowflake, BigQuery, Databricks).
 - Incremental warehouse metadata (it is re-read on every build; it is fast for local warehouses but not for large remote ones).
 
 ## CI/CD
 
-Build and Test runs on every push to `main` and on pull requests: Ruff and mypy, a commit message check on pull requests, the test suite on Python 3.11, 3.12 and 3.13 against Postgres and Iceberg REST catalog service containers, an end-to-end build of the jaffle_shop example that fails if it takes a minute or more, an install of the built wheel with `uv tool install`, an install from GitHub exactly as this README describes, the real-world jaffle-shop test, and the Airflow parity test. The test job also runs the browser tests in Chromium and fails below 90% branch coverage. Create Release runs automatically after Build and Test passes on a push to `main`, and releases the commit that was tested. commitizen reads the Conventional Commits since the last tag (`fix` gives a patch release, `feat` a minor one, a breaking change the next major, or minor while the version is 0.x), updates `pyproject.toml`, `src/kerplunk/__init__.py`, `uv.lock` and `CHANGELOG.md`, commits `chore(release): Release X.Y.Z`, tags `vX.Y.Z` and publishes a GitHub release with the changelog, wheel and sdist. A push with nothing releasable (only `docs`, `ci`, `test` or `chore` commits) makes no release. It can also be run by hand from the Actions tab to force a patch, minor or major release. Publishing to PyPI is a separate job that stays off until the `PUBLISH_TO_PYPI` repository variable is `true` and a `pypi` environment with trusted publishing exists.
+Build and Test runs on every push to `main` and on pull requests: Ruff and mypy, a commit message check on pull requests, the test suite on Python 3.11, 3.12 and 3.13 against Postgres and Iceberg REST catalog service containers, an end-to-end build of the jaffle_shop example that fails if it takes a minute or more, an install of the built wheel with `uv tool install`, an install from GitHub exactly as this README describes, the real-world jaffle-shop test, and the Airflow parity test. The test job also runs the browser tests in Chromium and fails below 90% branch coverage. Create Release runs automatically after Build and Test passes on a push to `main`, and releases the commit that was tested. commitizen reads the Conventional Commits since the last tag (`fix` gives a patch release, `feat` a minor one, a breaking change the next major, or minor while the version is 0.x), updates `pyproject.toml`, `konstruct/__init__.py`, `uv.lock` and `CHANGELOG.md`, commits `chore(release): Release X.Y.Z`, tags `vX.Y.Z` and publishes a GitHub release with the changelog, wheel and sdist. A push with nothing releasable (only `docs`, `ci`, `test` or `chore` commits) makes no release. It can also be run by hand from the Actions tab to force a patch, minor or major release. Publishing to PyPI is a separate job that stays off until the `PUBLISH_TO_PYPI` repository variable is `true` and a `pypi` environment with trusted publishing exists.
 
 ```mermaid
 graph LR
@@ -583,8 +583,8 @@ graph LR
 
 1. **Clone the repository**
    ```bash
-   git clone git@github.com:kodexlabsio/kerplunk.git
-   cd kerplunk
+   git clone git@github.com:kodexlabsio/konstruct.git
+   cd konstruct
    ```
 
 2. **Install dependencies and the git hooks**
@@ -610,7 +610,7 @@ uv run pytest --cov                             # everything, with branch covera
 | Property-based | `test_properties` | Invariants on generated inputs with Hypothesis: impact and trace are inverse, lineage matches generated CTE chains in seven dialects, Airflow dependencies match generated DAGs, no text crashes the SQL analysis |
 | Integration | `test_warehouse`, `test_build`, `test_cloud_warehouses` | DuckDB, Postgres and Iceberg (SQL and REST catalogs) for real; Snowflake against fakesnow and BigQuery against its emulator; Databricks against a stub; builds of projects with and without dbt |
 | End to end | `test_build`, `test_cli`, `test_query`, `test_mcp` | The example built with real dbt, every CLI command, the Python API, and the MCP server in process and over stdio |
-| Golden files | `test_golden`, `tests/golden/` | The exact text of the CLI output and REPORT.md; regenerate with `KERPLUNK_UPDATE_GOLDEN=1` and review the diff |
+| Golden files | `test_golden`, `tests/golden/` | The exact text of the CLI output and REPORT.md; regenerate with `KONSTRUCT_UPDATE_GOLDEN=1` and review the diff |
 | Browser | `test_browser` | graph.html in Chromium: selection, column rows and edges, formulas, deep links, isolate, direction, filters, themes, search, hostile text, a 400-relation graph |
 | Usage | `test_usage` | The SQL sent to Snowflake, BigQuery and Databricks, query text parsing for BigQuery, usage on columns, in the report and describe, the daily cache, off by default, and missing permissions as a warning, against stub drivers in each vendor's row shapes |
 | Conflicts | `test_conflicts` | Two revenue definitions that differ by one filter (the pair, the filter and its file), different sources, ranking, grouping by business terms, copies left out, no false conflicts on the example |
@@ -618,14 +618,14 @@ uv run pytest --cov                             # everything, with branch covera
 | Formulas | `test_explain` | `explain` on dbt and Airflow SQL, and composed formulas evaluated on the data against the final model, row for row; the viewer's formula cache |
 | Export | `test_export` | OpenLineage events validated against the OpenLineage JSON schemas; Mermaid, DOT and CSV |
 | Scale | `test_scale` | A generated 300-model project: full build and `--update` times |
-| Real world | `test_realworld` | dbt Labs' jaffle-shop at a pinned commit (needs network; `KERPLUNK_REALWORLD=1`) |
+| Real world | `test_realworld` | dbt Labs' jaffle-shop at a pinned commit (needs network; `KONSTRUCT_REALWORLD=1`) |
 | Lineage against data | `test_verify` | `verify` confirms true lineage and catches removed edges, false edges and dropped filters; a differential property test runs generated queries on generated data and requires the static lineage to agree with execution |
 | Change review | `test_diff` | `diff` on real git repositories: formatting and CTE renames are not changes, removed columns still read downstream are breaking, conditions, DAGs, two commits, all output formats, and dbt Jinja rendering |
 | Dagster | `test_dagster` | The Dagster parser, assets and op jobs joining dbt and warehouse lineage, sensors ordering work, and parity with Dagster's own asset and job graphs (needs Dagster; see the CI job) |
 | Databricks | `test_databricks_live` | The connector against a real workspace with Unity Catalog, compared with the stub results; runs only with workspace credentials (see the file) |
 | Parity | `test_airflow_parity` | The static Airflow parser against Airflow's own DagBag (needs Airflow; see the file for the command) |
 
-The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end tests build a copy of the example project for real. In CI, `KERPLUNK_REQUIRE_SERVICES=1` turns a missing service or browser into a failure rather than a skip, and `HYPOTHESIS_PROFILE=ci` runs more generated examples.
+The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end tests build a copy of the example project for real. In CI, `KONSTRUCT_REQUIRE_SERVICES=1` turns a missing service or browser into a failure rather than a skip, and `HYPOTHESIS_PROFILE=ci` runs more generated examples.
 
 ### Other Commands
 
@@ -633,7 +633,7 @@ The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end 
 - `uv run .kodex/scripts/prepare_example.py`: build the example warehouse
 - `vhs .kodex/scripts/demo-cli.tape`: re-record `docs/demo-cli.gif`
 - `.kodex/scripts/demo_diff_setup.sh && vhs .kodex/scripts/demo-diff.tape`: re-record `docs/demo-diff.gif`
-- `vhs .kodex/scripts/demo-claude-code.tape`: record the same question through `/kerplunk` in Claude Code (needs Claude Code signed in)
+- `vhs .kodex/scripts/demo-claude-code.tape`: record the same question through `/konstruct` in Claude Code (needs Claude Code signed in)
 
 ### Commits
 
@@ -643,21 +643,21 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/), che
 
 | Path | Contents |
 |------|----------|
-| `src/kerplunk/graph.py` | Graph model, name resolution, impact, trace and path |
-| `src/kerplunk/sql.py` | sqlglot column lineage, canonical expressions and conditions |
-| `src/kerplunk/dbt.py`, `jinja.py`, `airflow.py`, `dagster.py`, `warehouse.py`, `definitions.py` | Inputs, the sandboxed dbt renderer and business definitions |
-| `src/kerplunk/config.py`, `build.py`, `usage.py` | Configuration, discovery, the build and its cache, and usage from query history |
-| `src/kerplunk/query.py`, `explain.py`, `conflicts.py`, `diff.py`, `verify.py` | Questions over the graph: impact and the rest, formulas, conflicting definitions, change review, lineage against data |
-| `src/kerplunk/report.py`, `html.py`, `viewer/`, `export.py` | REPORT.md, graph.html (its HTML, CSS, script and fonts) and the export formats |
-| `src/kerplunk/project.py` | The Python API |
-| `src/kerplunk/cli.py`, `console.py`, `status.py`, `mcp_server.py`, `skill.py` | Interfaces |
+| `konstruct/graph.py` | Graph model, name resolution, impact, trace and path |
+| `konstruct/sql.py` | sqlglot column lineage, canonical expressions and conditions |
+| `konstruct/dbt.py`, `jinja.py`, `airflow.py`, `dagster.py`, `warehouse.py`, `definitions.py` | Inputs, the sandboxed dbt renderer and business definitions |
+| `konstruct/config.py`, `build.py`, `usage.py` | Configuration, discovery, the build and its cache, and usage from query history |
+| `konstruct/query.py`, `explain.py`, `conflicts.py`, `diff.py`, `verify.py` | Questions over the graph: impact and the rest, formulas, conflicting definitions, change review, lineage against data |
+| `konstruct/report.py`, `html.py`, `viewer/`, `export.py` | REPORT.md, graph.html (its HTML, CSS, script and fonts) and the export formats |
+| `konstruct/project.py` | The Python API |
+| `konstruct/cli.py`, `console.py`, `status.py`, `mcp_server.py`, `skill.py` | Interfaces |
 | `action.yml` | The GitHub Action |
 | `examples/jaffle_shop` | dbt Labs' jaffle_shop_duckdb (Apache-2.0, see its NOTICE) with an Airflow DAG |
 | `.kodex/scripts` | Project scripts: example preparation, test services, commit rules, benchmark, demo tapes |
 
 ## Contributing and Security
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report a problem or propose a change, and [SECURITY.md](SECURITY.md) for how to report a vulnerability and what kerplunk executes, reads and writes (it never imports DAG code, renders dbt Jinja in a sandbox and collects no telemetry).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report a problem or propose a change, and [SECURITY.md](SECURITY.md) for how to report a vulnerability and what konstruct executes, reads and writes (it never imports DAG code, renders dbt Jinja in a sandbox and collects no telemetry).
 
 ## Licence
 

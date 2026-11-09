@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-from kerplunk import Project
-from kerplunk.dagster import parse_file, parse_source
+from konstruct import Project
+from konstruct.dagster import parse_file, parse_source
 
 FIXTURE = Path(__file__).parent / "fixtures" / "dagster" / "definitions.py"
 
@@ -179,7 +179,7 @@ def test_keys_resources_and_selections(tmp_path: Path) -> None:
 
 
 def test_round_trip() -> None:
-    from kerplunk.dagster import DagsterFile
+    from konstruct.dagster import DagsterFile
 
     parsed = parse_file(FIXTURE)
     assert DagsterFile.from_dict(parsed.to_dict()) == parsed
@@ -295,7 +295,7 @@ def test_static_parse_matches_dagster(built_jaffle: Path, tmp_path: Path) -> Non
     from .conftest import run_dbt
 
     run_dbt(root, "parse")
-    spec = importlib.util.spec_from_file_location("kerplunk_fixture_definitions", root / "definitions.py")
+    spec = importlib.util.spec_from_file_location("konstruct_fixture_definitions", root / "definitions.py")
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -441,7 +441,7 @@ def test_dagster_in_the_build(tmp_path: Path) -> None:
         )
     )
     (pipelines / "broken.py").write_text("from dagster import asset\n@asset\ndef x(:\n")
-    (tmp_path / "kerplunk.toml").write_text('[dagster]\npaths = ["pipelines"]\n')
+    (tmp_path / "konstruct.toml").write_text('[dagster]\npaths = ["pipelines"]\n')
     project = Project(tmp_path)
     result = project.build()
     graph = result.graph

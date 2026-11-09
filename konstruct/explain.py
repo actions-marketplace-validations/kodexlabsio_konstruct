@@ -1,4 +1,4 @@
-"""What a column is, as a formula: ``kerplunk explain orders.credit_card_amount``.
+"""What a column is, as a formula: ``konstruct explain orders.credit_card_amount``.
 
 The build keeps each column's expression as SQL over physical columns, with CTEs, subqueries and
 aliases inlined (``attrs["expression"]`` on column nodes), and each relation's join, filter and
@@ -28,7 +28,7 @@ from typing import Any, Protocol
 import sqlglot
 from sqlglot import exp
 
-from kerplunk.graph import Graph, Node
+from konstruct.graph import Graph, Node
 
 MAX_COMPOSED = 4000
 """Stop substituting once the composed formula is longer than this many characters."""

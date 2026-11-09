@@ -1,20 +1,20 @@
 """Column usage from warehouse query history: which columns people and dashboards actually read.
 
 REPORT.md's most used columns come from the graph's structure. Query history says what is
-queried. Usage is off by default; ``[usage] enabled = true`` in kerplunk.toml turns it on for every
+queried. Usage is off by default; ``[usage] enabled = true`` in konstruct.toml turns it on for every
 Snowflake, BigQuery and Databricks warehouse in the build. It reads metadata only, aggregated to a
 count of queries and distinct users per column over the last ``days`` days.
 
 Sources, as documented by each vendor (checked November 2026):
 
 * **Snowflake**: ``SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY``, Enterprise Edition or higher. Each
-  query lists the objects it read with their columns. kerplunk counts ``DIRECT_OBJECTS_ACCESSED``
+  query lists the objects it read with their columns. konstruct counts ``DIRECT_OBJECTS_ACCESSED``
   (what the query named, views included) by default, or ``BASE_OBJECTS_ACCESSED`` (the underlying
   tables, including columns used only in filters and joins) with ``objects = "base"``. The role
   needs the ``SNOWFLAKE.GOVERNANCE_VIEWER`` database role or ``IMPORTED PRIVILEGES`` on the
   SNOWFLAKE database. Latency up to three hours; one year of history.
 * **BigQuery**: ``region-REGION.INFORMATION_SCHEMA.JOBS`` for the project. It records the tables a
-  job referenced but no columns, so kerplunk parses each distinct query text with its own SQL
+  job referenced but no columns, so konstruct parses each distinct query text with its own SQL
   analysis and counts the columns it reads, including those used in joins and filters. Needs
   ``bigquery.jobs.listAll`` (BigQuery Resource Viewer). 180 days of history.
 * **Databricks**: ``system.access.column_lineage``, which records every column a query reads
@@ -30,7 +30,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from kerplunk.warehouse import (
+from konstruct.warehouse import (
     BigQueryConnector,
     DatabricksConnector,
     MissingDriver,

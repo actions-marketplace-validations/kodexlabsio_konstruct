@@ -1,20 +1,20 @@
-"""kerplunk: a queryable graph of a data stack, with column-level lineage.
+"""konstruct: a queryable graph of a data stack, with column-level lineage.
 
 The main entry point is `Project`::
 
-    import kerplunk
+    import konstruct
 
-    project = kerplunk.Project(".")
+    project = konstruct.Project(".")
     project.build(update=True)
     print(project.impact("orders.amount"))
 """
 
 __version__ = "0.10.2"
 
-from kerplunk.explain import Explanation
-from kerplunk.graph import Edge, Graph, Node
-from kerplunk.project import Project
-from kerplunk.query import (
+from konstruct.explain import Explanation
+from konstruct.graph import Edge, Graph, Node
+from konstruct.project import Project
+from konstruct.query import (
     Definitions,
     Description,
     EdgeItem,

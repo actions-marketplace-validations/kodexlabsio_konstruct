@@ -9,16 +9,16 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from kerplunk.build import Cache, RelationIndex, build
-from kerplunk.config import load_config
-from kerplunk.graph import Graph, Node
+from konstruct.build import Cache, RelationIndex, build
+from konstruct.config import load_config
+from konstruct.graph import Graph, Node
 
 from .test_warehouse import require
 
 
 @pytest.fixture
 def jaffle_graph(jaffle_built_graph: Path) -> Graph:
-    return Graph.read(jaffle_built_graph / "kerplunk-out" / "graph.json")
+    return Graph.read(jaffle_built_graph / "konstruct-out" / "graph.json")
 
 
 def edges(graph: Graph, kind: str) -> set[tuple[str, str]]:
@@ -30,7 +30,7 @@ def edges(graph: Graph, kind: str) -> set[tuple[str, str]]:
 
 @pytest.mark.dbt
 def test_example_builds_every_output(jaffle_built_graph: Path, jaffle_graph: Graph) -> None:
-    out = jaffle_built_graph / "kerplunk-out"
+    out = jaffle_built_graph / "konstruct-out"
     assert {p.name for p in out.iterdir()} == {"graph.json", "REPORT.md", "graph.html", "cache.json"}
     assert jaffle_graph.warnings == []
     assert jaffle_graph.meta["dialect"] == "duckdb"
@@ -155,7 +155,7 @@ def test_update_reuses_unchanged_work_and_redoes_changed_models(jaffle: Path, db
 
 def test_cache_ignores_other_versions(tmp_path: Path) -> None:
     path = tmp_path / "cache.json"
-    path.write_text(json.dumps({"version": 1, "kerplunk": "0.0.0", "entries": {"k": 1}}))
+    path.write_text(json.dumps({"version": 1, "konstruct": "0.0.0", "entries": {"k": 1}}))
     assert Cache(path, enabled=True).entries == {}
     path.write_text("not json")
     assert Cache(path, enabled=True).entries == {}
@@ -207,7 +207,7 @@ def test_sql_files_and_views_without_dbt(tmp_path: Path) -> None:
     }
 
 
-def test_kerplunk_toml_configures_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_konstruct_toml_configures_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "data").mkdir()
     make_warehouse(tmp_path / "data" / "app.duckdb")
     (tmp_path / "ignored.duckdb").write_bytes(b"")
@@ -215,7 +215,7 @@ def test_kerplunk_toml_configures_inputs(tmp_path: Path, monkeypatch: pytest.Mon
     (tmp_path / "jobs" / "a.sql").write_text("create table main.a as select id from raw.users")
     (tmp_path / "jobs" / "scratch.sql").write_text("this is not sql")
     monkeypatch.setenv("APP_DB", "data/app.duckdb")
-    (tmp_path / "kerplunk.toml").write_text(
+    (tmp_path / "konstruct.toml").write_text(
         """
 dialect = "duckdb"
 exclude = ["jobs/scratch.sql"]
@@ -246,7 +246,7 @@ schemas = ["raw"]
 
 def test_pyproject_tool_table_and_bad_warehouse(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text(
-        '[tool.kerplunk]\n[[tool.kerplunk.warehouse]]\ntype = "duckdb"\npath = "missing.duckdb"\n'
+        '[tool.konstruct]\n[[tool.konstruct.warehouse]]\ntype = "duckdb"\npath = "missing.duckdb"\n'
     )
     result = build(load_config(tmp_path))
     assert result.inputs["warehouses"] == 0
@@ -263,7 +263,7 @@ def test_dbt_project_without_artefacts_or_dbt(tmp_path: Path, monkeypatch: pytes
     shutil.copytree(
         Path(__file__).resolve().parents[1] / "examples" / "jaffle_shop",
         tmp_path / "shop",
-        ignore=shutil.ignore_patterns("target", "*.duckdb", "kerplunk-out", "logs"),
+        ignore=shutil.ignore_patterns("target", "*.duckdb", "konstruct-out", "logs"),
     )
     monkeypatch.setenv("PATH", str(tmp_path))
     result = build(load_config(tmp_path))
@@ -282,7 +282,7 @@ def test_relation_index_suffixes_and_placeholders() -> None:
     assert index.find("sales.orders") is graph.nodes["a"]
     assert index.find("orders") is None
     assert index.find("users") is graph.nodes["c"]
-    assert index.find("__kerplunk__.users") is graph.nodes["c"]
+    assert index.find("__konstruct__.users") is graph.nodes["c"]
     assert index.find("other.sales.users") is None
     assert index.find("host.db.sales.users", drop_leading=True) is graph.nodes["c"]
 
@@ -294,7 +294,7 @@ def test_relation_index_suffixes_and_placeholders() -> None:
 def test_postgres_warehouse_end_to_end(tmp_path: Path) -> None:
     import psycopg
 
-    dsn = require("KERPLUNK_TEST_PG_DSN")
+    dsn = require("KONSTRUCT_TEST_PG_DSN")
     schema = f"kp_{uuid.uuid4().hex[:8]}"
     with psycopg.connect(dsn, autocommit=True) as con:
         con.execute(f"create schema {schema}")
@@ -306,7 +306,7 @@ def test_postgres_warehouse_end_to_end(tmp_path: Path) -> None:
         )
     try:
         os.environ["KP_TEST_DSN"] = dsn
-        (tmp_path / "kerplunk.toml").write_text(
+        (tmp_path / "konstruct.toml").write_text(
             f'[[warehouse]]\ntype = "postgres"\ndsn = "${{KP_TEST_DSN}}"\nschemas = ["{schema}"]\n'
         )
         graph = build(load_config(tmp_path)).graph
@@ -341,7 +341,7 @@ def test_iceberg_tables_join_sql_lineage(tmp_path: Path) -> None:
     (tmp_path / "report.sql").write_text(
         "create table lake.marts.big as select id, amount * 2 as doubled from lake.sales.orders"
     )
-    (tmp_path / "kerplunk.toml").write_text(
+    (tmp_path / "konstruct.toml").write_text(
         f"""
 dialect = "trino"
 [[warehouse]]
@@ -364,7 +364,7 @@ warehouse = "file://{tmp_path}"
 
 
 def test_struct_fields_from_duckdb_trace_and_verify(tmp_path: Path) -> None:
-    from kerplunk import Project
+    from konstruct import Project
 
     con = duckdb.connect(str(tmp_path / "shop.duckdb"))
     con.execute("create schema raw")
@@ -402,7 +402,7 @@ def test_struct_fields_from_duckdb_trace_and_verify(tmp_path: Path) -> None:
 
 
 def test_lists_of_structs_and_maps_from_duckdb(tmp_path: Path) -> None:
-    from kerplunk import Project
+    from konstruct import Project
 
     con = duckdb.connect(str(tmp_path / "shop.duckdb"))
     con.execute("create schema raw")

@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from kerplunk import Project
+from konstruct import Project
 
 pytestmark = pytest.mark.scale
 

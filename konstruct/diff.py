@@ -1,7 +1,7 @@
-"""`kerplunk diff`: what a change does to the data stack, column by column, before it is merged.
+"""`konstruct diff`: what a change does to the data stack, column by column, before it is merged.
 
 For every dbt model, SQL file and Airflow DAG file that differs between a base commit and the
-working tree (or a head commit), kerplunk analyses both versions and compares each output column's
+working tree (or a head commit), konstruct analyses both versions and compares each output column's
 canonical expression (CTEs, subqueries and aliases inlined down to physical columns, so formatting,
 renamed CTEs and reordered columns do not count as changes) and the join, filter and grouping
 conditions. It then reports:
@@ -22,13 +22,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kerplunk import airflow, dbt
-from kerplunk.definitions import FILE_NAMES as DEFINITION_FILES
-from kerplunk.graph import RELATION_KINDS, Graph, Node
-from kerplunk.jinja import Renderer, render_model
-from kerplunk.query import Walk, impact
-from kerplunk.sql import StatementLineage, analyse, strip_templating
-from kerplunk.verify import defining_sql_file
+from konstruct import airflow, dbt
+from konstruct.definitions import FILE_NAMES as DEFINITION_FILES
+from konstruct.graph import RELATION_KINDS, Graph, Node
+from konstruct.jinja import Renderer, render_model
+from konstruct.query import Walk, impact
+from konstruct.sql import StatementLineage, analyse, strip_templating
+from konstruct.verify import defining_sql_file
 
 
 class DiffError(Exception):
@@ -177,7 +177,7 @@ _MEANING = ("definition", "columns", "filters", "grain")
 
 
 def compare_definitions(path: str, before: str | None, after: str | None) -> DefinitionsChange:
-    from kerplunk.definitions import parse
+    from konstruct.definitions import parse
 
     old = {t.name: t for t in parse(before or "", path).terms}
     new = {t.name: t for t in parse(after or "", path).terms}
@@ -381,7 +381,7 @@ class Diff:
 
     @property
     def source_files(self) -> list[str]:
-        """Changed files, leaving out generated ones (target/, logs/, kerplunk-out/, packages)."""
+        """Changed files, leaving out generated ones (target/, logs/, konstruct-out/, packages)."""
         return [f for f in self.files if not set(Path(f).parts) & dbt.SKIP_DIRS]
 
     @property
@@ -487,7 +487,7 @@ class Diff:
 
     def __str__(self) -> str:
         lines = [
-            f"kerplunk diff  {self.base}..{self.head}  ({len(self.source_files)} file{'s' if len(self.source_files) != 1 else ''} changed)",
+            f"konstruct diff  {self.base}..{self.head}  ({len(self.source_files)} file{'s' if len(self.source_files) != 1 else ''} changed)",
             "",
         ]
         lines.append(self.summary())
@@ -540,7 +540,7 @@ class Diff:
 
     def markdown(self) -> str:
         c = self.counts()
-        lines = [f"### kerplunk: {self.summary()}", ""]
+        lines = [f"### konstruct: {self.summary()}", ""]
         if self.breaking:
             lines += ["**Breaking changes**", ""]
             for label, change in self.breaking:
@@ -597,7 +597,7 @@ class Diff:
         if self.selection.modified_plus:
             lines += [f"**dbt:** {self.selection.summary()}", "", f"```\n{self.selection.command()}\n```", ""]
         lines.append(
-            f"<sub>{c['files']} file{'s' if c['files'] != 1 else ''} compared between `{self.base}` and `{self.head}` by kerplunk. "
+            f"<sub>{c['files']} file{'s' if c['files'] != 1 else ''} compared between `{self.base}` and `{self.head}` by konstruct. "
             "Expressions are compared with CTEs and aliases inlined, so formatting and renames do not count.</sub>"
         )
         return "\n".join(lines) + "\n"

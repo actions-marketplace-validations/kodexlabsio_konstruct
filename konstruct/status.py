@@ -1,4 +1,4 @@
-"""`kerplunk status` and `kerplunk init`: what kerplunk finds in a project, without building."""
+"""`konstruct status` and `konstruct init`: what konstruct finds in a project, without building."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from kerplunk import dbt
-from kerplunk.config import (
+from konstruct import dbt
+from konstruct.config import (
     Config,
     WarehouseConfig,
     discover_dag_files,
@@ -19,7 +19,7 @@ from kerplunk.config import (
     discover_warehouses,
     load_config,
 )
-from kerplunk.graph import Graph
+from konstruct.graph import Graph
 
 
 @dataclass
@@ -57,7 +57,7 @@ class Status:
         else:
             rows.append(("dbt", "no dbt projects found"))
         rows.append(
-            ("dbt on PATH", "yes" if self.dbt_on_path else "no (kerplunk uses existing target/ artefacts)")
+            ("dbt on PATH", "yes" if self.dbt_on_path else "no (konstruct uses existing target/ artefacts)")
         )
         for warehouse in self.warehouses or [{"name": "none found", "source": ""}]:
             source = f" ({warehouse['source']})" if warehouse.get("source") else ""
@@ -74,9 +74,9 @@ class Status:
             )
             rows.append(("graph", f"{graph['path']}, built {graph['age']}; {state}"))
         else:
-            rows.append(("graph", "not built yet; run `kerplunk build`"))
+            rows.append(("graph", "not built yet; run `konstruct build`"))
         rows.append(
-            ("skill", ", ".join(self.skills) if self.skills else "not installed; run `kerplunk install`")
+            ("skill", ", ".join(self.skills) if self.skills else "not installed; run `konstruct install`")
         )
         return rows
 
@@ -111,7 +111,7 @@ def _relative(path: Path, root: Path) -> str:
 
 def _sql_used_by(dag_files: list[Path]) -> set[Path]:
     """SQL files that DAG tasks run, which are analysed with their task rather than on their own."""
-    from kerplunk.airflow import parse_file
+    from konstruct.airflow import parse_file
 
     used: set[Path] = set()
     for path in dag_files:
@@ -124,8 +124,8 @@ def _sql_used_by(dag_files: list[Path]) -> set[Path]:
 
 
 def inspect(path: Path, out_dir: Path | None = None, home: Path | None = None) -> Status:
-    from kerplunk.build import changed_inputs
-    from kerplunk.project import find_out_dir
+    from konstruct.build import changed_inputs
+    from konstruct.project import find_out_dir
 
     config = load_config(path, out_dir)
     root = config.root
@@ -182,17 +182,17 @@ def inspect(path: Path, out_dir: Path | None = None, home: Path | None = None) -
         (home / ".claude" / "skills", "user (Claude Code and Cursor)"),
         (home / ".cursor" / "skills", "user (Cursor)"),
     ):
-        if (base / "kerplunk" / "SKILL.md").is_file():
+        if (base / "konstruct" / "SKILL.md").is_file():
             status.skills.append(agent)
     return status
 
 
 def render_config(config: Config, status: Status, warehouses: list[WarehouseConfig]) -> str:
-    """A commented kerplunk.toml that spells out what discovery found, ready to edit."""
+    """A commented konstruct.toml that spells out what discovery found, ready to edit."""
     lines = [
-        "# kerplunk configuration. Everything is optional: without this file kerplunk discovers its",
+        "# konstruct configuration. Everything is optional: without this file konstruct discovers its",
         "# inputs, and this file records what it found so you can pin or change it.",
-        "# See https://github.com/kodexlabsio/kerplunk#configuration",
+        "# See https://github.com/kodexlabsio/konstruct#configuration",
         "",
         '# dialect = "duckdb"              # SQL dialect; default: the dbt adapter, then the warehouse',
         '# default_catalog = "analytics"   # for unqualified tables in Airflow and SQL files',

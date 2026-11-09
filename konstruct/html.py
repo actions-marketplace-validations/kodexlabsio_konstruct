@@ -1,9 +1,9 @@
 """Write graph.html: one self-contained, offline, interactive viewer of the graph.
 
-The page is assembled from ``kerplunk/viewer`` (``index.html``, ``viewer.css``, ``viewer.js`` and
+The page is assembled from ``konstruct/viewer`` (``index.html``, ``viewer.css``, ``viewer.js`` and
 the Manrope and JetBrains Mono fonts, both under the SIL Open Font License, embedded as data
 URLs). It embeds ``Graph.to_dict()`` as JSON, plus each column's formula and each relation's
-conditions as computed by :mod:`kerplunk.explain`, and loads nothing from the network.
+conditions as computed by :mod:`konstruct.explain`, and loads nothing from the network.
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from kerplunk.graph import Graph
+from konstruct.graph import Graph
 
-_DATA_PLACEHOLDER = "__KERPLUNK_DATA__"
-_EXPLAIN_PLACEHOLDER = "__KERPLUNK_EXPLAIN__"
+_DATA_PLACEHOLDER = "__KONSTRUCT_DATA__"
+_EXPLAIN_PLACEHOLDER = "__KONSTRUCT_EXPLAIN__"
 
 # Inside <script type="application/json"> the HTML parser only looks for "</script"; escaping
 # "<", ">" and "&" rules that out entirely, and U+2028/U+2029 are escaped for older JS parsers.
@@ -37,7 +37,7 @@ _FONTS = (
 
 
 def _asset(name: str) -> resources.abc.Traversable:
-    return resources.files("kerplunk").joinpath("viewer", name)
+    return resources.files("konstruct").joinpath("viewer", name)
 
 
 def _font_faces() -> str:
@@ -67,11 +67,11 @@ def _embed_json(data: Any) -> str:
 def explanations(graph: Graph, cache: Any = None) -> dict[str, Any]:
     """Column formulas and relation conditions for the viewer, or empty if they cannot be made.
     ``cache`` is the build cache, so an update recomputes only the formulas that changed."""
-    from kerplunk.explain import Explainer
+    from konstruct.explain import Explainer
 
     try:
         # A formula longer than this is not readable at a glance; the panel points to
-        # `kerplunk explain` for the full composition.
+        # `konstruct explain` for the full composition.
         return Explainer(graph, max_composed=VIEWER_FORMULA_LIMIT).summaries(cache=cache)
     except RecursionError:
         return {}

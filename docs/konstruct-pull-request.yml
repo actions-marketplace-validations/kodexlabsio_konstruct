@@ -1,10 +1,10 @@
-# kerplunk on pull requests: comments with what the change does to the data stack, column by
+# konstruct on pull requests: comments with what the change does to the data stack, column by
 # column, and fails when it removes a column that something downstream still reads.
 #
-# Copy to .github/workflows/kerplunk.yml in a dbt or SQL repository. `dbt parse` gives kerplunk the
+# Copy to .github/workflows/konstruct.yml in a dbt or SQL repository. `dbt parse` gives konstruct the
 # manifest it needs to resolve ref() and source(); it needs a profile but no warehouse connection.
 # Replace dbt-duckdb with your adapter, and drop the dbt step if the repository has no dbt project.
-name: kerplunk
+name: konstruct
 
 on:
   pull_request:
@@ -23,26 +23,26 @@ jobs:
 
       - uses: astral-sh/setup-uv@v10.3.3
 
-      - name: Install kerplunk and dbt
+      - name: Install konstruct and dbt
         run: |
-          uv tool install git+https://github.com/kodexlabsio/kerplunk
+          uv tool install git+https://github.com/kodexlabsio/konstruct
           uv tool install dbt-core --with dbt-duckdb
 
       - name: Parse the dbt project
         run: dbt parse --quiet
 
       - name: Build the graph
-        run: kerplunk build --no-warehouse
+        run: konstruct build --no-warehouse
 
       - name: Compare with the base branch
-        run: kerplunk diff --base "origin/${{ github.base_ref }}" --format markdown -q > kerplunk.md
+        run: konstruct diff --base "origin/${{ github.base_ref }}" --format markdown -q > konstruct.md
 
       - name: Comment on the pull request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file kerplunk.md --edit-last \
-            || gh pr comment "${{ github.event.pull_request.number }}" --body-file kerplunk.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file konstruct.md --edit-last \
+            || gh pr comment "${{ github.event.pull_request.number }}" --body-file konstruct.md
 
       - name: Fail on breaking changes
-        run: kerplunk diff --base "origin/${{ github.base_ref }}" --fail-on-breaking -q > /dev/null
+        run: konstruct diff --base "origin/${{ github.base_ref }}" --fail-on-breaking -q > /dev/null

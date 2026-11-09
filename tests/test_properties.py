@@ -9,9 +9,9 @@ from pathlib import Path
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from kerplunk.airflow import parse_file
-from kerplunk.graph import Graph, Node, column_id, relation_key
-from kerplunk.sql import analyse, strip_templating
+from konstruct.airflow import parse_file
+from konstruct.graph import Graph, Node, column_id, relation_key
+from konstruct.sql import analyse, strip_templating
 
 SETTINGS = settings(deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 

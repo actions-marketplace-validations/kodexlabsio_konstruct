@@ -13,8 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from kerplunk import __version__, airflow, dagster, dbt, definitions
-from kerplunk.config import (
+from konstruct import __version__, airflow, dagster, dbt, definitions
+from konstruct.config import (
     Config,
     ConfigError,
     discover_dag_files,
@@ -23,9 +23,9 @@ from kerplunk.config import (
     discover_sql_files,
     discover_warehouses,
 )
-from kerplunk.graph import RELATION_KINDS, Edge, Graph, Node, relation_key
-from kerplunk.sql import PLACEHOLDER, StatementLineage, analyse, dialect_for, strip_templating
-from kerplunk.warehouse import MissingDriver, RelationMeta
+from konstruct.graph import RELATION_KINDS, Edge, Graph, Node, relation_key
+from konstruct.sql import PLACEHOLDER, StatementLineage, analyse, dialect_for, strip_templating
+from konstruct.warehouse import MissingDriver, RelationMeta
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class Cache:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 data = {}
-            if data.get("version") == CACHE_VERSION and data.get("kerplunk") == __version__:
+            if data.get("version") == CACHE_VERSION and data.get("konstruct") == __version__:
                 self.entries = dict(data.get("entries", {}))
 
     @staticmethod
@@ -71,7 +71,7 @@ class Cache:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"version": CACHE_VERSION, "kerplunk": __version__, "entries": self.used}
+        payload = {"version": CACHE_VERSION, "konstruct": __version__, "entries": self.used}
         self.path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
 
 
@@ -126,7 +126,7 @@ class Builder:
         self.config = config
         self.graph = Graph()
         self.graph.meta = {
-            "kerplunk_version": __version__,
+            "konstruct_version": __version__,
             "root": str(config.root),
             "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
@@ -136,7 +136,7 @@ class Builder:
         self.default_catalog = config.default_catalog
         self.default_schema = config.default_schema
         self.inputs: dict[str, int] = {}
-        # One entry per input, for the build summary and `kerplunk status`.
+        # One entry per input, for the build summary and `konstruct status`.
         self.sources: list[dict[str, str]] = []
         self.watched: set[str] = set()
 
@@ -794,7 +794,7 @@ class Builder:
 
     def load_usage(self) -> None:
         """Query history from the warehouses that have it, as usage counts on columns."""
-        from kerplunk import usage
+        from konstruct import usage
 
         settings = self.config.usage
         if not settings.enabled:
@@ -1197,7 +1197,7 @@ def _similar_columns(graph: Graph, ref: str, limit: int = 3) -> list[str]:
     import difflib
     import re
 
-    from kerplunk.query import search_nodes
+    from konstruct.query import search_nodes
 
     found: list[str] = []
     relation_part, _, column_part = ref.rpartition(".")
@@ -1332,8 +1332,8 @@ def _topological(models: list[dbt.ModelSql]) -> list[dbt.ModelSql]:
 
 
 def build(config: Config, *, update: bool = False) -> BuildResult:
-    from kerplunk.html import write_html
-    from kerplunk.report import write_report
+    from konstruct.html import write_html
+    from konstruct.report import write_report
 
     started = time.perf_counter()
     builder = Builder(config, update=update)

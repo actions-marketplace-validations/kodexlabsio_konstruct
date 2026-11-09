@@ -45,10 +45,10 @@ class Console:
     def info(self, text: str) -> None:
         """Progress and hints on stderr, so stdout stays clean for --json and pipes."""
         if not self.quiet:
-            print(f"{self.style('kerplunk:', 'dim', stream=self.err)} {text}", file=self.err)
+            print(f"{self.style('konstruct:', 'dim', stream=self.err)} {text}", file=self.err)
 
     def warn(self, text: str) -> None:
-        print(f"{self.style('kerplunk:', 'yellow', stream=self.err)} {text}", file=self.err)
+        print(f"{self.style('konstruct:', 'yellow', stream=self.err)} {text}", file=self.err)
 
     def error(self, text: str) -> None:
-        print(f"{self.style('kerplunk: error:', 'red', 'bold', stream=self.err)} {text}", file=self.err)
+        print(f"{self.style('konstruct: error:', 'red', 'bold', stream=self.err)} {text}", file=self.err)

@@ -78,13 +78,13 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: kerplunk
-          POSTGRES_PASSWORD: kerplunk
-          POSTGRES_DB: kerplunk
+          POSTGRES_USER: konstruct
+          POSTGRES_PASSWORD: konstruct
+          POSTGRES_DB: konstruct
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U kerplunk"
+          --health-cmd "pg_isready -U konstruct"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -93,12 +93,12 @@ jobs:
         ports:
           - 8181:8181
     env:
-      KERPLUNK_TEST_PG_DSN: postgresql://kerplunk:kerplunk@localhost:5432/kerplunk
-      KERPLUNK_TEST_ICEBERG_URI: http://localhost:8181
-      KERPLUNK_REQUIRE_SERVICES: '1'
+      KONSTRUCT_TEST_PG_DSN: postgresql://konstruct:konstruct@localhost:5432/konstruct
+      KONSTRUCT_TEST_ICEBERG_URI: http://localhost:8181
+      KONSTRUCT_REQUIRE_SERVICES: '1'
       HYPOTHESIS_PROFILE: ci
-      KERPLUNK_BROWSER_CHANNEL: chrome
-      KERPLUNK_TEST_BIGQUERY_ENDPOINT: http://localhost:9050
+      KONSTRUCT_BROWSER_CHANNEL: chrome
+      KONSTRUCT_TEST_BIGQUERY_ENDPOINT: http://localhost:9050
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -161,7 +161,7 @@ jobs:
 
       - name: Clone, build and analyse the project
         env:
-          KERPLUNK_REALWORLD: '1'
+          KONSTRUCT_REALWORLD: '1'
         run: uv run pytest tests/test_realworld.py
 
   airflow-parity:
@@ -205,29 +205,29 @@ jobs:
       - name: Build the graph in under a minute
         run: |
           start=$(date +%s)
-          uv run kerplunk build examples/jaffle_shop
+          uv run konstruct build examples/jaffle_shop
           elapsed=$(( $(date +%s) - start ))
-          echo "kerplunk build took ${elapsed}s"
+          echo "konstruct build took ${elapsed}s"
           if [ "$elapsed" -ge 60 ]; then
-            echo "ERROR: kerplunk build took ${elapsed}s, the limit is 60s"
+            echo "ERROR: konstruct build took ${elapsed}s, the limit is 60s"
             exit 1
           fi
 
       - name: Query the graph
         run: |
           cd examples/jaffle_shop
-          uv run kerplunk impact stg_payments.amount
-          uv run kerplunk trace orders.amount
-          uv run kerplunk query "which models use payments"
+          uv run konstruct impact stg_payments.amount
+          uv run konstruct trace orders.amount
+          uv run konstruct query "which models use payments"
 
       - name: Verify the lineage against the data
-        run: uv run kerplunk verify -C examples/jaffle_shop --strict
+        run: uv run konstruct verify -C examples/jaffle_shop --strict
 
       - name: Upload the graph
         uses: actions/upload-artifact@v7
         with:
-          name: kerplunk-out
-          path: examples/jaffle_shop/kerplunk-out
+          name: konstruct-out
+          path: examples/jaffle_shop/konstruct-out
 
   package:
     name: Package
@@ -248,8 +248,8 @@ jobs:
       - name: Install the wheel as a tool
         run: |
           uv tool install dist/*.whl
-          kerplunk --version
-          kerplunk --help
+          konstruct --version
+          konstruct --help
 
       - name: Upload the distributions
         uses: actions/upload-artifact@v7
@@ -269,13 +269,13 @@ jobs:
       - name: uv tool install from GitHub
         run: |
           uv tool install "git+https://github.com/${{ github.repository }}@${{ github.sha }}"
-          kerplunk --version
+          konstruct --version
 
       - name: uvx without installing
-        run: uvx --from "git+https://github.com/${{ github.repository }}@${{ github.sha }}" kerplunk --help
+        run: uvx --from "git+https://github.com/${{ github.repository }}@${{ github.sha }}" konstruct --help
 
       - name: An extra
-        run: uv tool install --force "kerplunk[bigquery] @ git+https://github.com/${{ github.repository }}@${{ github.sha }}"
+        run: uv tool install --force "konstruct[bigquery] @ git+https://github.com/${{ github.repository }}@${{ github.sha }}"
 
   action:
     name: GitHub Action on a breaking and a safe change
@@ -339,26 +339,26 @@ jobs:
     timeout-minutes: 20
     # Runs when the workspace secrets are configured; otherwise the job reports that it skipped.
     env:
-      KERPLUNK_TEST_DATABRICKS_HOST: ${{ secrets.KERPLUNK_TEST_DATABRICKS_HOST }}
-      KERPLUNK_TEST_DATABRICKS_HTTP_PATH: ${{ secrets.KERPLUNK_TEST_DATABRICKS_HTTP_PATH }}
-      KERPLUNK_TEST_DATABRICKS_TOKEN: ${{ secrets.KERPLUNK_TEST_DATABRICKS_TOKEN }}
-      KERPLUNK_TEST_DATABRICKS_CATALOG: ${{ vars.KERPLUNK_TEST_DATABRICKS_CATALOG || 'main' }}
+      KONSTRUCT_TEST_DATABRICKS_HOST: ${{ secrets.KONSTRUCT_TEST_DATABRICKS_HOST }}
+      KONSTRUCT_TEST_DATABRICKS_HTTP_PATH: ${{ secrets.KONSTRUCT_TEST_DATABRICKS_HTTP_PATH }}
+      KONSTRUCT_TEST_DATABRICKS_TOKEN: ${{ secrets.KONSTRUCT_TEST_DATABRICKS_TOKEN }}
+      KONSTRUCT_TEST_DATABRICKS_CATALOG: ${{ vars.KONSTRUCT_TEST_DATABRICKS_CATALOG || 'main' }}
     steps:
       - name: Checkout code
-        if: env.KERPLUNK_TEST_DATABRICKS_TOKEN != ''
+        if: env.KONSTRUCT_TEST_DATABRICKS_TOKEN != ''
         uses: actions/checkout@v7
 
       - name: Set up uv
-        if: env.KERPLUNK_TEST_DATABRICKS_TOKEN != ''
+        if: env.KONSTRUCT_TEST_DATABRICKS_TOKEN != ''
         uses: astral-sh/setup-uv@v10.3.3
 
       - name: Integration tests
-        if: env.KERPLUNK_TEST_DATABRICKS_TOKEN != ''
+        if: env.KONSTRUCT_TEST_DATABRICKS_TOKEN != ''
         run: uv run pytest tests/test_databricks_live.py -m databricks -v
 
       - name: No workspace configured
-        if: env.KERPLUNK_TEST_DATABRICKS_TOKEN == ''
-        run: echo "Set the KERPLUNK_TEST_DATABRICKS_* repository secrets to run these tests."
+        if: env.KONSTRUCT_TEST_DATABRICKS_TOKEN == ''
+        run: echo "Set the KONSTRUCT_TEST_DATABRICKS_* repository secrets to run these tests."
 
   dagster-parity:
     name: Dagster parser against Dagster

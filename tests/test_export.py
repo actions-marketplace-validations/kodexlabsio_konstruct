@@ -1,4 +1,4 @@
-"""kerplunk export: OpenLineage (checked against the official schemas), Mermaid, DOT and CSV."""
+"""konstruct export: OpenLineage (checked against the official schemas), Mermaid, DOT and CSV."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ import pytest
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 
-from kerplunk import Project, QueryError
-from kerplunk.cli import main
+from konstruct import Project, QueryError
+from konstruct.cli import main
 
 SCHEMAS = Path(__file__).parent / "fixtures" / "openlineage"
 
@@ -23,7 +23,7 @@ SCHEMAS = Path(__file__).parent / "fixtures" / "openlineage"
 @pytest.fixture
 def project(jaffle_built_graph: Path, tmp_path: Path) -> Project:
     copy = tmp_path / "jaffle_shop"
-    shutil.copytree(jaffle_built_graph / "kerplunk-out", copy / "kerplunk-out")
+    shutil.copytree(jaffle_built_graph / "konstruct-out", copy / "konstruct-out")
     return Project(copy)
 
 
@@ -77,7 +77,7 @@ def test_openlineage_column_lineage_and_transformations(project: Project) -> Non
     customers = events["jaffle_shop.main.customers"]
     assert customers["job"]["facets"]["sourceCodeLocation"]["path"] == "models/customers.sql"
     output = customers["outputs"][0]
-    assert output["namespace"] == "duckdb://kerplunk"
+    assert output["namespace"] == "duckdb://konstruct"
     facet = output["facets"]["columnLineage"]
     [ltv] = facet["fields"]["customer_lifetime_value"]["inputFields"]
     assert (ltv["name"], ltv["field"]) == ("jaffle_shop.main.stg_payments", "amount")
@@ -147,7 +147,7 @@ def test_mermaid_and_dot_with_columns(project: Project) -> None:
     assert "subgraph" in text and '["amount"]' in text
     assert " -.-> " in text  # orders.amount is transformed from stg_payments.amount
     graph = project.export("dot", columns=True)
-    assert graph.startswith("digraph kerplunk {") and graph.rstrip().endswith("}")
+    assert graph.startswith("digraph konstruct {") and graph.rstrip().endswith("}")
     assert "shape=record" in graph and "[style=dashed]" in graph
     if shutil.which("dot"):
         result = subprocess.run(["dot", "-Tsvg"], input=graph, capture_output=True, text=True, check=False)
@@ -165,12 +165,12 @@ def test_cli_export(project: Project, tmp_path: Path, capsys: pytest.CaptureFixt
     )
     assert json.loads(out.read_text().splitlines()[0])["outputs"][0]["namespace"] == "duckdb://shop"
     assert main(["export", "dot", "-C", str(project.path)]) == 0
-    assert capsys.readouterr().out.startswith("digraph kerplunk {")
+    assert capsys.readouterr().out.startswith("digraph konstruct {")
 
 
 def test_unknown_format() -> None:
-    from kerplunk.export import export
-    from kerplunk.graph import Graph
+    from konstruct.export import export
+    from konstruct.graph import Graph
 
     with pytest.raises(ValueError, match="unknown export format"):
         export(Graph(), "yaml")

@@ -1,4 +1,4 @@
-"""kerplunk explain: column formulas composed down to sources, and checked against the data."""
+"""konstruct explain: column formulas composed down to sources, and checked against the data."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from kerplunk import Project, QueryError
-from kerplunk.cli import main
+from konstruct import Project, QueryError
+from konstruct.cli import main
 
 
 @pytest.fixture
 def project(jaffle_built_graph: Path, tmp_path: Path) -> Project:
     copy = tmp_path / "jaffle_shop"
-    shutil.copytree(jaffle_built_graph / "kerplunk-out", copy / "kerplunk-out")
+    shutil.copytree(jaffle_built_graph / "konstruct-out", copy / "konstruct-out")
     return Project(copy)
 
 
@@ -151,7 +151,7 @@ def _viewer_formulas(project: Project) -> dict[str, dict[str, object]]:
     import re
 
     page = (project.out_dir / "graph.html").read_text()
-    match = re.search(r'<script type="application/json" id="kerplunk-explain">(.*?)</script>', page, re.S)
+    match = re.search(r'<script type="application/json" id="konstruct-explain">(.*?)</script>', page, re.S)
     assert match is not None
     return dict(json.loads(match.group(1))["columns"])
 

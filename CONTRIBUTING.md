@@ -1,14 +1,14 @@
-# Contributing to kerplunk
+# Contributing to konstruct
 
 Thank you for helping. Bug reports with a reproducible case are the most valuable contribution: a SQL statement whose lineage is wrong, a DAG or Dagster file that is misread, or a project where a command fails.
 
 ## Reporting a Problem
 
-Open an issue with the [bug report form](https://github.com/kodexlabsio/kerplunk/issues/new?template=bug.yml). The most useful reports include:
+Open an issue with the [bug report form](https://github.com/kodexlabsio/konstruct/issues/new?template=bug.yml). The most useful reports include:
 
 - the smallest SQL, DAG or dbt model that shows the problem (rename anything confidential);
-- what kerplunk said (`kerplunk trace`, `explain` or `diff` output, or the warning in `REPORT.md`) and what it should have said;
-- `kerplunk --version`, the SQL dialect and, for dbt, the adapter.
+- what konstruct said (`konstruct trace`, `explain` or `diff` output, or the warning in `REPORT.md`) and what it should have said;
+- `konstruct --version`, the SQL dialect and, for dbt, the adapter.
 
 For a security problem, follow [SECURITY.md](SECURITY.md) instead.
 
@@ -29,9 +29,9 @@ uv run pytest --cov
 
 A pull request is ready when:
 
-1. **It has tests.** A lineage fix comes with a test that fails without it, preferably as a small SQL case in `tests/test_sql.py`. A change to what kerplunk claims about lineage should also hold under `kerplunk verify` (`tests/test_verify.py`). Coverage must stay at or above 90%.
+1. **It has tests.** A lineage fix comes with a test that fails without it, preferably as a small SQL case in `tests/test_sql.py`. A change to what konstruct claims about lineage should also hold under `konstruct verify` (`tests/test_verify.py`). Coverage must stay at or above 90%.
 2. **The checks pass.** `uv run ruff check`, `uv run ruff format --check` and `uv run mypy` (strict) are clean, and the pre-push hook has run the tests.
-3. **Output changes are reviewed.** If the CLI's text or `REPORT.md` changes, regenerate the golden files with `KERPLUNK_UPDATE_GOLDEN=1 uv run pytest tests/test_golden.py` and check the diff is what you meant.
+3. **Output changes are reviewed.** If the CLI's text or `REPORT.md` changes, regenerate the golden files with `KONSTRUCT_UPDATE_GOLDEN=1 uv run pytest tests/test_golden.py` and check the diff is what you meant.
 4. **Performance is no worse.** For changes to the build, SQL analysis or formulas, run `uv run .kodex/scripts/benchmark.py 500` before and after.
 5. **The README says what changed**, if a user would notice it: a new command, option, input or limitation.
 
@@ -42,7 +42,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/) with
 ## Code Style
 
 - Typed Python 3.11+, checked by mypy in strict mode.
-- Prefer small, plain functions to frameworks. kerplunk has few dependencies, and new ones need a good reason.
+- Prefer small, plain functions to frameworks. konstruct has few dependencies, and new ones need a good reason.
 - Never import or execute user code (DAGs, Dagster definitions, Python models). Parse it.
 - Comments explain why, not what.
 

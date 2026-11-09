@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from kerplunk.graph import Graph, Node, column_id
-from kerplunk.html import write_html
+from konstruct.graph import Graph, Node, column_id
+from konstruct.html import write_html
 
 HOSTILE = "Ends here </script><script>alert(1)</script> and\u2028continues & <b>more</b>"
 SVG_NAMESPACE = "http://www.w3.org/2000/svg"
@@ -56,7 +56,7 @@ def sample_graph() -> Graph:
 
 
 def embedded_json(page: str) -> str:
-    match = re.search(r'<script type="application/json" id="kerplunk-data">(.*?)</script>', page, re.S)
+    match = re.search(r'<script type="application/json" id="konstruct-data">(.*?)</script>', page, re.S)
     assert match is not None
     return match.group(1)
 
@@ -111,7 +111,7 @@ def test_column_formulas_and_conditions_are_embedded(tmp_path: Path) -> None:
         "SUM(db.main.stg_orders.amount)"
     )
     page = write_html(graph, tmp_path / "graph.html").read_text(encoding="utf-8")
-    match = re.search(r'<script type="application/json" id="kerplunk-explain">(.*?)</script>', page, re.S)
+    match = re.search(r'<script type="application/json" id="konstruct-explain">(.*?)</script>', page, re.S)
     assert match is not None
     data = json.loads(match.group(1))
     assert data["conditions"] == {stg.id: ["WHERE: orders.status <> 'void'"]}
@@ -124,7 +124,7 @@ def test_column_formulas_and_conditions_are_embedded(tmp_path: Path) -> None:
 
 def test_the_viewer_assets_follow_the_design_rules() -> None:
     """DESIGN.md: Manrope and JetBrains Mono, no text below 14px, no em dashes in copy."""
-    from kerplunk.html import template
+    from konstruct.html import template
 
     page = template()
     assert 'font-family: "Manrope"' in page and 'font-family: "JetBrains Mono"' in page

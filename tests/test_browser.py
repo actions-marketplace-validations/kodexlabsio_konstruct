@@ -1,7 +1,7 @@
 """graph.html in a real browser (Chromium through Playwright).
 
 Skipped when Playwright's Chromium is not installed (`uv run playwright install chromium`);
-CI installs it, and KERPLUNK_REQUIRE_SERVICES turns the skip into a failure there.
+CI installs it, and KONSTRUCT_REQUIRE_SERVICES turns the skip into a failure there.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from kerplunk.graph import Graph, Node, column_id
-from kerplunk.html import write_html
+from konstruct.graph import Graph, Node, column_id
+from konstruct.html import write_html
 
 pytestmark = pytest.mark.browser
 
@@ -28,10 +28,10 @@ def browser() -> Iterator[Any]:
         pytest.skip("playwright is not installed")
     with sync_playwright() as playwright:
         try:
-            # KERPLUNK_BROWSER_CHANNEL=chrome uses an installed Google Chrome instead of Playwright's.
-            instance = playwright.chromium.launch(channel=os.environ.get("KERPLUNK_BROWSER_CHANNEL") or None)
+            # KONSTRUCT_BROWSER_CHANNEL=chrome uses an installed Google Chrome instead of Playwright's.
+            instance = playwright.chromium.launch(channel=os.environ.get("KONSTRUCT_BROWSER_CHANNEL") or None)
         except Error as error:
-            if os.environ.get("KERPLUNK_REQUIRE_SERVICES"):
+            if os.environ.get("KONSTRUCT_REQUIRE_SERVICES"):
                 raise
             pytest.skip(f"Chromium is not available: {str(error).splitlines()[0]}")
         yield instance
@@ -60,7 +60,7 @@ def open_page(browser: Any) -> Iterator[Any]:
 
 @pytest.mark.dbt
 def test_example_graph(jaffle_built_graph: Path, open_page: Any) -> None:
-    page = open_page(jaffle_built_graph / "kerplunk-out" / "graph.html")
+    page = open_page(jaffle_built_graph / "konstruct-out" / "graph.html")
     ids = page.eval_on_selector_all("#nodes [data-id]", "els => els.map(e => e.getAttribute('data-id'))")
     assert "model.jaffle_shop.orders" in ids
     assert "task.jaffle_shop_daily.dbt_run_marts" in ids
@@ -68,7 +68,7 @@ def test_example_graph(jaffle_built_graph: Path, open_page: Any) -> None:
     assert not any(i.startswith(("test.", "dag.")) or "#" in i for i in ids)
     assert page.inner_text("#project") == "jaffle_shop"
     assert "44\ncolumns" in page.inner_text("#stats")
-    assert page.title() == "jaffle_shop \u00b7 kerplunk"
+    assert page.title() == "jaffle_shop \u00b7 konstruct"
 
     page.click("[data-id='model.jaffle_shop.orders'] .name")
     panel = page.locator("#panel")
@@ -81,7 +81,7 @@ def test_example_graph(jaffle_built_graph: Path, open_page: Any) -> None:
     assert names[:3] == ["order_id", "customer_id", "order_date"]
     assert "not_null_orders_amount" in text
     assert "GROUP BY: stg_payments.order_id" in text
-    assert "kerplunk impact orders" in text
+    assert "konstruct impact orders" in text
 
     page.locator("#panel table.columns").get_by_role("button", name="amount", exact=True).click()
     lineage = panel.inner_text()
@@ -90,7 +90,7 @@ def test_example_graph(jaffle_built_graph: Path, open_page: Any) -> None:
     assert "= SUM(raw_payments.amount / 100)" in lineage
     assert "stg_payments.amount" in lineage and "raw_payments.amount" in lineage
     assert "Nothing downstream reads this column." in lineage
-    assert "kerplunk explain orders.amount" in lineage
+    assert "konstruct explain orders.amount" in lineage
     # The column's rows and lineage are drawn on the canvas.
     assert page.locator(".row.selected[data-col='model.jaffle_shop.orders#amount']").count() == 1
     assert page.locator(".row.on-path[data-col='seed.jaffle_shop.raw_payments#amount']").count() == 1
@@ -108,7 +108,7 @@ def test_example_graph(jaffle_built_graph: Path, open_page: Any) -> None:
 
 @pytest.mark.dbt
 def test_deep_links_direction_and_isolate(jaffle_built_graph: Path, open_page: Any) -> None:
-    graph = jaffle_built_graph / "kerplunk-out" / "graph.html"
+    graph = jaffle_built_graph / "konstruct-out" / "graph.html"
     page = open_page(graph)
     page.goto(graph.as_uri() + "#model.jaffle_shop.stg_payments%23amount")
     page.wait_for_selector("#panel:not([hidden])")
@@ -132,7 +132,7 @@ def test_deep_links_direction_and_isolate(jaffle_built_graph: Path, open_page: A
 
 @pytest.mark.dbt
 def test_columns_theme_and_filters(jaffle_built_graph: Path, open_page: Any) -> None:
-    page = open_page(jaffle_built_graph / "kerplunk-out" / "graph.html")
+    page = open_page(jaffle_built_graph / "konstruct-out" / "graph.html")
     page.click("#columns")
     assert page.locator(".row[data-col]").count() == 44
     assert page.locator(".edge.column").count() == 36
@@ -152,7 +152,7 @@ def test_columns_theme_and_filters(jaffle_built_graph: Path, open_page: Any) -> 
 
 @pytest.mark.dbt
 def test_business_terms(jaffle_built_graph: Path, open_page: Any) -> None:
-    graph = jaffle_built_graph / "kerplunk-out" / "graph.html"
+    graph = jaffle_built_graph / "konstruct-out" / "graph.html"
     page = open_page(graph)
     assert "5\nbusiness terms" in page.inner_text("#stats")
     page.fill("#search", "ltv")
@@ -182,7 +182,7 @@ def test_business_terms(jaffle_built_graph: Path, open_page: Any) -> None:
 
 @pytest.mark.dbt
 def test_search(jaffle_built_graph: Path, open_page: Any) -> None:
-    page = open_page(jaffle_built_graph / "kerplunk-out" / "graph.html")
+    page = open_page(jaffle_built_graph / "konstruct-out" / "graph.html")
     page.fill("#search", "lifetime")
     results = page.eval_on_selector_all("#results .label", "els => els.map(e => e.textContent)")
     # The business term comes first, then the columns.

@@ -1,6 +1,6 @@
 """Warehouse and catalogue metadata: DuckDB, Postgres and Iceberg REST (or any PyIceberg) catalogs.
 
-Each connector returns `RelationMeta` records; `kerplunk.build` merges them into the graph.
+Each connector returns `RelationMeta` records; `konstruct.build` merges them into the graph.
 Connections are read only. Credentials come from configuration or environment variables and
 are never written to the graph.
 """
@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from kerplunk.graph import relation_key
+from konstruct.graph import relation_key
 
 SYSTEM_SCHEMAS = frozenset({"information_schema", "pg_catalog", "pg_toast"})
 
@@ -252,7 +252,7 @@ class IcebergConnector:
     def fetch(self) -> list[RelationMeta]:
         from pyiceberg.catalog import load_catalog
 
-        # kerplunk reads metadata only. PyIceberg still builds a FileIO for every table it loads,
+        # konstruct reads metadata only. PyIceberg still builds a FileIO for every table it loads,
         # and its default needs pyarrow for some locations; the fsspec FileIO opens nothing
         # until a file is read, so it works for any location without extra packages.
         properties = {"py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO", **self.properties}
@@ -332,7 +332,7 @@ def _flatten_fields(fields: Any, prefix: str, identifier_ids: set[int]) -> Itera
 
 
 class MissingDriver(Exception):
-    """A warehouse needs an optional extra: pip install 'kerplunk[snowflake]' and so on."""
+    """A warehouse needs an optional extra: pip install 'konstruct[snowflake]' and so on."""
 
 
 def _driver(module: str, extra: str) -> Any:
@@ -341,7 +341,7 @@ def _driver(module: str, extra: str) -> Any:
     try:
         return importlib.import_module(module)
     except ImportError as error:
-        raise MissingDriver(f"install the {extra} extra: uv tool install 'kerplunk[{extra}]'") from error
+        raise MissingDriver(f"install the {extra} extra: uv tool install 'konstruct[{extra}]'") from error
 
 
 def _information_schema(

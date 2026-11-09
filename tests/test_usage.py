@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from kerplunk import Project
-from kerplunk.cli import main
-from kerplunk.usage import (
+from konstruct import Project
+from konstruct.cli import main
+from konstruct.usage import (
     UsageSettings,
     aggregate_queries,
     bigquery_sql,
@@ -120,7 +120,7 @@ SNOWFLAKE_USAGE = [
 
 
 def _snowflake_project(root: Path, usage: str) -> None:
-    (root / "kerplunk.toml").write_text(
+    (root / "konstruct.toml").write_text(
         f'[[warehouse]]\ntype = "snowflake"\ndatabase = "SHOP"\nschema = "MART"\n\n[usage]\n{usage}'
     )
 
@@ -184,7 +184,7 @@ def test_missing_permissions_are_a_warning(monkeypatch: pytest.MonkeyPatch, tmp_
 
 
 def test_bad_usage_settings(tmp_path: Path) -> None:
-    (tmp_path / "kerplunk.toml").write_text('[usage]\nobjects = "everything"\n')
+    (tmp_path / "konstruct.toml").write_text('[usage]\nobjects = "everything"\n')
     assert main(["build", str(tmp_path), "-q"]) == 1
 
 
@@ -196,7 +196,7 @@ def test_databricks_usage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     ]
     lineage = [("main.sales.orders", "amount", 42, 3)]
     _stub(monkeypatch, "databricks.sql", _Cursor(tables, columns, lineage, []))
-    (tmp_path / "kerplunk.toml").write_text(
+    (tmp_path / "konstruct.toml").write_text(
         '[[warehouse]]\ntype = "databricks"\nserver_hostname = "x"\ncatalogs = ["main"]\n\n[usage]\nenabled = true\n'
     )
     graph = Project(tmp_path).build().graph
@@ -205,7 +205,7 @@ def test_databricks_usage(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 
 def test_bigquery_usage_parses_query_text(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from kerplunk.warehouse import BigQueryConnector
+    from konstruct.warehouse import BigQueryConnector
 
     field = types.SimpleNamespace
     schema = [
@@ -252,7 +252,7 @@ def test_bigquery_usage_parses_query_text(monkeypatch: pytest.MonkeyPatch, tmp_p
             return field(result=lambda: history)
 
     monkeypatch.setattr(BigQueryConnector, "client", lambda self: Client())
-    (tmp_path / "kerplunk.toml").write_text(
+    (tmp_path / "konstruct.toml").write_text(
         '[[warehouse]]\ntype = "bigquery"\nproject = "acme"\nlocation = "EU"\n\n[usage]\nenabled = true\n'
     )
     graph = Project(tmp_path).build().graph

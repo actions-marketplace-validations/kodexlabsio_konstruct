@@ -1,4 +1,4 @@
-"""The kerplunk command line.
+"""The konstruct command line.
 
 Exit status: 0 on success, 1 on an error (or, with ``build --strict``, on warnings), 2 on a usage
 error, 3 when ``path`` finds no connection.
@@ -16,9 +16,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from kerplunk import __version__
-from kerplunk.console import Console
-from kerplunk.project import OUT_DIR, Project, find_out_dir
+from konstruct import __version__
+from konstruct.console import Console
+from konstruct.project import OUT_DIR, Project, find_out_dir
 
 __all__ = ["OUT_DIR", "find_out_dir", "main", "parser"]
 
@@ -39,9 +39,9 @@ def _ready(
     when inputs changed since the last build."""
     if not project.has_graph():
         if args.no_build:
-            from kerplunk.query import QueryError
+            from konstruct.query import QueryError
 
-            raise QueryError(f"no graph at {project.graph_path}; run `kerplunk build` first")
+            raise QueryError(f"no graph at {project.graph_path}; run `konstruct build` first")
         console.info(f"no graph yet; building {project.path}")
         project.build()
         return project
@@ -54,7 +54,7 @@ def _ready(
         else:
             console.warn(
                 f"the graph is older than {len(changed)} changed input(s) ({shown}); "
-                "results may be out of date. Add --refresh or run `kerplunk build --update`"
+                "results may be out of date. Add --refresh or run `konstruct build --update`"
             )
     return project
 
@@ -77,9 +77,9 @@ def _relative(path: Path) -> str:
 
 
 def cmd_build(args: argparse.Namespace, console: Console) -> int:
-    from kerplunk.build import build
-    from kerplunk.config import load_config
-    from kerplunk.report import analyse
+    from konstruct.build import build
+    from konstruct.config import load_config
+    from konstruct.report import analyse
 
     root = Path(args.path or args.project)
     if not root.is_dir():
@@ -122,7 +122,7 @@ def _print_build(
 ) -> None:
     graph = result.graph
     sources: list[dict[str, str]] = graph.meta.get("sources", [])
-    console.print(f"{console.style('kerplunk', 'bold')}  {root}")
+    console.print(f"{console.style('konstruct', 'bold')}  {root}")
     console.print()
     if not sources:
         console.row("inputs", "none found: no dbt project, DAG, SQL file or warehouse", style=("yellow",))
@@ -170,13 +170,13 @@ def _print_build(
 
 
 def cmd_status(args: argparse.Namespace, console: Console) -> int:
-    from kerplunk.status import inspect
+    from konstruct.status import inspect
 
     status = inspect(Path(args.project))
     if args.json:
         console.print(json.dumps(status.to_dict(), indent=2))
         return 0
-    console.print(f"{console.style('kerplunk', 'bold')}  {status.root}")
+    console.print(f"{console.style('konstruct', 'bold')}  {status.root}")
     console.print()
     for key, value in status.lines():
         attention = (
@@ -187,12 +187,12 @@ def cmd_status(args: argparse.Namespace, console: Console) -> int:
 
 
 def cmd_init(args: argparse.Namespace, console: Console) -> int:
-    from kerplunk import dbt
-    from kerplunk.config import discover_warehouses, load_config
-    from kerplunk.status import inspect, render_config
+    from konstruct import dbt
+    from konstruct.config import discover_warehouses, load_config
+    from konstruct.status import inspect, render_config
 
     root = Path(args.project).resolve()
-    target = root / "kerplunk.toml"
+    target = root / "konstruct.toml"
     if target.exists() and not args.force and not args.stdout:
         console.error(f"{_relative(target)} already exists; add --force to replace it")
         return 1
@@ -202,7 +202,7 @@ def cmd_init(args: argparse.Namespace, console: Console) -> int:
         console.print(text.rstrip())
         return 0
     target.write_text(text, encoding="utf-8")
-    console.print(f"kerplunk: wrote {_relative(target)}; edit it if needed, then run `kerplunk build`")
+    console.print(f"konstruct: wrote {_relative(target)}; edit it if needed, then run `konstruct build`")
     return 0
 
 
@@ -305,7 +305,7 @@ def cmd_verify(args: argparse.Namespace, console: Console) -> int:
 
 
 def cmd_diff(args: argparse.Namespace, console: Console) -> int:
-    from kerplunk.diff import DiffError
+    from konstruct.diff import DiffError
 
     # Changed inputs are what diff is about: it reads the current SQL itself, so no stale warning.
     project = _ready(_project(args), args, console, warn_stale=False)
@@ -342,7 +342,7 @@ def cmd_open(args: argparse.Namespace, console: Console) -> int:
     project = _ready(_project(args), args, console)
     page = project.out_dir / "graph.html"
     if not page.is_file():
-        console.error(f"no viewer at {page}; run `kerplunk build`")
+        console.error(f"no viewer at {page}; run `konstruct build`")
         return 1
     console.print(page.as_uri())
     if not args.print_only:
@@ -354,16 +354,16 @@ def cmd_open(args: argparse.Namespace, console: Console) -> int:
 
 
 def cmd_install(args: argparse.Namespace, console: Console) -> int:
-    from kerplunk.skill import install
+    from konstruct.skill import install
 
     target = Path(args.target).resolve() if args.target else None
     for line in install(agents=args.agent, project=target, mcp=args.mcp, force=args.force):
-        console.print(f"kerplunk: {line}")
+        console.print(f"konstruct: {line}")
     return 0
 
 
 def cmd_mcp(args: argparse.Namespace, console: Console) -> int:
-    from kerplunk.mcp_server import serve
+    from konstruct.mcp_server import serve
 
     serve(Path(args.project))
     return 0
@@ -404,7 +404,7 @@ def _common() -> argparse.ArgumentParser:
 def _query_options(command: argparse.ArgumentParser) -> None:
     command.add_argument("--json", action="store_true", help="print JSON instead of text")
     command.add_argument(
-        "--graph", metavar="FILE", help="use this graph.json instead of finding kerplunk-out"
+        "--graph", metavar="FILE", help="use this graph.json instead of finding konstruct-out"
     )
     command.add_argument(
         "--refresh", action="store_true", help="update the graph first if its inputs changed"
@@ -414,46 +414,46 @@ def _query_options(command: argparse.ArgumentParser) -> None:
 
 EPILOG = """\
 examples:
-  kerplunk build                          build the graph for the current directory
-  kerplunk status                         what kerplunk finds here; is the graph current?
-  kerplunk impact orders.amount           what breaks if orders.amount changes
-  kerplunk trace customers.lifetime_value where a value comes from
-  kerplunk path raw_payments customer_dashboard
-  kerplunk search lifetime value
-  kerplunk list models
-  kerplunk diff --base origin/main        what this branch changes and breaks, column by column
-  kerplunk verify                         check the lineage against the data (DuckDB)
-  kerplunk install                        add /kerplunk to Claude Code and Cursor
+  konstruct build                          build the graph for the current directory
+  konstruct status                         what konstruct finds here; is the graph current?
+  konstruct impact orders.amount           what breaks if orders.amount changes
+  konstruct trace customers.lifetime_value where a value comes from
+  konstruct path raw_payments customer_dashboard
+  konstruct search lifetime value
+  konstruct list models
+  konstruct diff --base origin/main        what this branch changes and breaks, column by column
+  konstruct verify                         check the lineage against the data (DuckDB)
+  konstruct install                        add /konstruct to Claude Code and Cursor
 
 Names can be a table (orders, main.orders), a column (orders.amount), a dbt unique id or a
 DAG task (dag_id.task_id). Query commands build the graph first if it does not exist yet.
-Run `kerplunk <command> --help` for a command's options.
+Run `konstruct <command> --help` for a command's options.
 """
 
 
 def parser() -> argparse.ArgumentParser:
     common = _common()
     root = argparse.ArgumentParser(
-        prog="kerplunk",
+        prog="konstruct",
         description="Turn a data stack (dbt, SQL, Airflow, warehouse and Iceberg metadata) into a "
         "queryable graph with column-level lineage, for people and coding agents.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         parents=[common],
     )
-    root.add_argument("--version", action="version", version=f"kerplunk {__version__}")
+    root.add_argument("--version", action="version", version=f"konstruct {__version__}")
     commands = root.add_subparsers(dest="command", metavar="<command>", title="commands")
 
     def add(name: str, help_text: str) -> argparse.ArgumentParser:
         description = help_text[:1].upper() + help_text[1:] + "."
         return commands.add_parser(name, help=help_text, description=description, parents=[common])
 
-    build = add("build", "build kerplunk-out/graph.json, REPORT.md and graph.html")
+    build = add("build", "build konstruct-out/graph.json, REPORT.md and graph.html")
     build.add_argument("path", nargs="?", help="project directory (default: -C or the current directory)")
     build.add_argument(
         "-u", "--update", action="store_true", help="reuse cached analyses of unchanged inputs"
     )
-    build.add_argument("--out", metavar="DIR", help="output directory (default: <project>/kerplunk-out)")
+    build.add_argument("--out", metavar="DIR", help="output directory (default: <project>/konstruct-out)")
     build.add_argument("--no-dbt", action="store_true", help="never run dbt; use the artefacts in target/")
     build.add_argument("--no-warehouse", action="store_true", help="do not connect to any warehouse")
     build.add_argument(
@@ -463,12 +463,12 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--json", action="store_true", help="print a JSON summary instead of text")
     build.set_defaults(func=cmd_build)
 
-    status = add("status", "show what kerplunk finds here and whether the graph is up to date")
+    status = add("status", "show what konstruct finds here and whether the graph is up to date")
     status.add_argument("--json", action="store_true", help="print JSON instead of text")
     status.set_defaults(func=cmd_status)
 
-    init = add("init", "write a kerplunk.toml that records what discovery found")
-    init.add_argument("--force", action="store_true", help="replace an existing kerplunk.toml")
+    init = add("init", "write a konstruct.toml that records what discovery found")
+    init.add_argument("--force", action="store_true", help="replace an existing konstruct.toml")
     init.add_argument("--stdout", action="store_true", help="print the configuration instead of writing it")
     init.set_defaults(func=cmd_init)
 
@@ -551,7 +551,7 @@ def parser() -> argparse.ArgumentParser:
         "--columns", action="store_true", help="mermaid and dot: draw columns and column lineage"
     )
     exporting.add_argument(
-        "--namespace", metavar="NS", help="openlineage: dataset namespace (default: <dialect>://kerplunk)"
+        "--namespace", metavar="NS", help="openlineage: dataset namespace (default: <dialect>://konstruct)"
     )
     _query_options(exporting)
     exporting.set_defaults(func=cmd_export)
@@ -571,7 +571,7 @@ def parser() -> argparse.ArgumentParser:
     diff.add_argument(
         "--fail-on-breaking", action="store_true", help="exit with status 1 on a breaking change"
     )
-    diff.add_argument("--graph", metavar="FILE", help="use this graph.json instead of finding kerplunk-out")
+    diff.add_argument("--graph", metavar="FILE", help="use this graph.json instead of finding konstruct-out")
     diff.add_argument("--refresh", action="store_true", help="update the graph first if its inputs changed")
     diff.add_argument("--no-build", action="store_true", help="fail rather than build a missing graph")
     diff.set_defaults(func=cmd_diff, json=False)
@@ -602,7 +602,7 @@ def parser() -> argparse.ArgumentParser:
     _query_options(open_)
     open_.set_defaults(func=cmd_open)
 
-    install = add("install", "add the /kerplunk skill to Claude Code and Cursor")
+    install = add("install", "add the /konstruct skill to Claude Code and Cursor")
     install.add_argument(
         "--agent", choices=["claude", "cursor", "both"], default="both", help="which agent (default: both)"
     )
@@ -619,9 +619,9 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    from kerplunk.config import ConfigError
-    from kerplunk.query import QueryError
-    from kerplunk.skill import InstallError
+    from konstruct.config import ConfigError
+    from konstruct.query import QueryError
+    from konstruct.skill import InstallError
 
     arguments = parser()
     args = arguments.parse_args(argv)
@@ -634,7 +634,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
-        format="kerplunk: %(message)s",
+        format="konstruct: %(message)s",
         stream=sys.stderr,
     )
     try:
@@ -645,7 +645,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     except BrokenPipeError:
-        # The reader went away (`kerplunk list | head`); stop quietly, as other tools do.
+        # The reader went away (`konstruct list | head`); stop quietly, as other tools do.
         devnull = os.open(os.devnull, os.O_WRONLY)
         os.dup2(devnull, sys.stdout.fileno())
         return 0

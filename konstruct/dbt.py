@@ -18,14 +18,24 @@ import yaml
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
-from kerplunk.graph import Graph, Node, NodeKind, column_id, relation_key
-from kerplunk.jinja import Renderer, render_model
-from kerplunk.sql import dialect_for, strip_templating
+from konstruct.graph import Graph, Node, NodeKind, column_id, relation_key
+from konstruct.jinja import Renderer, render_model
+from konstruct.sql import dialect_for, strip_templating
 
 log = logging.getLogger(__name__)
 
 SKIP_DIRS = frozenset(
-    {".git", ".venv", "venv", "node_modules", "dbt_packages", "dbt_modules", "target", "logs", "kerplunk-out"}
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "dbt_packages",
+        "dbt_modules",
+        "target",
+        "logs",
+        "konstruct-out",
+    }
 )
 RELATION_TYPES: dict[str, NodeKind] = {"model": "model", "seed": "seed", "snapshot": "snapshot"}
 
@@ -49,7 +59,7 @@ class DbtProject:
 
 @dataclass
 class ModelSql:
-    """SQL kerplunk will analyse for one dbt node, and how good that SQL is."""
+    """SQL konstruct will analyse for one dbt node, and how good that SQL is."""
 
     node_id: str
     relation: str
@@ -156,7 +166,7 @@ def ensure_artefacts(project: DbtProject, *, run_dbt: bool, graph: Graph) -> str
         env["DBT_PROFILES_DIR"] = str(project.root)
     for command in (["docs", "generate"], ["parse"]):
         log.info("running dbt %s in %s", " ".join(command), project.root)
-        # kerplunk only parses and compiles, so a require-dbt-version pin need not block it.
+        # konstruct only parses and compiles, so a require-dbt-version pin need not block it.
         result = subprocess.run(
             [dbt, *command, "--quiet", "--no-version-check"],
             cwd=project.root,

@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from kerplunk import dbt
-from kerplunk.graph import Graph, Node
+from konstruct import dbt
+from konstruct.graph import Graph, Node
 
 pytestmark = pytest.mark.dbt
 

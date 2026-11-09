@@ -18,7 +18,7 @@ body:
   - type: textarea
     id: actual
     attributes:
-      label: What kerplunk said
+      label: What konstruct said
       description: The command you ran and its output (trace, explain, diff, or the warning in REPORT.md).
       render: text
     validations:
@@ -32,8 +32,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: kerplunk version
-      description: Output of `kerplunk --version`.
+      label: konstruct version
+      description: Output of `konstruct --version`.
     validations:
       required: true
   - type: input

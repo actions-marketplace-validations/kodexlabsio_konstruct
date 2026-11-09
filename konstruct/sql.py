@@ -21,7 +21,7 @@ from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import Scope, build_scope
 from sqlglot.schema import MappingSchema
 
-from kerplunk.graph import relation_key
+from konstruct.graph import relation_key
 
 Transform = Literal["direct", "transformed"]
 
@@ -74,7 +74,7 @@ class StatementLineage:
     errors: list[str] = field(default_factory=list)
     # Each output column's expression with CTEs, subqueries and aliases inlined down to physical
     # columns, and the statement's join, filter and grouping conditions in the same form. Both
-    # ignore formatting, quoting, aliases and CTE names, so `kerplunk diff` can compare versions.
+    # ignore formatting, quoting, aliases and CTE names, so `konstruct diff` can compare versions.
     expressions: dict[str, str] = field(default_factory=dict)
     conditions: list[str] = field(default_factory=list)
 
@@ -112,7 +112,7 @@ class StatementLineage:
 
 _JINJA_EXPR = re.compile(r"(['\"]?)\{\{.*?\}\}(['\"]?)", re.DOTALL)
 _JINJA_BLOCK = re.compile(r"\{%.*?%\}|\{#.*?#\}", re.DOTALL)
-PLACEHOLDER = "__kerplunk__"
+PLACEHOLDER = "__konstruct__"
 
 
 def strip_templating(sql: str) -> str:

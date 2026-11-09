@@ -1,8 +1,8 @@
-# Records docs/demo-claude-code.gif: impact analysis through the /kerplunk skill in Claude Code.
+# Records docs/demo-claude-code.gif: impact analysis through the /konstruct skill in Claude Code.
 # Needs Claude Code installed and signed in, and the skill installed for this project:
 #   uv run .kodex/scripts/prepare_example.py
-#   uv run kerplunk build examples/jaffle_shop
-#   uv run kerplunk install --project examples/jaffle_shop
+#   uv run konstruct build examples/jaffle_shop
+#   uv run konstruct install --project examples/jaffle_shop
 #   vhs .kodex/scripts/demo-claude-code.tape
 # The model's answer varies between runs; record until the take is clear, then commit the GIF.
 Output docs/demo-claude-code.gif
@@ -23,7 +23,7 @@ Enter
 Sleep 4s
 Show
 
-Type "/kerplunk what breaks if I change how stg_payments.amount is calculated?"
+Type "/konstruct what breaks if I change how stg_payments.amount is calculated?"
 Sleep 500ms
 Enter
 Wait+Screen@120s /customer_dashboard/

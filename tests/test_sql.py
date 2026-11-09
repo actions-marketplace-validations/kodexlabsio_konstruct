@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from kerplunk.sql import ColumnSource, StatementLineage, analyse, dialect_for, strip_templating
+from konstruct.sql import ColumnSource, StatementLineage, analyse, dialect_for, strip_templating
 
 SCHEMA = {
     "db.main.orders": {
@@ -285,14 +285,14 @@ def test_ddl_without_a_query_is_ignored() -> None:
 
 def test_strip_templating() -> None:
     sql = "{% if x %}select 1{% endif %} from t where ds = '{{ ds }}' and d = {{ ds }}{# note #}"
-    assert strip_templating(sql) == "select 1 from t where ds = '__kerplunk__' and d = '__kerplunk__'"
+    assert strip_templating(sql) == "select 1 from t where ds = '__konstruct__' and d = '__konstruct__'"
     sql = 'select a from {{ params.schema }}.orders join "{{ var }}".x on true where d = {{ ds }}'
     stripped = strip_templating(sql)
     assert (
         stripped
-        == "select a from __kerplunk__.orders join \"__kerplunk__\".x on true where d = '__kerplunk__'"
+        == "select a from __konstruct__.orders join \"__konstruct__\".x on true where d = '__konstruct__'"
     )
-    assert analyse(stripped, dialect="duckdb")[0].reads == ["__kerplunk__.orders", "__kerplunk__.x"]
+    assert analyse(stripped, dialect="duckdb")[0].reads == ["__konstruct__.orders", "__konstruct__.x"]
 
 
 def test_round_trip_to_dict() -> None:

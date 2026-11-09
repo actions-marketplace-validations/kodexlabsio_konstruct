@@ -130,7 +130,7 @@ jobs:
         run: |
           git push origin HEAD:main
           git push origin "${{ steps.bump.outputs.tag }}"
-          # GitHub Action users pin the major version (`uses: kodexlabsio/kerplunk@v0`): move it.
+          # GitHub Action users pin the major version (`uses: kodexlabsio/konstruct@v0`): move it.
           tag="${{ steps.bump.outputs.tag }}"
           major="${tag%%.*}"
           git tag -f "$major" "$tag"

@@ -5,7 +5,7 @@
 """Build the jaffle_shop example's DuckDB warehouse, as its Airflow DAG would.
 
 Runs `dbt build` and `dbt docs generate`, then the DAG's reporting SQL, so that
-`kerplunk build examples/jaffle_shop` has a populated warehouse and fresh dbt artefacts.
+`konstruct build examples/jaffle_shop` has a populated warehouse and fresh dbt artefacts.
 
     uv run .kodex/scripts/prepare_example.py
 """

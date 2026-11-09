@@ -30,7 +30,7 @@ def copy_example(destination: Path) -> Path:
     shutil.copytree(
         EXAMPLE,
         project,
-        ignore=shutil.ignore_patterns("target", "logs", "kerplunk-out", "*.duckdb", "*.duckdb.wal"),
+        ignore=shutil.ignore_patterns("target", "logs", "konstruct-out", "*.duckdb", "*.duckdb.wal"),
     )
     return project
 
@@ -46,7 +46,7 @@ def run_dbt(project: Path, *args: str) -> None:
 @pytest.fixture(scope="session")
 def built_jaffle(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A copy of the jaffle_shop example with its DuckDB warehouse built and the reporting table
-    created, but no dbt artefacts: kerplunk has to produce those itself."""
+    created, but no dbt artefacts: konstruct has to produce those itself."""
     if dbt_executable() is None:
         pytest.skip("dbt is not installed")
     project = copy_example(tmp_path_factory.mktemp("jaffle"))
@@ -90,9 +90,9 @@ def dbt_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(scope="session")
 def jaffle_built_graph(built_jaffle: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """The example after a full `kerplunk build`: the project root, with kerplunk-out inside."""
-    from kerplunk.build import build
-    from kerplunk.config import load_config
+    """The example after a full `konstruct build`: the project root, with konstruct-out inside."""
+    from konstruct.build import build
+    from konstruct.config import load_config
 
     dbt = dbt_executable()
     assert dbt is not None

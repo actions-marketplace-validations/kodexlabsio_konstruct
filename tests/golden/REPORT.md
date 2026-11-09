@@ -1,6 +1,6 @@
-# kerplunk report
+# konstruct report
 
-Built <time> from `<root>` by kerplunk <version> in <seconds>s. SQL dialect: duckdb.
+Built <time> from `<root>` by konstruct <version> in <seconds>s. SQL dialect: duckdb.
 
 ## Summary
 
@@ -85,7 +85,7 @@ None.
 
 ## Columns with no lineage
 
-Columns of models and SQL-built tables with no upstream column: constants, columns kerplunk could not resolve, or SQL it could not parse (see Warnings).
+Columns of models and SQL-built tables with no upstream column: constants, columns konstruct could not resolve, or SQL it could not parse (see Warnings).
 
 None.
 

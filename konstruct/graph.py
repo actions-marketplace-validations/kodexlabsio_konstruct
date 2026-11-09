@@ -1,4 +1,4 @@
-"""The kerplunk graph: nodes, edges, traversal and (de)serialisation.
+"""The konstruct graph: nodes, edges, traversal and (de)serialisation.
 
 Edge directions
 ---------------

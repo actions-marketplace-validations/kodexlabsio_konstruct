@@ -1,9 +1,9 @@
-"""Configuration: ``kerplunk.toml`` (or ``[tool.kerplunk]`` in ``pyproject.toml``) plus discovery.
+"""Configuration: ``konstruct.toml`` (or ``[tool.konstruct]`` in ``pyproject.toml``) plus discovery.
 
-Everything is optional. Without configuration kerplunk discovers dbt projects, Airflow DAG
+Everything is optional. Without configuration konstruct discovers dbt projects, Airflow DAG
 files, SQL files, DuckDB files and the warehouse each dbt profile points at.
 
-Example ``kerplunk.toml``::
+Example ``konstruct.toml``::
 
     dialect = "postgres"                  # default: the dbt adapter, else sqlglot's default
     default_catalog = "analytics"         # for unqualified tables in Airflow and SQL files
@@ -56,10 +56,10 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 if TYPE_CHECKING:
-    from kerplunk.usage import UsageSettings
+    from konstruct.usage import UsageSettings
 
-from kerplunk.dbt import SKIP_DIRS, DbtProject, walk_dirs
-from kerplunk.warehouse import (
+from konstruct.dbt import SKIP_DIRS, DbtProject, walk_dirs
+from konstruct.warehouse import (
     BigQueryConnector,
     Connector,
     DatabricksConnector,
@@ -91,7 +91,7 @@ def expand_env(value: Any) -> Any:
 class WarehouseConfig:
     type: str
     options: dict[str, Any]
-    source: str = "kerplunk.toml"
+    source: str = "konstruct.toml"
 
     def connector(self, root: Path) -> Connector:
         options = expand_env(self.options)
@@ -191,7 +191,7 @@ class Config:
 
 
 def _usage_settings(data: dict[str, Any]) -> UsageSettings:
-    from kerplunk.usage import UsageSettings
+    from konstruct.usage import UsageSettings
 
     objects = str(data.get("objects", "direct")).lower()
     if objects not in ("direct", "base"):
@@ -209,12 +209,12 @@ def load_config(root: Path, out_dir: Path | None = None) -> Config:
     root = root.resolve()
     data: dict[str, Any] = {}
     config_file: Path | None = None
-    if (root / "kerplunk.toml").is_file():
-        config_file = root / "kerplunk.toml"
+    if (root / "konstruct.toml").is_file():
+        config_file = root / "konstruct.toml"
         data = _read_toml(config_file)
     elif (root / "pyproject.toml").is_file():
         pyproject = _read_toml(root / "pyproject.toml")
-        tool = pyproject.get("tool", {}).get("kerplunk")
+        tool = pyproject.get("tool", {}).get("konstruct")
         if isinstance(tool, dict):
             config_file = root / "pyproject.toml"
             data = tool
@@ -227,7 +227,7 @@ def load_config(root: Path, out_dir: Path | None = None) -> Config:
         warehouses = [warehouses]
     config = Config(
         root=root,
-        out_dir=(out_dir or root / str(data.get("out_dir", "kerplunk-out"))).resolve(),
+        out_dir=(out_dir or root / str(data.get("out_dir", "konstruct-out"))).resolve(),
         dialect=data.get("dialect"),
         default_catalog=data.get("default_catalog"),
         default_schema=data.get("default_schema"),
@@ -278,7 +278,7 @@ def iter_files(config: Config, suffix: str) -> list[Path]:
 
 
 def discover_dag_files(config: Config) -> list[Path]:
-    from kerplunk.airflow import looks_like_dag_file
+    from konstruct.airflow import looks_like_dag_file
 
     if config.dag_paths is not None:
         files: list[Path] = []
@@ -300,7 +300,7 @@ def discover_dag_files(config: Config) -> list[Path]:
 
 
 def discover_dagster_files(config: Config) -> list[Path]:
-    from kerplunk.dagster import looks_like_dagster_file
+    from konstruct.dagster import looks_like_dagster_file
 
     if config.dagster_paths is not None:
         files: list[Path] = []
@@ -323,7 +323,7 @@ def discover_dagster_files(config: Config) -> list[Path]:
 
 def discover_definitions_files(config: Config) -> list[Path]:
     """``definitions.yml`` files: the configured paths, or every one in the repository."""
-    from kerplunk.definitions import FILE_NAMES
+    from konstruct.definitions import FILE_NAMES
 
     if config.definitions_paths is not None:
         files: list[Path] = []

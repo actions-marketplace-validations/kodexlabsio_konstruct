@@ -1,5 +1,5 @@
 "use strict";
-// kerplunk graph viewer: one self-contained page over graph.json. Relations are cards in layers
+// konstruct graph viewer: one self-contained page over graph.json. Relations are cards in layers
 // from sources to exposures; expanding a card lists its columns, and column lineage is drawn
 // between column rows. Everything is built with DOM APIs and textContent, never innerHTML.
 (function () {
@@ -24,8 +24,8 @@
   const W = 268, HEAD = 46, ROW = 28, PAD = 6, COL_GAP = 104, ROW_GAP = 22, SWEEPS = 8;
   const MAX_RESULTS = 60, ANIMATE_LIMIT = 400, EXPAND_ALL_LIMIT = 400, AUTO_ISOLATE = 120;
 
-  const data = JSON.parse(document.getElementById("kerplunk-data").textContent);
-  const explained = JSON.parse(document.getElementById("kerplunk-explain").textContent || "{}");
+  const data = JSON.parse(document.getElementById("konstruct-data").textContent);
+  const explained = JSON.parse(document.getElementById("konstruct-explain").textContent || "{}");
   const formulas = explained.columns || {};
   const conditionsOf = explained.conditions || {};
   const nodes = data.nodes || [];
@@ -818,11 +818,11 @@
     return null;
   }
   const prefersLight = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches;
-  document.documentElement.setAttribute("data-theme", storage("kerplunk-theme") || (prefersLight ? "light" : "dark"));
+  document.documentElement.setAttribute("data-theme", storage("konstruct-theme") || (prefersLight ? "light" : "dark"));
   document.getElementById("theme").addEventListener("click", () => {
     const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
-    storage("kerplunk-theme", next);
+    storage("konstruct-theme", next);
     drawTexture();
     drawMinimap();
   });
@@ -833,7 +833,7 @@
     const root = display(meta.root);
     const name = root ? root.replace(/[\\/]+$/, "").split(/[\\/]/).pop() : "Graph";
     document.getElementById("project").textContent = name;
-    document.title = name + " · kerplunk";
+    document.title = name + " · konstruct";
     const counts = new Map();
     for (const n of nodes) counts.set(n.kind, (counts.get(n.kind) || 0) + 1);
     const relations = viewNodes.filter((n) => n.kind !== "task").length;
@@ -857,7 +857,7 @@
     }
     const parts = [];
     if (meta.generated_at) parts.push("Built " + display(meta.generated_at).slice(0, 16).replace("T", " "));
-    if (meta.kerplunk_version) parts.push("kerplunk " + display(meta.kerplunk_version));
+    if (meta.konstruct_version) parts.push("konstruct " + display(meta.konstruct_version));
     if (meta.dialect) parts.push(display(meta.dialect));
     document.getElementById("built").textContent = parts.join(" · ");
 
@@ -1124,9 +1124,9 @@
       body.append(section("Where"));
       body.append(list([["File", n.path + (attr(n, "line") ? ":" + attr(n, "line") : "")]], (li, [k, v]) => li.append(el("span", "meta", k), el("span", "grow mono", v))));
     }
-    body.append(section("Ask kerplunk"));
+    body.append(section("Ask konstruct"));
     const commands = el("div", "commands");
-    commands.append(command("kerplunk define " + (/^[\w.]+$/.test(n.name) ? n.name : JSON.stringify(n.name))));
+    commands.append(command("konstruct define " + (/^[\w.]+$/.test(n.name) ? n.name : JSON.stringify(n.name))));
     body.append(commands);
   }
 
@@ -1235,9 +1235,9 @@
       body.append(section("Where"));
       body.append(list(facts2, (li, [k, v]) => li.append(el("span", "meta", k), el("span", "grow mono", display(v)))));
     }
-    body.append(section("Ask kerplunk"));
+    body.append(section("Ask konstruct"));
     const commands = el("div", "commands");
-    commands.append(command("kerplunk impact " + ref(n.id)), command("kerplunk describe " + ref(n.id)));
+    commands.append(command("konstruct impact " + ref(n.id)), command("konstruct describe " + ref(n.id)));
     body.append(commands);
   }
 
@@ -1256,7 +1256,7 @@
       if (info.c && info.c !== info.e) {
         body.append(section("In terms of sources"));
         body.append(formula(info.c));
-        if (info.s && info.s.length) body.append(el("p", "note", "From " + info.s.join(", ") + (info.p ? ". Partial: some steps are not inlined, because they have no recorded expression or the formula would grow too long; kerplunk explain shows each step." : "")));
+        if (info.s && info.s.length) body.append(el("p", "note", "From " + info.s.join(", ") + (info.p ? ". Partial: some steps are not inlined, because they have no recorded expression or the formula would grow too long; konstruct explain shows each step." : "")));
       }
     } else {
       body.append(section("Formula"));
@@ -1297,9 +1297,9 @@
       body.append(section("Tests", tests.length));
       body.append(list(tests, (li, t) => li.append(el("span", "grow", t.name))));
     }
-    body.append(section("Ask kerplunk"));
+    body.append(section("Ask konstruct"));
     const commands = el("div", "commands");
-    commands.append(command("kerplunk explain " + ref(n.id)), command("kerplunk impact " + ref(n.id)));
+    commands.append(command("konstruct explain " + ref(n.id)), command("konstruct impact " + ref(n.id)));
     body.append(commands);
   }
 

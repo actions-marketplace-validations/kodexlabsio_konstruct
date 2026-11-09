@@ -1,5 +1,5 @@
 # Business definitions for the jaffle_shop example: what each term means, who owns it, and the
-# columns that hold it. kerplunk attaches them to the graph and warns when they drift.
+# columns that hold it. konstruct attaches them to the graph and warns when they drift.
 version: 1
 terms:
   - name: Customer lifetime value

@@ -1,6 +1,6 @@
-"""`kerplunk mcp`: a stdio MCP server over the graph in kerplunk-out.
+"""`konstruct mcp`: a stdio MCP server over the graph in konstruct-out.
 
-The server rereads graph.json whenever it changes, so `kerplunk build --update` in another
+The server rereads graph.json whenever it changes, so `konstruct build --update` in another
 terminal is picked up without restarting the agent.
 """
 
@@ -13,26 +13,26 @@ from typing import Any
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-from kerplunk import __version__
-from kerplunk.project import Project
-from kerplunk.query import QueryError
+from konstruct import __version__
+from konstruct.project import Project
+from konstruct.query import QueryError
 
 INSTRUCTIONS = """\
-kerplunk answers questions about this repository's data stack: dbt models, sources, tests and
+konstruct answers questions about this repository's data stack: dbt models, sources, tests and
 exposures; warehouse and Iceberg tables; Airflow DAGs and tasks; and column-level lineage.
 Refer to tables as `name` or `schema.name` and to columns as `table.column`.
 Use `impact` before changing a model, table or column, `trace` to find where a value comes from,
 `define` for what a business term means and which columns hold it, `explain` for how a column is calculated, `describe` for one node's columns and tests, `search` when unsure of a name, and `path` to see how
-two nodes connect. If a tool says there is no graph, ask the user to run `kerplunk build`."""
+two nodes connect. If a tool says there is no graph, ask the user to run `konstruct build`."""
 
 
 def build_server(root: Path) -> MCPServer:
     project = Project(root)
-    server = MCPServer("kerplunk", version=__version__, instructions=INSTRUCTIONS)
+    server = MCPServer("konstruct", version=__version__, instructions=INSTRUCTIONS)
 
     def run(func: Callable[..., Any], *args: Any) -> dict[str, Any]:
         if not project.has_graph():
-            raise ToolError(f"no graph at {project.graph_path}; run `kerplunk build` in the project first")
+            raise ToolError(f"no graph at {project.graph_path}; run `konstruct build` in the project first")
         try:
             result: dict[str, Any] = func(*args).to_dict()
         except QueryError as error:
@@ -100,7 +100,7 @@ def build_server(root: Path) -> MCPServer:
         merge base with main): columns added, removed or changed with their expressions before and
         after, changed join and filter conditions, removed columns still read downstream (breaking),
         changed DAG tasks, and the downstream impact of each change. Use before proposing a merge."""
-        from kerplunk.diff import DiffError
+        from konstruct.diff import DiffError
 
         try:
             return run(project.diff, base, head)

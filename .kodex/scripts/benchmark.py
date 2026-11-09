@@ -1,4 +1,4 @@
-"""Measure kerplunk on generated dbt projects of increasing size.
+"""Measure konstruct on generated dbt projects of increasing size.
 
 Each project is the one tests/test_scale.py builds: models in layers, each joining two earlier
 models through CTEs, with a manifest, a catalog and Airflow DAGs. For each size it records:
@@ -29,9 +29,8 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from konstruct import Project, __version__  # noqa: E402
 from tests.test_scale import make_project  # noqa: E402
-
-from kerplunk import Project, __version__  # noqa: E402
 
 COLUMNS = 20
 
@@ -51,7 +50,7 @@ def median_time(func: Any, *args: Any, repeat: int = 5) -> float:
 
 
 def measure(models: int) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="kerplunk-bench-") as directory:
+    with tempfile.TemporaryDirectory(prefix="konstruct-bench-") as directory:
         root = Path(directory)
         make_project(root, models=models, columns_per_model=COLUMNS)
         project = Project(root)
@@ -112,11 +111,11 @@ def main() -> int:
     machine = (
         f"{platform.machine()}, {platform.system()} {platform.release()}, Python {platform.python_version()}"
     )
-    print(f"kerplunk {__version__} on {machine}, {COLUMNS} columns per model\n")
+    print(f"konstruct {__version__} on {machine}, {COLUMNS} columns per model\n")
     print(markdown(rows))
     if args.json:
         args.json.write_text(
-            json.dumps({"kerplunk": __version__, "machine": machine, "results": rows}, indent=1)
+            json.dumps({"konstruct": __version__, "machine": machine, "results": rows}, indent=1)
         )
     return 0
 

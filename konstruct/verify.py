@@ -1,4 +1,4 @@
-"""`kerplunk verify`: test the static lineage against the data, by perturbation.
+"""`konstruct verify`: test the static lineage against the data, by perturbation.
 
 Static column lineage is a claim about SQL. This module checks the claim empirically, the way
 perturbation-based provenance does: for every model built in a local DuckDB warehouse it copies the
@@ -30,8 +30,8 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
-from kerplunk.graph import Graph, Node
-from kerplunk.sql import strip_templating, table_key
+from konstruct.graph import Graph, Node
+from konstruct.sql import strip_templating, table_key
 
 STRATEGIES = ("shift", "null", "shuffle")
 _TEXT = ("VARCHAR", "TEXT", "STRING", "CHAR", "BPCHAR", "CHARACTER VARYING", "CHARACTER")
@@ -160,7 +160,7 @@ class Verification:
     def markdown(self) -> str:
         t = self.totals()
         lines = [
-            "# kerplunk lineage verification",
+            "# konstruct lineage verification",
             "",
             f"Warehouse `{self.warehouse}`, seed {self.seed}, strategies {', '.join(self.strategies)}, "
             f"up to {self.max_rows} rows per input, {self.seconds:.1f}s.",
@@ -211,7 +211,7 @@ class Candidate:
 
 
 def candidates(graph: Graph, root: Path) -> list[Candidate]:
-    """Nodes whose defining SELECT kerplunk can rerun: dbt models from the manifest, and tables
+    """Nodes whose defining SELECT konstruct can rerun: dbt models from the manifest, and tables
     built by a SQL file or an Airflow SQL task."""
     found: list[Candidate] = []
     manifests: dict[str, dict[str, Any]] = {}

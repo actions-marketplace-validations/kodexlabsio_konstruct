@@ -1,4 +1,4 @@
-"""kerplunk diff on real git repositories, and the dbt Jinja renderer it relies on."""
+"""konstruct diff on real git repositories, and the dbt Jinja renderer it relies on."""
 
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from kerplunk import Project
-from kerplunk.cli import main
-from kerplunk.diff import DiffError, default_base
-from kerplunk.jinja import Renderer, render_model
+from konstruct import Project
+from konstruct.cli import main
+from konstruct.diff import DiffError, default_base
+from konstruct.jinja import Renderer, render_model
 
 # Renderer
 
@@ -94,7 +94,7 @@ def test_dbt_builtin_macros(renderer: Renderer) -> None:
 
 def test_unknown_names_keep_their_arguments_and_errors_fall_back(renderer: Renderer) -> None:
     assert renderer.render("select {{ some_macro('amount', 'day') }}{{ adapter.unknown.thing }} 1") == (
-        "select kerplunk_macro(amount, 'day') 1"
+        "select konstruct_macro(amount, 'day') 1"
     )
     assert renderer.render("{{ nothing() }}") == ""
     assert render_model("{% if %}", renderer, lambda raw: "fallback") == "fallback"
@@ -156,7 +156,7 @@ def repo(tmp_path: Path) -> Path:
     (root / "sql" / "ltv.sql").write_text(BASE_LTV)
     (root / "sql" / "report.sql").write_text(BASE_REPORT)
     (root / "dag.py").write_text(DAG)
-    (root / ".gitignore").write_text("kerplunk-out/\n*.duckdb\n")
+    (root / ".gitignore").write_text("konstruct-out/\n*.duckdb\n")
     git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
@@ -253,7 +253,7 @@ def test_new_and_deleted_files_and_formats(repo: Path, capsys: pytest.CaptureFix
     out = capsys.readouterr().out
     assert main(["-q", "diff", "-C", str(repo), "--base", "HEAD", "--format", "selector"]) == 0
     assert capsys.readouterr().out.strip() == Project(repo).diff(base="HEAD").selection.selector
-    assert "### kerplunk:" in out
+    assert "### konstruct:" in out
     assert json.loads(out[out.index("{") :])["counts"]["added"] == 1
 
 
@@ -286,7 +286,7 @@ def test_outside_git(tmp_path: Path) -> None:
 def test_dbt_project_diff(built_jaffle: Path, tmp_path: Path) -> None:
     root = tmp_path / "shop"
     shutil.copytree(built_jaffle, root)
-    (root / ".gitignore").write_text("target/\nlogs/\nkerplunk-out/\n*.duckdb\n")
+    (root / ".gitignore").write_text("target/\nlogs/\nkonstruct-out/\n*.duckdb\n")
     git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
@@ -312,13 +312,13 @@ def test_dbt_project_diff(built_jaffle: Path, tmp_path: Path) -> None:
 @pytest.mark.dbt
 def test_column_aware_selection_is_sound(built_jaffle: Path, tmp_path: Path) -> None:
     """Build the project with dbt before and after a change and compare every table: each model
-    whose data changed must be in kerplunk's selection, which must still be smaller than
+    whose data changed must be in konstruct's selection, which must still be smaller than
     state:modified+ when a change touches nothing downstream."""
     from .conftest import run_dbt
 
     root = tmp_path / "shop"
     shutil.copytree(built_jaffle, root)
-    (root / ".gitignore").write_text("target/\nlogs/\nkerplunk-out/\n*.duckdb\n")
+    (root / ".gitignore").write_text("target/\nlogs/\nkonstruct-out/\n*.duckdb\n")
     git(root, "init", "-q", "-b", "main")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "base")
@@ -364,7 +364,7 @@ def test_column_aware_selection_is_sound(built_jaffle: Path, tmp_path: Path) -> 
 
 
 def test_dbt_yaml_changes() -> None:
-    from kerplunk.diff import compare_yaml
+    from konstruct.diff import compare_yaml
 
     before = """
 version: 2

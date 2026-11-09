@@ -1,6 +1,6 @@
 """dbt Labs' current jaffle-shop project, end to end: sources over seeds, packages, macros.
 
-Needs network access (git clone and `dbt deps`), so it runs only with KERPLUNK_REALWORLD=1; CI runs
+Needs network access (git clone and `dbt deps`), so it runs only with KONSTRUCT_REALWORLD=1; CI runs
 it in its own job.
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from kerplunk import Project
+from konstruct import Project
 
 from .conftest import dbt_executable
 
@@ -25,8 +25,8 @@ PROFILE = "default:\n  target: dev\n  outputs:\n    dev:\n      type: duckdb\n  
 
 @pytest.fixture(scope="module")
 def jaffle_shop(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    if not os.environ.get("KERPLUNK_REALWORLD"):
-        pytest.skip("set KERPLUNK_REALWORLD=1 to run (needs network access)")
+    if not os.environ.get("KONSTRUCT_REALWORLD"):
+        pytest.skip("set KONSTRUCT_REALWORLD=1 to run (needs network access)")
     dbt = dbt_executable()
     assert dbt is not None
     root = tmp_path_factory.mktemp("realworld") / "jaffle-shop"
@@ -52,7 +52,7 @@ def test_builds_without_warnings(project: Project) -> None:
     assert graph.warnings == []
     kinds = {n.kind for n in graph.nodes.values()}
     assert {"model", "seed", "source", "test", "column"} <= kinds
-    from kerplunk.report import analyse
+    from konstruct.report import analyse
 
     findings = analyse(graph)
     assert findings.lineage_covered / findings.lineage_total > 0.98
@@ -85,13 +85,13 @@ def test_names_resolve_to_the_source(project: Project) -> None:
 def test_rendering_without_dbt_matches_compiled_lineage(
     jaffle_shop: Path, project: Project, tmp_path: Path
 ) -> None:
-    """kerplunk's own Jinja rendering (used when there is no compiled SQL, and by diff) must give
+    """konstruct's own Jinja rendering (used when there is no compiled SQL, and by diff) must give
     the same lineage as dbt's compiled SQL."""
     import json
     import shutil
 
     copy = tmp_path / "uncompiled"
-    shutil.copytree(jaffle_shop, copy, ignore=shutil.ignore_patterns("kerplunk-out"))
+    shutil.copytree(jaffle_shop, copy, ignore=shutil.ignore_patterns("konstruct-out"))
     manifest_path = copy / "target" / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     for node in manifest["nodes"].values():

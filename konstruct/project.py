@@ -1,8 +1,8 @@
-"""The Python API: one object for a project, its graph and every question kerplunk answers.
+"""The Python API: one object for a project, its graph and every question konstruct answers.
 
-import kerplunk
+import konstruct
 
-project = kerplunk.Project("path/to/repo")
+project = konstruct.Project("path/to/repo")
 project.build(update=True)
 walk = project.impact("orders.amount")
 print(walk.summary())
@@ -17,23 +17,23 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kerplunk import query
-from kerplunk.graph import Graph
+from konstruct import query
+from konstruct.graph import Graph
 
 if TYPE_CHECKING:
-    from kerplunk.build import BuildResult
-    from kerplunk.config import Config
-    from kerplunk.conflicts import Conflicts
-    from kerplunk.diff import Diff
-    from kerplunk.explain import Explanation
-    from kerplunk.verify import Verification
+    from konstruct.build import BuildResult
+    from konstruct.config import Config
+    from konstruct.conflicts import Conflicts
+    from konstruct.diff import Diff
+    from konstruct.explain import Explanation
+    from konstruct.verify import Verification
 
-OUT_DIR = "kerplunk-out"
+OUT_DIR = "konstruct-out"
 
 
 def find_out_dir(start: Path) -> Path:
-    """The nearest ``kerplunk-out`` holding a graph, looking up from ``start``; otherwise
-    ``start/kerplunk-out``."""
+    """The nearest ``konstruct-out`` holding a graph, looking up from ``start``; otherwise
+    ``start/konstruct-out``."""
     start = start.resolve()
     for directory in (start, *start.parents):
         if (directory / OUT_DIR / "graph.json").is_file():
@@ -44,11 +44,11 @@ def find_out_dir(start: Path) -> Path:
 
 
 class Project:
-    """A repository kerplunk builds a graph for.
+    """A repository konstruct builds a graph for.
 
     ``path`` is the project root (or any directory inside one that has already been built).
     ``out_dir`` overrides where the graph is written and read; by default it is the
-    ``kerplunk-out`` directory found at or above ``path``, or ``<path>/kerplunk-out``.
+    ``konstruct-out`` directory found at or above ``path``, or ``<path>/konstruct-out``.
     """
 
     def __init__(self, path: str | Path = ".", *, out_dir: str | Path | None = None) -> None:
@@ -78,7 +78,7 @@ class Project:
         return self.graph_path.is_file()
 
     def config(self) -> Config:
-        from kerplunk.config import load_config
+        from konstruct.config import load_config
 
         return load_config(self.path, self.out_dir)
 
@@ -92,7 +92,7 @@ class Project:
         config: Config | None = None,
     ) -> BuildResult:
         """Build (or with ``update``, refresh) the graph and write graph.json, REPORT.md and graph.html."""
-        from kerplunk.build import build
+        from konstruct.build import build
 
         config = config or self.config()
         if run_dbt is not None:
@@ -121,7 +121,7 @@ class Project:
         if stamp is None:
             if self._graph is not None:
                 return self._graph
-            raise query.QueryError(f"no graph at {self.graph_path}; run `kerplunk build` first")
+            raise query.QueryError(f"no graph at {self.graph_path}; run `konstruct build` first")
         if self._graph is None or stamp != self._stamp:
             self._graph = Graph.read(self.graph_path)
             self._stamp = stamp
@@ -129,7 +129,7 @@ class Project:
 
     def changed_inputs(self) -> list[str]:
         """Input files that changed after the graph was built; empty when it is up to date."""
-        from kerplunk.build import changed_inputs
+        from konstruct.build import changed_inputs
 
         return changed_inputs(self.graph_path, self.graph) if self.has_graph() else []
 
@@ -153,9 +153,9 @@ class Project:
 
     def conflicts(self, limit: int | None = None, *, write: bool = False) -> Conflicts:
         """Columns that appear to be one business idea computed in different ways, ranked by
-        downstream reach (see kerplunk.conflicts). With ``write``, saves CONFLICTS.md and
+        downstream reach (see konstruct.conflicts). With ``write``, saves CONFLICTS.md and
         conflicts.json beside the graph."""
-        from kerplunk.conflicts import find_conflicts
+        from konstruct.conflicts import find_conflicts
 
         result = find_conflicts(self.graph, limit)
         if write:
@@ -172,7 +172,7 @@ class Project:
 
     def explain(self, ref: str) -> Explanation:
         """A column's formula, composed down to source columns, with the conditions on the way."""
-        from kerplunk.explain import explain
+        from konstruct.explain import explain
 
         node = query.resolve_one(self.graph, ref)
         if node.kind != "column":
@@ -189,9 +189,9 @@ class Project:
         columns: bool = False,
         namespace: str | None = None,
     ) -> str:
-        """The graph as OpenLineage JSON lines, Mermaid, Graphviz DOT or CSV (see kerplunk.export),
+        """The graph as OpenLineage JSON lines, Mermaid, Graphviz DOT or CSV (see konstruct.export),
         optionally only the lineage of ``select``."""
-        from kerplunk.export import export
+        from konstruct.export import export
 
         node = query.resolve_one(self.graph, select) if select else None
         return export(self.graph, fmt, select=node, columns=columns, namespace=namespace)
@@ -208,14 +208,14 @@ class Project:
         models: Sequence[str] | None = None,
         write: bool = True,
     ) -> Verification:
-        """Check the graph's column lineage against the data by perturbation (see kerplunk.verify).
+        """Check the graph's column lineage against the data by perturbation (see konstruct.verify).
 
         Needs the models built in a local DuckDB warehouse; by default the one the build read.
         With ``write``, saves VERIFY.md and verify.json and marks verified edges in graph.json
         and graph.html.
         """
-        from kerplunk.html import write_html
-        from kerplunk.verify import annotate, verify
+        from konstruct.html import write_html
+        from konstruct.verify import annotate, verify
 
         graph = self.graph
         target = str(warehouse) if warehouse else self._verification_warehouse()
@@ -243,9 +243,9 @@ class Project:
             if source.get("input") == "duckdb" and source.get("status") != "failed":
                 path = Path(str(source["name"]).removeprefix("duckdb ").strip())
                 return str(path if path.is_absolute() else self.root / path)
-        from kerplunk.config import discover_warehouses
-        from kerplunk.dbt import find_projects
-        from kerplunk.warehouse import PostgresConnector
+        from konstruct.config import discover_warehouses
+        from konstruct.dbt import find_projects
+        from konstruct.warehouse import PostgresConnector
 
         config = self.config()
         for warehouse in discover_warehouses(config, find_projects(config.root)):
@@ -261,7 +261,7 @@ class Project:
     def diff(self, base: str | None = None, head: str | None = None) -> Diff:
         """Column-level changes between ``base`` (default: the merge base with main) and ``head``
         (default: the working tree), with what each change breaks or affects downstream."""
-        from kerplunk.diff import diff
+        from konstruct.diff import diff
 
         return diff(self.graph, self.root, base=base, head=head)
 

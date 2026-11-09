@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from kerplunk import __version__
-from kerplunk.cli import find_out_dir, main
-from kerplunk.console import Console, colour_enabled
+from konstruct import __version__
+from konstruct.cli import find_out_dir, main
+from konstruct.console import Console, colour_enabled
 
 
 def run(capsys: pytest.CaptureFixture[str], *args: str) -> tuple[int, str, str]:
@@ -29,7 +29,7 @@ def test_build_prints_what_it_found(
     assert code == 0
     assert "building" in err
     lines = out.splitlines()
-    assert lines[0] == f"kerplunk  {jaffle}"
+    assert lines[0] == f"konstruct  {jaffle}"
     assert (
         "  dbt        jaffle_shop (.)  5 models, 3 seeds, 20 tests, 1 exposure  (ran dbt docs generate)"
         in lines
@@ -67,7 +67,7 @@ def test_query_commands(jaffle_built_graph: Path, capsys: pytest.CaptureFixture[
     assert code == 0 and "-feeds-> orders (model)" in out
     code, out, _ = run(capsys, "search", "lifetime", "value", "-C", project, "-n", "1")
     assert code == 0 and out.startswith("Customer lifetime value")
-    graph_file = str(jaffle_built_graph / "kerplunk-out" / "graph.json")
+    graph_file = str(jaffle_built_graph / "konstruct-out" / "graph.json")
     code, out, _ = run(capsys, "describe", "customers", "--graph", graph_file)
     assert code == 0 and out.startswith("customers (model)")
     code, out, _ = run(capsys, "list", "models", "-C", project)
@@ -79,7 +79,7 @@ def test_query_commands(jaffle_built_graph: Path, capsys: pytest.CaptureFixture[
     code, out, _ = run(capsys, "query", "which", "models", "use", "payments", "-C", project)
     assert code == 0 and "stg_payments" in out
     code, out, _ = run(capsys, "open", "--print-only", "-C", project)
-    assert code == 0 and out.strip().endswith("kerplunk-out/graph.html")
+    assert code == 0 and out.strip().endswith("konstruct-out/graph.html")
     code, _, err = run(capsys, "impact", "nope", "-C", project)
     assert code == 1 and "nothing in the graph matches 'nope'" in err
 
@@ -93,7 +93,7 @@ def test_path_without_a_connection_exits_3(tmp_path: Path, capsys: pytest.Captur
 def test_query_commands_build_a_missing_graph(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (tmp_path / "x.sql").write_text("create table t2 as select a + 1 as b from t1")
     code, _, err = run(capsys, "impact", "x", "-C", str(tmp_path), "--no-build")
-    assert code == 1 and "run `kerplunk build` first" in err
+    assert code == 1 and "run `konstruct build` first" in err
     code, out, err = run(capsys, "trace", "t2.b", "-C", str(tmp_path))
     assert code == 0
     assert "no graph yet; building" in err
@@ -136,10 +136,10 @@ def test_build_options_and_errors(tmp_path: Path, capsys: pytest.CaptureFixture[
     (tmp_path / "bad.sql").write_text("select from where (")
     code, out, _ = run(capsys, "build", str(tmp_path), "--strict")
     assert code == 1 and "  warnings   1" in out
-    (tmp_path / "kerplunk.toml").write_text("[[warehouse]]\ntype = 'oracle'\n")
+    (tmp_path / "konstruct.toml").write_text("[[warehouse]]\ntype = 'oracle'\n")
     code, _, err = run(capsys, "build", str(tmp_path))
     assert code == 1 and "unknown warehouse type 'oracle'" in err
-    (tmp_path / "kerplunk.toml").write_text("not = [toml")
+    (tmp_path / "konstruct.toml").write_text("not = [toml")
     code, _, err = run(capsys, "build", str(tmp_path))
     assert code == 1 and "cannot read" in err
 
@@ -163,39 +163,39 @@ def test_status_and_init(
     assert "  dbt          jaffle_shop (.): no target/manifest.json yet" in out
     assert "  warehouse    duckdb jaffle_shop.duckdb (dbt profile jaffle_shop)" in out
     assert "  sql          no SQL files found" in out
-    assert "  graph        not built yet; run `kerplunk build`" in out
-    assert "  skill        not installed; run `kerplunk install`" in out
+    assert "  graph        not built yet; run `konstruct build`" in out
+    assert "  skill        not installed; run `konstruct install`" in out
     code, out, _ = run(capsys, "status", "-C", str(jaffle), "--json")
     assert json.loads(out)["dag_files"] == ["dags/jaffle_shop_daily.py"]
 
     code, out, _ = run(capsys, "init", "-C", str(jaffle))
     assert code == 0 and "wrote" in out
-    text = (jaffle / "kerplunk.toml").read_text()
+    text = (jaffle / "konstruct.toml").read_text()
     assert 'projects = ["."]' in text and 'dags = ["dags"]' in text and 'path = "jaffle_shop.duckdb"' in text
     code, _, err = run(capsys, "init", "-C", str(jaffle))
     assert code == 1 and "already exists" in err
     assert run(capsys, "init", "-C", str(jaffle), "--force")[0] == 0
     code, out, _ = run(capsys, "init", "-C", str(jaffle), "--stdout")
-    assert out.startswith("# kerplunk configuration")
+    assert out.startswith("# konstruct configuration")
     code, out, _ = run(capsys, "status", "-C", str(jaffle))
-    assert "  config       kerplunk.toml" in out
+    assert "  config       konstruct.toml" in out
     run(capsys, "install", "--target", str(jaffle))
     code, out, _ = run(capsys, "status", "-C", str(jaffle))
     assert "  skill        project (Claude Code and Cursor)" in out
 
 
 def test_find_out_dir_looks_upwards(tmp_path: Path) -> None:
-    (tmp_path / "kerplunk-out").mkdir()
-    (tmp_path / "kerplunk-out" / "graph.json").write_text("{}")
+    (tmp_path / "konstruct-out").mkdir()
+    (tmp_path / "konstruct-out" / "graph.json").write_text("{}")
     nested = tmp_path / "a" / "b"
     nested.mkdir(parents=True)
-    assert find_out_dir(nested) == tmp_path / "kerplunk-out"
-    assert find_out_dir(tmp_path / "kerplunk-out") == tmp_path / "kerplunk-out"
+    assert find_out_dir(nested) == tmp_path / "konstruct-out"
+    assert find_out_dir(tmp_path / "konstruct-out") == tmp_path / "konstruct-out"
 
 
 def test_no_command_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     code, out, _ = run(capsys)
-    assert code == 2 and "usage: kerplunk" in out and "examples:" in out
+    assert code == 2 and "usage: konstruct" in out and "examples:" in out
 
 
 def test_colour(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -207,7 +207,7 @@ def test_colour(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[s
     assert Console(colour=False).style("x", "red") == "x"
     Console(quiet=True).info("hidden")
     Console(colour=False).warn("shown")
-    assert capsys.readouterr().err == "kerplunk: shown\n"
+    assert capsys.readouterr().err == "konstruct: shown\n"
 
 
 def test_version_and_help() -> None:
@@ -215,10 +215,14 @@ def test_version_and_help() -> None:
 
     def cli(*args: str) -> str:
         return subprocess.run(
-            [sys.executable, "-m", "kerplunk.cli", *args], capture_output=True, text=True, env=env, check=True
+            [sys.executable, "-m", "konstruct.cli", *args],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
         ).stdout
 
-    assert cli("--version").strip() == f"kerplunk {__version__}"
+    assert cli("--version").strip() == f"konstruct {__version__}"
     help_text = cli("--help")
     for command in (
         "build",

@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from kerplunk.graph import RELATION_KINDS, Graph, Node
+from konstruct.graph import RELATION_KINDS, Graph, Node
 
 LIST_LIMIT = 50
 
@@ -26,7 +26,7 @@ class Findings:
 
 
 def _is_produced(graph: Graph, node: Node) -> bool:
-    """Whether kerplunk knows how the relation is built (dbt model, SQL or task that writes it)."""
+    """Whether konstruct knows how the relation is built (dbt model, SQL or task that writes it)."""
     if node.kind in ("model", "snapshot"):
         return True
     return any(
@@ -118,10 +118,10 @@ def render(graph: Graph) -> str:
     meta = graph.meta
     inputs = meta.get("inputs", {})
     lines = [
-        "# kerplunk report",
+        "# konstruct report",
         "",
-        f"Built {meta.get('generated_at', '')} from `{meta.get('root', '')}` by kerplunk "
-        f"{meta.get('kerplunk_version', '')} in {meta.get('build_seconds', '?')}s. SQL dialect: "
+        f"Built {meta.get('generated_at', '')} from `{meta.get('root', '')}` by konstruct "
+        f"{meta.get('konstruct_version', '')} in {meta.get('build_seconds', '?')}s. SQL dialect: "
         f"{meta.get('dialect') or 'sqlglot default'}.",
         "",
         "## Summary",
@@ -238,7 +238,7 @@ def render(graph: Graph) -> str:
         "",
         "## Columns with no lineage",
         "",
-        "Columns of models and SQL-built tables with no upstream column: constants, columns kerplunk "
+        "Columns of models and SQL-built tables with no upstream column: constants, columns konstruct "
         "could not resolve, or SQL it could not parse (see Warnings).",
         "",
         *_bullets(graph, findings.no_lineage),

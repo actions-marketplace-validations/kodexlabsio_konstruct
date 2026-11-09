@@ -1,3 +1,13 @@
+## v0.8.0 (2026-11-09)
+
+### Feat
+
+- **ci**: Make kerplunk a GitHub Action for pull request lineage review
+
+### Fix
+
+- **cli**: Allow diff --format selector and add --json-file for scripts
+
 ## v0.7.0 (2026-11-09)
 
 ### Feat

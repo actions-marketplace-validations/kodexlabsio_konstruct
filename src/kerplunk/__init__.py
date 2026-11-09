@@ -9,7 +9,7 @@ The main entry point is `Project`::
     print(project.impact("orders.amount"))
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from kerplunk.explain import Explanation
 from kerplunk.graph import Edge, Graph, Node

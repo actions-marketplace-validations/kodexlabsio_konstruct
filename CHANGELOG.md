@@ -1,3 +1,11 @@
+## v0.7.0 (2026-11-09)
+
+### Feat
+
+- **html**: Isolate a selected column's path and show verification results
+- **html**: Rebuild the graph viewer on the Kodex Labs design system
+- **lineage**: Explain how a column is calculated, composed down to sources
+
 ## v0.6.0 (2026-11-06)
 
 ### Feat

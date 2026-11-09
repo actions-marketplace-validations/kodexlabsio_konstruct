@@ -1,3 +1,9 @@
+## v0.10.2 (2026-11-09)
+
+### Feat
+
+- **warehouse**: Rank columns by what query history shows people read
+
 ## v0.10.1 (2026-11-09)
 
 ### Feat

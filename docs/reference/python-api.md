@@ -25,3 +25,44 @@ project.verify(seed=7).totals()  # {"claimed": 36, "confirmed": 36, "unexplained
 ```
 
 Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult` made of `Item`s, plus `Definitions` of `TermDefinition`s, `Explanation`, `Diff` and `Verification`). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `konstruct.QueryError` with suggestions. `project.graph` is the underlying `konstruct.Graph` for anything the API does not cover.
+
+## Classes
+
+Generated from the docstrings.
+
+```{eval-rst}
+.. autoclass:: konstruct.Project
+   :members:
+
+.. autoclass:: konstruct.Walk
+   :members: summary, to_dict
+
+.. autoclass:: konstruct.Item
+
+.. autoclass:: konstruct.Explanation
+   :members: to_dict
+
+.. autoclass:: konstruct.Definitions
+   :members: to_dict
+
+.. autoclass:: konstruct.TermDefinition
+
+.. autoclass:: konstruct.Description
+
+.. autoclass:: konstruct.PathResult
+
+.. autoclass:: konstruct.SearchResult
+
+.. autoclass:: konstruct.Listing
+
+.. autoclass:: konstruct.QueryResult
+
+.. autoexception:: konstruct.QueryError
+
+.. autoclass:: konstruct.Graph
+   :members: read, write, resolve, impact, trace, path, label, columns_of
+
+.. autoclass:: konstruct.Node
+
+.. autoclass:: konstruct.Edge
+```

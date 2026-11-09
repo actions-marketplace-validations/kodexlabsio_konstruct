@@ -25,3 +25,14 @@
 Tables and columns can be named as `orders`, `main.orders`, `orders.amount`, `jaffle_shop.main.orders.amount`, `ecom.raw_orders` for a dbt source, `dag_id.task_id` for a task, or by dbt unique id. When nothing matches, Konstruct suggests close names; when a name is ambiguous, it lists the candidates.
 
 Every command takes `-C DIR` (before or after the command name) to work on another directory; query commands also find `konstruct-out` in any parent directory. Query commands build the graph if there is none, warn when inputs changed since the last build, and take `--refresh` to update it first, `--json` for structured output and `--graph FILE` to read a specific graph. Output is coloured on a terminal unless `NO_COLOR` is set or `--no-color` is given. Exit status is 0 on success, 1 on an error, 2 on a usage error and 3 when `path` finds no connection.
+
+## Every Command and Option
+
+Generated from the command's own argument definitions.
+
+```{eval-rst}
+.. argparse::
+   :module: konstruct.cli
+   :func: parser
+   :prog: konstruct
+```

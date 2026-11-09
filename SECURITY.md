@@ -4,7 +4,7 @@
 
 Please report vulnerabilities privately, with GitHub's **Report a vulnerability** button on the [Security tab](https://github.com/kodexlabsio/konstruct/security) of this repository, rather than in a public issue. Include the version (`konstruct --version`), what an attacker controls (a SQL file, a DAG file, a dbt project, a graph.json, warehouse metadata), and what they can achieve.
 
-You should receive a reply within five working days. Fixes are released as a patch version and noted in the [changelog](CHANGELOG.md) and the GitHub release.
+You should receive a reply within five working days. Fixes are released as a patch version and noted in the [changelog](https://github.com/kodexlabsio/konstruct/blob/main/CHANGELOG.md) and the GitHub release.
 
 ## Supported Versions
 

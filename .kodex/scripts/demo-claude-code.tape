@@ -1,11 +1,11 @@
-# Records docs/demo-claude-code.gif: impact analysis through the /konstruct skill in Claude Code.
+# Records docs/images/demo-claude-code.gif: impact analysis through the /konstruct skill in Claude Code.
 # Needs Claude Code installed and signed in, and the skill installed for this project:
 #   uv run .kodex/scripts/prepare_example.py
 #   uv run konstruct build examples/jaffle_shop
 #   uv run konstruct install --project examples/jaffle_shop
 #   vhs .kodex/scripts/demo-claude-code.tape
 # The model's answer varies between runs; record until the take is clear, then commit the GIF.
-Output docs/demo-claude-code.gif
+Output docs/images/demo-claude-code.gif
 
 Set Shell "bash"
 Set FontSize 15

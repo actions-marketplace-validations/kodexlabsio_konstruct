@@ -1,7 +1,7 @@
-# Records docs/demo-diff.gif: konstruct diff on a branch of the example project.
+# Records docs/images/demo-diff.gif: konstruct diff on a branch of the example project.
 # Run from the repository root after `uv run .kodex/scripts/prepare_example.py`:
 #   .kodex/scripts/demo_diff_setup.sh && vhs .kodex/scripts/demo-diff.tape
-Output docs/demo-diff.gif
+Output docs/images/demo-diff.gif
 
 Set Shell "bash"
 Set FontSize 14

@@ -1,0 +1,16 @@
+# MCP Server
+
+`konstruct mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io/) server on stdio. `konstruct install --mcp` registers it for Claude Code and Cursor (see [Coding Agents](../guide/agents.md)). Every tool returns the same structured result as the matching command with `--json`, and the server rereads `graph.json` when a build changes it.
+
+| Tool | Arguments | What it returns |
+|------|-----------|-----------------|
+| `impact` | `ref`, `max_depth=None` | Everything downstream of a table, model or column (e.g. `orders` or `orders.amount`): derived columns, relations, models that join or filter on it, tests, exposures and the orchestration tasks that run them. Use before renaming, dropping or changing it. |
+| `trace` | `ref`, `max_depth=None` | Everything upstream of a table, model or column: the source columns it is derived from, each marked direct (passed through or renamed) or transformed, and the tasks that build it. |
+| `search` | `text`, `limit=20`, `kinds=None` | Find nodes whose names or descriptions match the words in `text`. `kinds` limits the results to node kinds: source, table, column, model, seed, snapshot, dag, task, test, exposure. |
+| `describe` | `ref` | One node in detail: description, path, columns with types and descriptions, tests, immediate upstream and downstream neighbours, and for tasks what they run. |
+| `conflicts` | `limit=20` | Columns that appear to measure the same business idea (by name, synonyms or a shared business term) but are computed differently: each pair with its formula in terms of sources, and exactly what differs (source columns, filters, joins, aggregation) with the file each lives in, ranked by how much depends on them downstream. |
+| `define` | `ref` | The business definition of a term, by name or synonym (e.g. `lifetime value`), or the terms that define a column (e.g. `customers.customer_lifetime_value`): the agreed wording, owner, status (draft, agreed, approved, retired), grain, required filters, unit and the columns that hold it. Approved terms come first. Use before answering a business question, so the answer follows the approved definition and its required filters. |
+| `explain` | `ref` | What a column is, as SQL: its expression with CTEs and aliases inlined, the same formula composed down to source columns, and step by step the expression of each column on the way with the joins, filters and grouping that shape its rows. Use to answer "how is this number calculated?" or before changing a calculation. |
+| `path` | `start`, `end` | The shortest connection between two nodes, following data flow where possible. |
+| `diff` | `base=None`, `head=None` | What the current branch changes, column by column, compared with `base` (default: the merge base with main): columns added, removed or changed with their expressions before and after, changed join and filter conditions, removed columns still read downstream (breaking), changed DAG tasks, and the downstream impact of each change. Use before proposing a merge. |
+| `query` | `question` | A free-text question: the best-matching nodes and their connections, plus impact or lineage when the question asks for it. Prefer the specific tools when you know the name. |

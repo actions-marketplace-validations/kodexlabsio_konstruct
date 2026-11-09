@@ -10,7 +10,7 @@ Open an issue with the [bug report form](https://github.com/kodexlabsio/konstruc
 - what Konstruct said (`konstruct trace`, `explain` or `diff` output, or the warning in `REPORT.md`) and what it should have said;
 - `konstruct --version`, the SQL dialect and, for dbt, the adapter.
 
-For a security problem, follow [SECURITY.md](SECURITY.md) instead.
+For a security problem, follow [SECURITY.md](https://github.com/kodexlabsio/konstruct/blob/main/SECURITY.md) instead.
 
 ## Proposing a Change
 
@@ -18,7 +18,7 @@ For anything larger than a fix, open an issue first, so the approach can be agre
 
 ## Making a Change
 
-The [Development section of the README](README.md#development) covers setting up, the test suite and the commands. In short:
+The [Development section of the README](https://kodexlabsio.github.io/konstruct/development.html) covers setting up, the test suite and the commands. In short:
 
 ```bash
 uv sync
@@ -49,4 +49,4 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/) with
 
 ## Licence
 
-By contributing you agree that your contribution is licensed under the [MIT Licence](LICENSE).
+By contributing you agree that your contribution is licensed under the [MIT Licence](https://github.com/kodexlabsio/konstruct/blob/main/LICENSE).

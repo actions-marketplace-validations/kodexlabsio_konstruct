@@ -1,0 +1,97 @@
+/* The Read the Docs theme in the Kodex Labs design system (DESIGN.md): Manrope for words,
+   JetBrains Mono for code, slate grounds and one sky accent. */
+
+@font-face { font-family: "Manrope"; font-weight: 500; font-display: swap; src: url("fonts/manrope-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Manrope"; font-weight: 700; font-display: swap; src: url("fonts/manrope-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Manrope"; font-weight: 800; font-display: swap; src: url("fonts/manrope-latin-800-normal.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 500; font-display: swap; src: url("fonts/jetbrains-mono-latin-500-normal.woff2") format("woff2"); }
+
+:root {
+    --slate: #1f2a2e;
+    --surface: #273338;
+    --deep: #1a2427;
+    --sky: #7dc3ff;
+    --link: #1f6fb2;
+    --link-hover: #164f80;
+    --mist: #eef5fa;
+    --line: #e1eaf0;
+    --ink: #1f2a2e;
+    --ink-soft: #33444b;
+}
+
+body,
+.wy-body-for-nav,
+.rst-content,
+.wy-nav-content {
+    font-family: Manrope, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-weight: 500;
+    color: var(--ink-soft);
+}
+
+h1, h2, h3, h4, .rst-content .toctree-wrapper > p.caption, .wy-side-nav-search > a {
+    font-family: Manrope, system-ui, sans-serif;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+}
+
+.rst-content h1 { font-size: 2.4rem; line-height: 1.1; letter-spacing: -0.03em; }
+
+code, kbd, pre, .rst-content code, .rst-content tt, .rst-content pre.literal-block, .highlight pre {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.rst-content code.literal {
+    color: var(--slate);
+    background: var(--mist);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1px 5px;
+    font-size: 0.86em;
+}
+
+.highlight {
+    background: var(--mist);
+    border-radius: 12px;
+}
+
+div[class^="highlight"] {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+}
+
+a, a:visited { color: var(--link); }
+a:hover { color: var(--link-hover); }
+
+.wy-nav-side, .wy-side-scroll { background: var(--deep); }
+.wy-side-nav-search { background: var(--slate); }
+.wy-side-nav-search > a { color: #fff; }
+.wy-side-nav-search input[type="text"] { border-radius: 999px; border-color: var(--surface); }
+.wy-menu-vertical header, .wy-menu-vertical p.caption {
+    color: var(--sky);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}
+.wy-menu-vertical a { color: rgba(255, 255, 255, 0.86); }
+.wy-menu-vertical a:hover { background: var(--surface); color: #fff; }
+.wy-menu-vertical li.current > a, .wy-menu-vertical li.on a { font-weight: 700; }
+.wy-nav-top { background: var(--slate); }
+
+.rst-content table.docutils, .wy-table-responsive table td, .wy-table-responsive table th {
+    white-space: normal;
+}
+.rst-content table.docutils { border-color: var(--line); }
+.rst-content table.docutils thead th { background: var(--mist); color: var(--ink); }
+.rst-content table.docutils td, .rst-content table.docutils th { border-color: var(--line); }
+
+.rst-content .admonition { border-radius: 12px; }
+.rst-content img { border-radius: 12px; }
+
+.hero-tagline {
+    font-size: 1.25rem;
+    line-height: 1.6;
+    color: var(--ink);
+    font-weight: 500;
+}
+
+.wy-side-nav-search img.logo { max-width: 72px; padding: 6px 0 2px; }

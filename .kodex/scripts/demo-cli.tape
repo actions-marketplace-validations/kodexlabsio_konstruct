@@ -1,7 +1,7 @@
-# Records docs/demo-cli.gif: build the example graph, then ask what a change would break.
+# Records docs/images/demo-cli.gif: build the example graph, then ask what a change would break.
 # Run from the repository root after `uv sync` and `uv run .kodex/scripts/prepare_example.py`:
 #   vhs .kodex/scripts/demo-cli.tape
-Output docs/demo-cli.gif
+Output docs/images/demo-cli.gif
 
 Set Shell "bash"
 Set FontSize 15

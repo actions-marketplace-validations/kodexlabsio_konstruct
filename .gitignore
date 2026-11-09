@@ -38,3 +38,6 @@ logs/
 .claude/settings.local.json
 .claude/worktrees/
 coverage.xml
+docs/_build/
+.claude/plans/
+.claude/settings.local.json

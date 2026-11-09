@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RELEASABLE = {'feat': 'Feat', 'fix': 'Fix', 'refactor': 'Refactor', 'perf': 'Perf'}
 ORDER = ['BREAKING CHANGE', 'Feat', 'Fix', 'Refactor', 'Perf']
 HEADER = re.compile(r'^(?P<type>\w+)(?:\((?P<scope>[^()]*)\))?(?P<breaking>!)?: (?P<subject>.+)$')
-BREAKING_FOOTER = re.compile(r'^BREAKING[ -]CHANGE: (?P<text>.+)$', re.MULTILINE)
+BREAKING_FOOTER = re.compile(r'^BREAKING[ -]CHANGE: (?P<text>.+(?:\n(?!\n).+)*)', re.MULTILINE)
 VERSION_LINE = re.compile(r'^version = "(?P<version>[^"]+)"$', re.MULTILINE)
 SECTION = re.compile(r'^## v(?P<version>\d+\.\d+\.\d+) \(', re.MULTILINE)
 
@@ -106,8 +106,10 @@ def section(version: str, commits: list[Commit], date: str | None = None) -> str
         scope = f'**{match["scope"]}**: ' if match['scope'] else ''
         if match['type'] in RELEASABLE:
             groups.setdefault(RELEASABLE[match['type']], []).append(f'- {scope}{match["subject"]}')
-        for footer in BREAKING_FOOTER.finditer(body):
-            groups.setdefault('BREAKING CHANGE', []).append(f'- {scope}{footer["text"].strip()}')
+        footers = [' '.join(f['text'].split()) for f in BREAKING_FOOTER.finditer(body)]
+        # A breaking change says what broke in its footer; without one, its subject says it.
+        for text in footers or ([match['subject']] if match['breaking'] else []):
+            groups.setdefault('BREAKING CHANGE', []).append(f'- {scope}{text}')
     parts = [f'## v{version} ({date or dt.date.today().isoformat()})']
     for name in ORDER:
         if name in groups:
@@ -146,26 +148,35 @@ def without_section(changelog: str, version: str) -> str:
     return changelog
 
 
-def released_sections(changelog: str) -> str:
-    """Sections of releases the workflow made from a detached commit, which main's CHANGELOG.md
-    has not recorded yet, taken from each release's own tag, newest first."""
-    top = SECTION.search(changelog)
-    newest = parse_version(top['version']) if top else (0, 0, 0)
-    found = []
-    for tag in sorted(
+def sections(changelog: str) -> tuple[str, dict[str, str]]:
+    """The text before the first section, and each section by version."""
+    matches = list(SECTION.finditer(changelog))
+    found = {}
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(changelog)
+        found[match['version']] = changelog[match.start() : end].rstrip('\n') + '\n'
+    return changelog[: matches[0].start()] if matches else changelog, found
+
+
+def history(changelog: str) -> str:
+    """The changelog's released history, rebuilt from the tags: every released version's section
+    as its own tag records it (so a release the workflow made from a detached commit is recorded,
+    and a section a stale pull request wrote for a version released differently is corrected),
+    falling back to the section here, newest first. Sections for versions never released go."""
+    preamble, here = sections(changelog)
+    tags = sorted(
         (t for t in git('tag', '--list', 'v*').split() if re.fullmatch(r'v\d+\.\d+\.\d+', t)),
         key=lambda t: parse_version(t[1:]),
         reverse=True,
-    ):
-        if parse_version(tag[1:]) <= newest:
-            break
-        text = git('show', f'{tag}:CHANGELOG.md')
-        matches = list(SECTION.finditer(text))
-        for index, match in enumerate(matches):
-            if match['version'] == tag[1:]:
-                end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-                found.append(text[match.start() : end].rstrip('\n') + '\n')
-    return '\n'.join(found)
+    )
+    kept = []
+    for tag in tags:
+        version = tag[1:]
+        _, recorded = sections(git('show', f'{tag}:CHANGELOG.md'))
+        text = recorded.get(version) or here.get(version)
+        if text:
+            kept.append(text)
+    return preamble + '\n'.join(kept)
 
 
 def write(version: str, changes: str) -> None:
@@ -191,9 +202,8 @@ def write(version: str, changes: str) -> None:
         encoding='utf-8',
     )
     changelog = ROOT / 'CHANGELOG.md'
-    rest = without_section(changelog.read_text(encoding='utf-8'), version)
-    carried = released_sections(rest)
-    changelog.write_text(changes + '\n' + (carried + '\n' if carried else '') + rest, encoding='utf-8')
+    released = history(without_section(changelog.read_text(encoding='utf-8'), version))
+    changelog.write_text(changes + ('\n' + released if released else ''), encoding='utf-8')
 
 
 def check(title: str | None, body: str, base: str) -> int:

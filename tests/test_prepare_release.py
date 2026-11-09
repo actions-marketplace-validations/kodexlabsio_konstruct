@@ -46,7 +46,7 @@ def test_the_section_follows_commitizen() -> None:
     )
     assert text == (
         '## v0.12.0 (2026-11-09)\n\n'
-        '### BREAKING CHANGE\n\n- **sql**: the lineage API moved\n\n'
+        '### BREAKING CHANGE\n\n- **cli**: Rename build\n- **sql**: the lineage API moved\n\n'
         '### Feat\n\n- **mcp**: Add the ontology tool\n- **cli**: Rename build\n\n'
         '### Fix\n\n- Skip the fetch\n\n'
         '### Refactor\n\n- **sql**: Tidy\n\n'
@@ -202,3 +202,67 @@ def test_check_passes_unprepared_and_matching_pull_requests(
     # A breaking title now calls for a minor, so the prepared patch no longer matches.
     assert _prepare('--title', 'feat!: Rename everything', '--check') == 1
     assert '0.12.0 expected' in capsys.readouterr().out
+
+
+def test_breaking_changes_say_what_broke() -> None:
+    text = release.section(
+        '0.12.0',
+        [
+            ('build(deps)!: Drop Python 3.11', ''),
+            (
+                'fix(sql): Rename a field',
+                'Why.\n\nBREAKING CHANGE: the field is now\ncalled source_column\n\nRefs: #1',
+            ),
+        ],
+        date='2026-11-09',
+    )
+    assert text == (
+        '## v0.12.0 (2026-11-09)\n\n'
+        '### BREAKING CHANGE\n\n- **deps**: Drop Python 3.11\n- **sql**: the field is now called source_column\n\n'
+        '### Fix\n\n- **sql**: Rename a field\n'
+    )
+
+
+def test_a_stale_section_for_a_released_version_is_corrected(repo: Path) -> None:
+    def run(*args: str) -> None:
+        subprocess.run(args, cwd=repo, check=True, capture_output=True)
+
+    # A pull request prepared v0.11.2 for a feat, but v0.11.2 was released from a detached commit
+    # for the fix on main. Its section must come from the tag, and the feat goes in v0.11.3.
+    run('git', 'checkout', '-q', '--detach')
+    assert _prepare() == 0
+    run(
+        'git',
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@e',
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '-qam',
+        'release',
+    )
+    run('git', 'tag', 'v0.11.2')
+    run('git', 'checkout', '-q', 'main')
+    changelog = (repo / 'CHANGELOG.md').read_text()
+    (repo / 'CHANGELOG.md').write_text('## v0.11.2 (2026-11-09)\n\n### Feat\n\n- Add a thing\n\n' + changelog)
+    run(
+        'git',
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@e',
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '-qam',
+        'feat: Add a thing',
+    )
+    assert _prepare() == 0
+    changelog = (repo / 'CHANGELOG.md').read_text()
+    headings = [line.split(' (')[0] for line in changelog.splitlines() if line.startswith('## ')]
+    assert headings == ['## v0.11.3', '## v0.11.2', '## v0.11.1']
+    newest, released, _oldest = changelog.split('## v0.11.')[1:]
+    assert '- Add a thing' in newest and '- Add a thing' not in released
+    assert '- **sql**: Order sources' in released

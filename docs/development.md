@@ -125,7 +125,7 @@ graph LR
     end
 
     subgraph "Release Workflow"
-        Bump[Tag the version<br/>a pull request set]
+        Bump[Tag a prepared version<br/>or release from above main]
         Release[GitHub release]
         PyPI[PyPI<br/>off by default]
     end

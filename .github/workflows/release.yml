@@ -71,44 +71,7 @@ jobs:
         if: steps.current.outputs.stale != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          latest="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
-          version="$(uv version --short)"
-          if [ -n "$latest" ] && ! gh release view "$latest" > /dev/null 2>&1; then
-            echo "${latest} is tagged but has no GitHub release; finishing it"
-            tag="$latest"
-            git checkout --quiet "$tag"
-          elif ! git rev-parse -q --verify "refs/tags/v${version}" > /dev/null; then
-            tag="v${version}"
-            echo "main carries ${tag}, prepared by its pull request"
-          else
-            next="$(python3 .kodex/scripts/prepare_release.py --base HEAD --no-fetch --dry-run | head -1)"
-            if [ "${next#nothing}" != "$next" ]; then
-              echo "Nothing to release since ${latest}"
-              echo "released=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            tag="v${next}"
-            echo "main has releasable changes since ${latest}; releasing ${tag} from a commit above main"
-            git checkout --quiet --detach
-            python3 .kodex/scripts/prepare_release.py --base HEAD --no-fetch
-            git commit --quiet -am "chore(release): Release ${next}"
-          fi
-          case "$tag" in
-            v0.*) ;;
-            *) echo "::error::refusing to release ${tag}: Konstruct stays below 1.0 until the owner decides"; exit 1 ;;
-          esac
-          # The changelog section for this version, up to the next heading.
-          awk -v heading="## ${tag} " 'index($0, heading) == 1 {found = 1; print; next}
-            found && /^## v/ {exit} found {print}' CHANGELOG.md > "$RUNNER_TEMP/RELEASE_NOTES.md"
-          if [ ! -s "$RUNNER_TEMP/RELEASE_NOTES.md" ]; then
-            echo "::error::CHANGELOG.md has no section for ${tag}"
-            exit 1
-          fi
-          echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+        run: bash .kodex/scripts/plan_release.sh
 
       - name: Build the sdist and wheel
         if: steps.plan.outputs.released == 'true'

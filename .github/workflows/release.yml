@@ -92,7 +92,7 @@ jobs:
               # commitizen decides whether anything since the last tag calls for a release; the
               # size is fixed here: a patch, unless a commit is marked breaking.
               last="$(git describe --tags --abbrev=0 --match 'v*')"
-              if git log "${last}..HEAD" --format='%s%n%b' | grep -qE '^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE'; then
+              if git log "${last}..HEAD" --format='%s%n%b' | grep -qE '^[a-z]+(\([^)]*\))?!: |^BREAKING[ -]CHANGE: '; then
                 INCREMENT=MINOR
               else
                 INCREMENT=PATCH

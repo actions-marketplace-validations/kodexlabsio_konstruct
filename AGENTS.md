@@ -76,13 +76,15 @@ a change.
   subjects, lines of at most 100 characters and no AI attribution of any kind. Hooks check this.
 - Commits are signed through 1Password. If signing fails with "failed to fill whole buffer",
   1Password is locked: ask for it to be unlocked. Never bypass signing.
-- main is protected: changes arrive through pull requests. A pull request with a `feat`, `fix`,
-  `perf` or `refactor` change runs `.kodex/scripts/prepare_release.py --title "<its title>"`, which
-  sets the next version and changelog; once it is merged and CI passes, `.github/workflows/release.yml`
-  tags and publishes that version. While the version is 0.x a release is a patch; only a breaking
-  change (`feat!:` or a `BREAKING CHANGE:` footer) gives the next minor. Do not write a body line
-  that starts with "BREAKING CHANGE" unless the change is breaking, and never move the version to
-  1.0: the owner decides that.
+- main is protected: changes arrive through squash-merged pull requests, and nothing pushes to
+  main. A pull request with a `feat`, `fix`, `perf` or `refactor` change runs
+  `.kodex/scripts/prepare_release.py --title "<its title>"` to set the next version and changelog;
+  once it is merged and CI passes, `.github/workflows/release.yml` tags and publishes that version.
+  Releasable changes merged without it are released by the workflow from a commit above main.
+  While the version is 0.x a release is a patch; only a breaking change (`feat!:` or a
+  `BREAKING CHANGE:` footer) gives the next minor. Do not write a body line that starts with
+  "BREAKING CHANGE" unless the change is breaking, and never move the version to 1.0: the owner
+  decides that.
 
 ## Writing Style
 

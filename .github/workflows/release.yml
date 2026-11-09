@@ -1,15 +1,19 @@
 name: Create Release
 
-# Runs after Build and Test passes on a push to main. main is protected, so a release's version and
-# changelog arrive through the pull request that releases: it runs .kodex/scripts/prepare_release.py,
-# which sets the next version in pyproject.toml, uv.lock and konstruct/__init__.py and adds its
-# section to CHANGELOG.md. While the version is 0.x a release is a patch unless a change is marked
-# breaking (`feat!:` or a BREAKING CHANGE footer), which gives the next minor.
+# Runs after Build and Test passes on a push to main. main is protected, so nothing here pushes to
+# it: a release is a tag on the tested commit, or on a commit above it, and a GitHub release.
 #
-# When the tested commit carries a version that has no tag yet, this workflow tags it vX.Y.Z, moves
-# the v0 tag that action users pin, and publishes a GitHub release with the changelog section, the
-# wheel and the sdist. A push whose version is already released makes no release; if it has
-# releasable commits, the run notes that the next pull request that prepares a release includes them.
+# - When the tested commit carries a version with no tag (a pull request ran
+#   .kodex/scripts/prepare_release.py), that commit is tagged and released.
+# - Otherwise, when main has releasable commits since the last tag (a Dependabot fix, or a pull
+#   request merged without preparing a release), the script writes the next version and changelog
+#   section on a detached commit above main, and that commit is tagged and released.
+# - A release left half done (its tag pushed but no GitHub release) is finished first.
+#
+# While the version is 0.x a release is a patch unless a change is marked breaking, which gives
+# the next minor. Any version outside 0.x is refused: moving to 1.0 is the owner's decision, made
+# by changing this workflow. Each release moves the v0 tag that action users pin and publishes the
+# changelog section, the wheel and the sdist.
 #
 # Publishing to PyPI is a separate job that stays off until the PUBLISH_TO_PYPI repository
 # variable is 'true' and a 'pypi' environment with trusted publishing exists.
@@ -38,8 +42,8 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
-      released: ${{ steps.version.outputs.released }}
-      tag: ${{ steps.version.outputs.tag }}
+      released: ${{ steps.plan.outputs.released }}
+      tag: ${{ steps.plan.outputs.tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -62,60 +66,77 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Find the version to release
-        id: version
+      - name: Work out what to release
+        id: plan
         if: steps.current.outputs.stale != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          latest="$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
           version="$(uv version --short)"
-          tag="v${version}"
-          if git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
-            echo "${tag} is already released"
-            pending="$(git log "${tag}..HEAD" --no-merges --format=%s | grep -E '^(feat|fix|perf|refactor)(\(|!|:)' || true)"
-            if [ -n "$pending" ]; then
-              echo "::notice::Unreleased changes since ${tag}; the next pull request that runs .kodex/scripts/prepare_release.py releases them"
+          if [ -n "$latest" ] && ! gh release view "$latest" > /dev/null 2>&1; then
+            echo "${latest} is tagged but has no GitHub release; finishing it"
+            tag="$latest"
+            git checkout --quiet "$tag"
+          elif ! git rev-parse -q --verify "refs/tags/v${version}" > /dev/null; then
+            tag="v${version}"
+            echo "main carries ${tag}, prepared by its pull request"
+          else
+            next="$(python3 .kodex/scripts/prepare_release.py --base HEAD --no-fetch --dry-run | head -1)"
+            if [ "${next#nothing}" != "$next" ]; then
+              echo "Nothing to release since ${latest}"
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            exit 0
+            tag="v${next}"
+            echo "main has releasable changes since ${latest}; releasing ${tag} from a commit above main"
+            git checkout --quiet --detach
+            python3 .kodex/scripts/prepare_release.py --base HEAD --no-fetch
+            git commit --quiet -am "chore(release): Release ${next}"
           fi
-          # The changelog section prepare_release.py wrote for this version, up to the next heading.
+          case "$tag" in
+            v0.*) ;;
+            *) echo "::error::refusing to release ${tag}: Konstruct stays below 1.0 until the owner decides"; exit 1 ;;
+          esac
+          # The changelog section for this version, up to the next heading.
           awk -v heading="## ${tag} " 'index($0, heading) == 1 {found = 1; print; next}
-            found && /^## v/ {exit} found {print}' CHANGELOG.md > RELEASE_NOTES.md
-          if [ ! -s RELEASE_NOTES.md ]; then
+            found && /^## v/ {exit} found {print}' CHANGELOG.md > "$RUNNER_TEMP/RELEASE_NOTES.md"
+          if [ ! -s "$RUNNER_TEMP/RELEASE_NOTES.md" ]; then
             echo "::error::CHANGELOG.md has no section for ${tag}"
             exit 1
           fi
           echo "released=true" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
-      # Lightweight tags, pushed by name; only tags are pushed, never main.
-      - name: Tag the release
-        if: steps.version.outputs.released == 'true'
-        run: |
-          tag="${{ steps.version.outputs.tag }}"
-          git tag "$tag"
-          git push origin "refs/tags/${tag}"
-          # GitHub Action users pin the major version (`uses: kodexlabsio/konstruct@v0`): move it.
-          major="${tag%%.*}"
-          git tag -f "$major" "$tag"
-          git push -f origin "refs/tags/${major}"
-
       - name: Build the sdist and wheel
-        if: steps.version.outputs.released == 'true'
+        if: steps.plan.outputs.released == 'true'
         run: uv build
 
-      - name: Create the GitHub release
-        if: steps.version.outputs.released == 'true'
+      # Tags are pushed only once the build has succeeded; only tags are pushed, never main.
+      - name: Tag and publish the release
+        if: steps.plan.outputs.released == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.plan.outputs.tag }}
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" dist/* \
-              --title "${{ steps.version.outputs.tag }}" \
-              --notes-file RELEASE_NOTES.md \
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" > /dev/null; then
+            git tag "$TAG"
+          fi
+          git push origin "refs/tags/${TAG}"
+          gh release create "$TAG" dist/* \
+              --title "$TAG" \
+              --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" \
               --verify-tag \
               --latest
+          # GitHub Action users pin the major version (`uses: kodexlabsio/konstruct@v0`): move it.
+          major="${TAG%%.*}"
+          git tag -f "$major" "$TAG"
+          git push -f origin "refs/tags/${major}"
 
       - name: Upload the distributions
-        if: steps.version.outputs.released == 'true'
+        if: steps.plan.outputs.released == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: dist

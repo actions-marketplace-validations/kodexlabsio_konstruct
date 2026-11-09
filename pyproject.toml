@@ -130,10 +130,8 @@ version_provider = "uv"
 tag_format = "v$version"
 version_scheme = "pep440"
 major_version_zero = true
-update_changelog_on_bump = true
 changelog_file = "CHANGELOG.md"
 version_files = ["konstruct/__init__.py:__version__"]
-bump_message = "chore(release): Release $new_version"
 
 [tool.coverage.run]
 branch = true

@@ -1,3 +1,9 @@
+## v0.10.0 (2026-11-09)
+
+### Feat
+
+- **definitions**: Record business terms in definitions.yml and attach them to the graph
+
 ## v0.9.1 (2026-11-09)
 
 ### Fix

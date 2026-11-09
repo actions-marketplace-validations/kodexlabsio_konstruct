@@ -333,6 +333,33 @@ jobs:
           BREAKING: ${{ steps.safe.outputs.breaking }}
         run: test "$BREAKING" = 0
 
+  databricks-live:
+    name: Databricks connector against a workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Runs when the workspace secrets are configured; otherwise the job reports that it skipped.
+    env:
+      KERPLUNK_TEST_DATABRICKS_HOST: ${{ secrets.KERPLUNK_TEST_DATABRICKS_HOST }}
+      KERPLUNK_TEST_DATABRICKS_HTTP_PATH: ${{ secrets.KERPLUNK_TEST_DATABRICKS_HTTP_PATH }}
+      KERPLUNK_TEST_DATABRICKS_TOKEN: ${{ secrets.KERPLUNK_TEST_DATABRICKS_TOKEN }}
+      KERPLUNK_TEST_DATABRICKS_CATALOG: ${{ vars.KERPLUNK_TEST_DATABRICKS_CATALOG || 'main' }}
+    steps:
+      - name: Checkout code
+        if: env.KERPLUNK_TEST_DATABRICKS_TOKEN != ''
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        if: env.KERPLUNK_TEST_DATABRICKS_TOKEN != ''
+        uses: astral-sh/setup-uv@v10.3.3
+
+      - name: Integration tests
+        if: env.KERPLUNK_TEST_DATABRICKS_TOKEN != ''
+        run: uv run pytest tests/test_databricks_live.py -m databricks -v
+
+      - name: No workspace configured
+        if: env.KERPLUNK_TEST_DATABRICKS_TOKEN == ''
+        run: echo "Set the KERPLUNK_TEST_DATABRICKS_* repository secrets to run these tests."
+
   dagster-parity:
     name: Dagster parser against Dagster
     runs-on: ubuntu-latest

@@ -513,7 +513,7 @@ Time grows linearly with the size of the project. Query times are medians over f
 
 ### Not Yet (v1)
 
-- Testing the Databricks connector against a real workspace.
+- Testing the Databricks connector against a real workspace. The tests are written (`tests/test_databricks_live.py`: metadata, struct fields, view lineage and system-table usage, in a scratch schema that is dropped afterwards) and a CI job runs them when the `KERPLUNK_TEST_DATABRICKS_*` repository secrets are set; they have not yet run against a workspace.
 - Column-level lineage for dbt Python models and through UDFs.
 - `verify` against sampled remote warehouses (Snowflake, BigQuery, Databricks).
 - Incremental warehouse metadata (it is re-read on every build; it is fast for local warehouses but not for large remote ones).
@@ -622,6 +622,7 @@ uv run pytest --cov                             # everything, with branch covera
 | Lineage against data | `test_verify` | `verify` confirms true lineage and catches removed edges, false edges and dropped filters; a differential property test runs generated queries on generated data and requires the static lineage to agree with execution |
 | Change review | `test_diff` | `diff` on real git repositories: formatting and CTE renames are not changes, removed columns still read downstream are breaking, conditions, DAGs, two commits, all output formats, and dbt Jinja rendering |
 | Dagster | `test_dagster` | The Dagster parser, assets and op jobs joining dbt and warehouse lineage, sensors ordering work, and parity with Dagster's own asset and job graphs (needs Dagster; see the CI job) |
+| Databricks | `test_databricks_live` | The connector against a real workspace with Unity Catalog, compared with the stub results; runs only with workspace credentials (see the file) |
 | Parity | `test_airflow_parity` | The static Airflow parser against Airflow's own DagBag (needs Airflow; see the file for the command) |
 
 The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end tests build a copy of the example project for real. In CI, `KERPLUNK_REQUIRE_SERVICES=1` turns a missing service or browser into a failure rather than a skip, and `HYPOTHESIS_PROFILE=ci` runs more generated examples.

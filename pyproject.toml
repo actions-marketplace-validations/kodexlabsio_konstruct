@@ -109,6 +109,7 @@ markers = [
     "snowflake: runs against fakesnow (needs fakesnow and snowflake-connector-python<5)",
     "bigquery: runs against the BigQuery emulator (KERPLUNK_TEST_BIGQUERY_ENDPOINT)",
     "iceberg_rest: needs an Iceberg REST catalog (KERPLUNK_TEST_ICEBERG_URI)",
+    "databricks: runs against a real Databricks workspace (KERPLUNK_TEST_DATABRICKS_*)",
 ]
 
 [tool.commitizen]

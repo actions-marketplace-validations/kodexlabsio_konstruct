@@ -240,6 +240,18 @@ def cmd_describe(args: argparse.Namespace, console: Console) -> int:
     return 0
 
 
+def cmd_conflicts(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    result = project.conflicts(args.limit, write=not args.no_write)
+    if args.format == "markdown":
+        console.print(result.markdown().rstrip())
+    else:
+        _emit(console, result, args.json)
+    if not args.no_write:
+        console.info(f"wrote CONFLICTS.md and conflicts.json to {project.out_dir}")
+    return 1 if args.fail_on_conflict and result.conflicts else 0
+
+
 def cmd_define(args: argparse.Namespace, console: Console) -> int:
     project = _ready(_project(args), args, console)
     result = project.define(" ".join(args.ref))
@@ -491,6 +503,18 @@ def parser() -> argparse.ArgumentParser:
     describe.add_argument("ref", metavar="NAME")
     _query_options(describe)
     describe.set_defaults(func=cmd_describe)
+
+    conflicting = add("conflicts", "columns that compute the same business idea in different ways")
+    conflicting.add_argument("-n", "--limit", type=int, metavar="N", help="at most N conflicts")
+    conflicting.add_argument("--format", choices=["text", "markdown"], default="text")
+    conflicting.add_argument(
+        "--no-write", action="store_true", help="do not write CONFLICTS.md and conflicts.json"
+    )
+    conflicting.add_argument(
+        "--fail-on-conflict", action="store_true", help="exit with status 1 if any conflict is found"
+    )
+    _query_options(conflicting)
+    conflicting.set_defaults(func=cmd_conflicts)
 
     defining = add("define", "what a business term means, who owns it and which columns hold it")
     defining.add_argument(

@@ -105,6 +105,7 @@ kerplunk  /src/jaffle_shop
 | `kerplunk trace <table.column>` | Everything upstream, each step marked `direct` (passed through or renamed) or `transformed` |
 | `kerplunk path <a> <b>` | Shortest connection between two tables or columns |
 | `kerplunk search <words>` | Find nodes by name or description, optionally `--kind model` |
+| `kerplunk conflicts` | Columns that compute the same business idea in different ways, with the sources, filters, joins and aggregations that differ and the file each is in, ranked by downstream reach. Writes `CONFLICTS.md` and `conflicts.json`. `--format markdown`, `--fail-on-conflict`, `-n N` (see [Finding Conflicting Definitions](#finding-conflicting-definitions)) |
 | `kerplunk define <term>` | What a business term means: its definition, owner, status, grain, required filters and the columns that hold it. Takes a term, a synonym or a column (to list the terms that define it). Exit status 3 when no term matches |
 | `kerplunk explain <table.column>` | How a column is calculated: its expression as SQL with CTEs and aliases inlined, the same formula composed down to source columns, and step by step each column on the way with the joins, filters and grouping that shape its rows (see [Explaining a Column](#explaining-a-column)) |
 | `kerplunk describe <name>` | Columns, types, descriptions, tests and neighbours of one node; for a task, what it runs and its neighbours in the DAG |
@@ -137,6 +138,7 @@ for column in walk.columns:
 print(project.trace("customer_ltv.lifetime_value"))  # the same text the CLI prints
 project.describe("orders").columns  # typed results
 project.explain("orders.amount").composed  # "SUM(raw_payments.amount / 100)"
+project.conflicts().conflicts[0].differences  # what two revenue columns disagree on
 project.define("lifetime value").terms[0].owner  # {"name": "Priya Shah", "role": "Head of Finance"}
 project.path_between("raw_payments", "customer_dashboard").found
 project.search("lifetime value", kinds=["column"]).results
@@ -200,7 +202,7 @@ The tests validate every OpenLineage event, and its column lineage and schema fa
 | `--mcp` | With `--target`, also register `kerplunk mcp` in `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor), keeping any other servers |
 | `--force` | Replace a skill that was edited by hand; otherwise a reinstall only replaces kerplunk's own earlier versions |
 
-The MCP server exposes `impact`, `trace`, `search`, `describe`, `define`, `explain`, `path`, `query` and `diff`, returns the same structured results as `--json`, and rereads `graph.json` when a build changes it.
+The MCP server exposes `impact`, `trace`, `search`, `describe`, `conflicts`, `define`, `explain`, `path`, `query` and `diff`, returns the same structured results as `--json`, and rereads `graph.json` when a build changes it.
 
 ## Configuration
 
@@ -306,6 +308,30 @@ Customer lifetime value  [approved, Priya Shah (Head of Finance), approved 2026-
 - **Pull requests review them.** `kerplunk diff` reports terms added, removed and changed field by field, and flags an approved term whose definition, grain, columns or filters changed while it stayed approved with the same date.
 
 kerplunk reads every `definitions.yml` (or `.yaml`) in the repository; `[definitions] paths` in `kerplunk.toml` pins the files. The example project has five terms in [`examples/jaffle_shop/definitions.yml`](examples/jaffle_shop/definitions.yml).
+
+## Finding Conflicting Definitions
+
+Most data stacks compute their key measures more than once: revenue in a finance mart, again in a marketing table, again in a dashboard extract. `kerplunk conflicts` finds those columns and shows exactly how they disagree, before the numbers do.
+
+```text
+$ kerplunk conflicts
+1 conflicting definition among 5 computed columns.
+
+revenue
+  daily_revenue.revenue  vs  daily_performance.total_revenue  (have names that mean the same thing; downstream weight 6)
+    a: daily_revenue.revenue = SUM(orders.amount)
+       in finance/revenue.sql; feeds 1 columns
+    b: daily_performance.total_revenue = SUM(orders.amount)
+       in marketing/daily.sql; feeds 1 tasks, 2 columns
+       carried into weekly.revenue
+    - filter only in daily_revenue.revenue: WHERE: orders.status = 'completed'  (finance/revenue.sql)
+```
+
+- **Which columns are compared.** Computed columns whose names mean the same thing once qualifiers and synonyms are folded together (`revenue`, `total_revenue`, `sales_amount`), columns named like a business term or its synonyms in `definitions.yml`, and columns bound to the same term. Keys, plain copies and columns derived from one another are left out: a column built from another inherits its definition and is listed as *carried into* it.
+- **What is compared.** Each column's formula in terms of source columns (from `explain`), the source columns themselves, the filters and joins on its whole route back to source with the file each is in, and the aggregation at the top. Pairs that agree on all of these are not reported.
+- **What comes first.** Conflicts are ranked by what depends on each side: exposures and dashboards, approved business terms, orchestration tasks and downstream columns.
+
+`CONFLICTS.md` (one section per conflict, with a table of both formulas and a list of differences) and `conflicts.json` are written beside the graph, ready to take into a meeting where the definition gets agreed and recorded in `definitions.yml`. The `conflicts` MCP tool gives an agent the same list, so it can check whether a measure already exists before adding another.
 
 ## Explaining a Column
 
@@ -558,6 +584,7 @@ uv run pytest --cov                             # everything, with branch covera
 | End to end | `test_build`, `test_cli`, `test_query`, `test_mcp` | The example built with real dbt, every CLI command, the Python API, and the MCP server in process and over stdio |
 | Golden files | `test_golden`, `tests/golden/` | The exact text of the CLI output and REPORT.md; regenerate with `KERPLUNK_UPDATE_GOLDEN=1` and review the diff |
 | Browser | `test_browser` | graph.html in Chromium: selection, column rows and edges, formulas, deep links, isolate, direction, filters, themes, search, hostile text, a 400-relation graph |
+| Conflicts | `test_conflicts` | Two revenue definitions that differ by one filter (the pair, the filter and its file), different sources, ranking, grouping by business terms, copies left out, no false conflicts on the example |
 | Definitions | `test_definitions` | The definitions.yml format and its errors, terms in the build, `define`, describe, search, query and impact, the glossary, warnings for missing columns and filters (including a renamed bound column in the example), and `diff` on definitions |
 | Formulas | `test_explain` | `explain` on dbt and Airflow SQL, and composed formulas evaluated on the data against the final model, row for row; the viewer's formula cache |
 | Export | `test_export` | OpenLineage events validated against the OpenLineage JSON schemas; Mermaid, DOT and CSV |
@@ -590,7 +617,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/), che
 | `src/kerplunk/sql.py` | sqlglot column lineage, canonical expressions and conditions |
 | `src/kerplunk/dbt.py`, `jinja.py`, `airflow.py`, `dagster.py`, `warehouse.py`, `definitions.py` | Inputs, the sandboxed dbt renderer and business definitions |
 | `src/kerplunk/config.py`, `build.py` | Configuration, discovery, the build and its cache |
-| `src/kerplunk/query.py`, `explain.py`, `diff.py`, `verify.py` | Questions over the graph: impact and the rest, formulas, change review, lineage against data |
+| `src/kerplunk/query.py`, `explain.py`, `conflicts.py`, `diff.py`, `verify.py` | Questions over the graph: impact and the rest, formulas, conflicting definitions, change review, lineage against data |
 | `src/kerplunk/report.py`, `html.py`, `viewer/`, `export.py` | REPORT.md, graph.html (its HTML, CSS, script and fonts) and the export formats |
 | `src/kerplunk/project.py` | The Python API |
 | `src/kerplunk/cli.py`, `console.py`, `status.py`, `mcp_server.py`, `skill.py` | Interfaces |

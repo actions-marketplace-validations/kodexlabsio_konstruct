@@ -65,6 +65,14 @@ def build_server(root: Path) -> MCPServer:
         return run(project.describe, ref)
 
     @server.tool()
+    def conflicts(limit: int = 20) -> dict[str, Any]:
+        """Columns that appear to measure the same business idea (by name, synonyms or a shared
+        business term) but are computed differently: each pair with its formula in terms of
+        sources, and exactly what differs (source columns, filters, joins, aggregation) with
+        the file each lives in, ranked by how much depends on them downstream."""
+        return run(project.conflicts, limit)
+
+    @server.tool()
     def define(ref: str) -> dict[str, Any]:
         """The business definition of a term, by name or synonym (e.g. `lifetime value`), or the
         terms that define a column (e.g. `customers.customer_lifetime_value`): the agreed wording,

@@ -51,6 +51,8 @@ lineage parsed from the SQL. Query it instead of reading every model by hand.
    - `kerplunk define <term>`: the approved business definition of a term (or the terms that
      define a column): wording, owner, status, grain, required filters and bound columns. Use it
      before answering a business question, and follow the required filters.
+   - `kerplunk conflicts`: columns that compute the same business idea in different ways, with
+     the filters, joins and sources that differ. Check it before adding a new measure.
    - `kerplunk explain <table.column>`: how a column is calculated, as SQL composed down to its
      source columns, with the joins and filters on the way.
    - `kerplunk path <a> <b>`: how two tables or columns are connected.

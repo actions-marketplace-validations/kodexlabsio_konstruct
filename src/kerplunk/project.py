@@ -23,6 +23,7 @@ from kerplunk.graph import Graph
 if TYPE_CHECKING:
     from kerplunk.build import BuildResult
     from kerplunk.config import Config
+    from kerplunk.conflicts import Conflicts
     from kerplunk.diff import Diff
     from kerplunk.explain import Explanation
     from kerplunk.verify import Verification
@@ -149,6 +150,20 @@ class Project:
 
     def describe(self, ref: str) -> query.Description:
         return query.describe(self.graph, ref)
+
+    def conflicts(self, limit: int | None = None, *, write: bool = False) -> Conflicts:
+        """Columns that appear to be one business idea computed in different ways, ranked by
+        downstream reach (see kerplunk.conflicts). With ``write``, saves CONFLICTS.md and
+        conflicts.json beside the graph."""
+        from kerplunk.conflicts import find_conflicts
+
+        result = find_conflicts(self.graph, limit)
+        if write:
+            (self.out_dir / "CONFLICTS.md").write_text(result.markdown(), encoding="utf-8")
+            (self.out_dir / "conflicts.json").write_text(
+                json.dumps(result.to_dict(), indent=1) + "\n", encoding="utf-8"
+            )
+        return result
 
     def define(self, ref: str) -> query.Definitions:
         """The business terms a name or synonym refers to, or the terms that define a column,

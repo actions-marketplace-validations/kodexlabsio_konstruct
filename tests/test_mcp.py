@@ -29,6 +29,7 @@ async def _exercise(client: Client) -> None:
         "trace",
         "search",
         "describe",
+        "conflicts",
         "define",
         "explain",
         "path",
@@ -46,6 +47,7 @@ async def _exercise(client: Client) -> None:
     assert len(search["results"]) == 2
     describe = structured(await client.call_tool("describe", {"ref": "customers"}))
     assert describe["kind"] == "model"
+    assert structured(await client.call_tool("conflicts", {}))["conflicts"] == []
     # Acceptance: "define lifetime value" returns the approved definition and its bound column.
     defined = structured(await client.call_tool("define", {"ref": "lifetime value"}))
     [term] = defined["terms"]

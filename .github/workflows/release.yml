@@ -2,8 +2,10 @@ name: Create Release
 
 # Runs after Build and Test passes on a push to main, like the Kodex Labs website's release
 # workflow, but with semantic versions. commitizen reads the Conventional Commits since the last
-# tag: fix gives a patch release, feat a minor one, a breaking change the next major (minor while
-# the version is 0.x). It updates pyproject.toml, src/kerplunk/__init__.py, uv.lock and
+# tag. While the version is 0.x, features and fixes give a patch release and only a breaking
+# change (`feat!:` or a BREAKING CHANGE footer) gives the next minor, so the minor version means
+# something; from 1.0, fix gives a patch, feat a minor and breaking the major. It updates
+# pyproject.toml, the package's __init__.py, uv.lock and
 # CHANGELOG.md, commits "chore(release): Release X.Y.Z", tags vX.Y.Z and publishes a GitHub
 # release with the wheel and sdist. Pushes with nothing releasable (docs, ci, test, chore only)
 # make no release. It can also be run by hand to force an increment.
@@ -86,6 +88,24 @@ jobs:
             git tag "v${version}"
           else
             args=(--yes)
+            if [ "$INCREMENT" = "auto" ] && [ "$(uv run cz version --project | cut -d. -f1)" = "0" ]; then
+              # commitizen decides whether anything since the last tag calls for a release; the
+              # size is fixed here: a patch, unless a commit is marked breaking.
+              last="$(git describe --tags --abbrev=0 --match 'v*')"
+              if git log "${last}..HEAD" --format='%s%n%b' | grep -qE '^[a-z]+(\([^)]*\))?!:|^BREAKING[ -]CHANGE'; then
+                INCREMENT=MINOR
+              else
+                INCREMENT=PATCH
+              fi
+              if ! uv run cz bump --dry-run --yes > /dev/null 2>&1; then
+                INCREMENT=none
+              fi
+            fi
+            if [ "$INCREMENT" = "none" ]; then
+              echo "Nothing to release"
+              echo "released=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             if [ "$INCREMENT" != "auto" ]; then args+=(--increment "$INCREMENT"); fi
             set +e
             uv run cz bump "${args[@]}"

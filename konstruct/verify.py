@@ -57,15 +57,25 @@ _NUMERIC = (
 @dataclass
 class ModelResult:
     node_id: str
+    """The model or table checked."""
     label: str
+    """Its short name."""
     rows: int = 0
+    """Rows sampled from each input."""
     claimed: int = 0
+    """Column edges the graph claims, as (output column, input column)."""
     confirmed: list[tuple[str, str]] = field(default_factory=list)
+    """Claimed edges whose output changed when the input was perturbed."""
     not_exercised: list[tuple[str, str]] = field(default_factory=list)
+    """Claimed edges no perturbation moved on this data."""
     through_references: list[tuple[str, str]] = field(default_factory=list)
+    """Observed influences the graph records as joins, filters or grouping."""
     unexplained: list[tuple[str, str]] = field(default_factory=list)
+    """Observed influences the graph does not record, which are gaps in the static analysis."""
     skipped: str | None = None
+    """Why the model was not checked, when it was not."""
     seconds: float = 0.0
+    """Time taken."""
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -77,11 +87,17 @@ class ModelResult:
 @dataclass
 class Verification:
     warehouse: str
+    """The DuckDB file or Postgres database read."""
     seed: int
+    """The random seed, so a run can be repeated exactly."""
     max_rows: int
+    """The most rows sampled from any input."""
     strategies: tuple[str, ...]
+    """The perturbations applied (shift, null and shuffle)."""
     models: list[ModelResult] = field(default_factory=list)
+    """One result per model or table checked."""
     seconds: float = 0.0
+    """Total time taken."""
 
     @property
     def checked(self) -> list[ModelResult]:

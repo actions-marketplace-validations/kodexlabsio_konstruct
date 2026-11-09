@@ -28,6 +28,8 @@ suppress_warnings = ['myst.domains']
 
 autodoc_member_order = 'bysource'
 autodoc_typehints = 'description'
+# Only parameters with a description get one; a dataclass's fields are documented as attributes.
+autodoc_typehints_description_target = 'documented'
 autodoc_default_options = {'members': True, 'undoc-members': False, 'show-inheritance': False}
 
 copybutton_prompt_text = r'\$ '

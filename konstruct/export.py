@@ -186,6 +186,7 @@ def openlineage(
     job_namespace: str = 'konstruct',
     event_time: str | None = None,
 ) -> str:
+    """One static OpenLineage ``JobEvent`` per built relation, as JSON lines, with schema and column lineage facets."""
     dialect = graph.meta.get('dialect')
     dialect = dialect if isinstance(dialect, str) else None
     namespace = namespace or f'{dialect or "sql"}://konstruct'
@@ -288,6 +289,7 @@ def _mermaid_text(text: str) -> str:
 
 
 def mermaid(graph: Graph, keep: set[str] | None = None, *, columns: bool = False) -> str:
+    """A Mermaid ``flowchart`` of relations and tasks, or of columns and column lineage with ``columns``."""
     nodes = _relations(graph, keep)
     ids: dict[str, str] = {}
     lines = ['flowchart LR']
@@ -341,6 +343,7 @@ def _dot_text(text: str) -> str:
 
 
 def dot(graph: Graph, keep: set[str] | None = None, *, columns: bool = False) -> str:
+    """A Graphviz graph of relations and tasks, or of columns as record ports with ``columns``."""
     nodes = _relations(graph, keep)
     present = {n.id for n in nodes}
     shapes = {'source': 'cylinder', 'seed': 'note', 'task': 'cds', 'exposure': 'hexagon', 'snapshot': 'box3d'}
@@ -399,6 +402,7 @@ CSV_FIELDS = (
 
 
 def column_csv(graph: Graph, keep: set[str] | None = None) -> str:
+    """One CSV row per column lineage edge: relation, column, upstream relation and column, transform, verification, expression, kinds and path."""
     buffer = io.StringIO()
     writer = csv.DictWriter(buffer, fieldnames=CSV_FIELDS, lineterminator='\n')
     writer.writeheader()

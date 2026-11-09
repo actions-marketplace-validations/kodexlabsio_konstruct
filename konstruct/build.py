@@ -86,11 +86,17 @@ class _QuietCache:
 @dataclass
 class BuildResult:
     graph: Graph
+    """The graph that was built."""
     outputs: list[Path]
+    """The files written (graph.json, REPORT.md and graph.html)."""
     seconds: float
+    """Time taken."""
     cache_hits: int
+    """Analyses reused from the previous build."""
     cache_misses: int
+    """Analyses computed afresh."""
     inputs: dict[str, int] = field(default_factory=dict)
+    """Counts of what was read, such as dbt projects, warehouses, DAGs and terms."""
 
 
 class RelationIndex:
@@ -1332,6 +1338,7 @@ def _topological(models: list[dbt.ModelSql]) -> list[dbt.ModelSql]:
 
 
 def build(config: Config, *, update: bool = False) -> BuildResult:
+    """Build the graph for ``config`` and write ``graph.json``, ``REPORT.md`` and ``graph.html``; :meth:`konstruct.Project.build` is the usual way in."""
     from konstruct.html import write_html
     from konstruct.report import write_report
 

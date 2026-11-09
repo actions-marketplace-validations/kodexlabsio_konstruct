@@ -41,10 +41,15 @@ class Step:
     """One column on the way down: its formula and the conditions on the rows of its relation."""
 
     column: str
+    """The column id."""
     label: str
+    """Its short name."""
     relation_kind: str
+    """The kind of the column's relation."""
     expression: str | None
+    """The column's own expression with short names, or None for a source column."""
     conditions: list[str] = field(default_factory=list)
+    """Joins, filters and grouping of the column's relation."""
     inputs: list[str] = field(default_factory=list)
     """Labels of the columns the expression reads."""
     verified: list[str] = field(default_factory=list)
@@ -57,14 +62,21 @@ class Step:
 @dataclass
 class Explanation:
     column: str
+    """The column explained."""
     label: str
+    """Its short name."""
     data_type: str | None
+    """Its type."""
     description: str | None
+    """Its description."""
     expression: str | None
+    """Its own expression, with CTEs and aliases inlined, or None for a source column."""
     composed: str | None
     """The formula in terms of source columns, or None when nothing could be substituted."""
     sources: list[str] = field(default_factory=list)
+    """The source columns the formula reaches."""
     steps: list[Step] = field(default_factory=list)
+    """Every column from this one upstream, nearest first."""
     complete: bool = True
     """False when some column on the way has no recorded expression (Python, unparsed SQL)."""
 
@@ -325,6 +337,7 @@ class Explainer:
         return steps
 
     def explain(self, column: Node) -> Explanation:
+        """The formula behind ``column`` and how it composes down to sources (see :func:`explain`)."""
         raw = column.attrs.get('expression')
         result = Explanation(
             column=column.id,

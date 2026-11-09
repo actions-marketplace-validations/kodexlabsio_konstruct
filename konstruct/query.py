@@ -48,23 +48,41 @@ class Item:
     """One node in a result, with how it was reached when it came from a walk."""
 
     id: str
+    """The node id, such as ``model.shop.orders#amount``."""
     kind: str
+    """The node kind, such as ``column``, ``model``, ``table``, ``source``, ``task`` or ``term``."""
     label: str
+    """The short name the CLI prints, such as ``orders.amount``."""
     name: str
+    """The node's own name, such as ``amount`` for that column."""
     relation_kind: str | None = None
+    """For a column, the kind of relation it belongs to."""
     path: str | None = None
+    """The file that defines the node (or its relation), relative to the project."""
     data_type: str | None = None
+    """Column type, when known."""
     description: str | None = None
+    """Description from dbt, the warehouse or definitions.yml."""
     depth: int | None = None
+    """In a walk, how many steps from the starting node."""
     via: str | None = None
+    """In a walk, the kind of edge that reached this node."""
     transform: str | None = None
+    """``direct`` (passed through or renamed) or ``transformed``, for column edges."""
     verified: str | None = None
+    """``konstruct verify``'s result for the edge that reached it, such as ``confirmed``."""
     role: str | None = None
+    """``reference`` when the node joins, filters or groups the next relation."""
     command: str | None = None
+    """For an orchestration task, the dbt command that runs the node."""
     through: str | None = None
+    """The task whose SQL produced the edge, when one did."""
     direction: str | None = None
+    """In a path, ``forward`` or ``backward`` along data flow."""
     score: float | None = None
+    """In a search, how well the node matched."""
     status: str | None = None
+    """For a business term, its status (draft, agreed, approved or retired)."""
 
     def to_dict(self) -> dict[str, Any]:
         return _drop_empty({f.name: getattr(self, f.name) for f in fields(self)})
@@ -129,15 +147,25 @@ class Walk:
     """Everything downstream (impact) or upstream (trace) of one node, grouped by what it is."""
 
     direction: Literal['downstream', 'upstream']
+    """``downstream`` for impact, ``upstream`` for trace."""
     target: Item
+    """The node the walk started from."""
     columns: list[Item] = field(default_factory=list)
+    """Columns reached, nearest first."""
     relations: list[Item] = field(default_factory=list)
+    """Tables and models reached."""
     joins_and_filters: list[Item] = field(default_factory=list)
+    """Relations that join, filter or group on the target (impact of a column)."""
     filtered_by: list[Item] = field(default_factory=list)
+    """Columns that join or filter the target's relation (trace of a column)."""
     tests: list[Item] = field(default_factory=list)
+    """dbt tests on anything reached."""
     exposures: list[Item] = field(default_factory=list)
+    """dbt exposures (dashboards) reached."""
     tasks: list[Item] = field(default_factory=list)
+    """Orchestration tasks that read, write or run anything reached."""
     terms: list[Item] = field(default_factory=list)
+    """Business terms bound to the target or, downstream, to anything reached."""
 
     SECTIONS = (
         ('columns', 'Columns'),
@@ -256,8 +284,11 @@ def trace(graph: Graph, ref: str, max_depth: int | None = None) -> Walk:
 @dataclass
 class PathResult:
     start: Item
+    """The node the path starts from."""
     end: Item
+    """The node it ends at."""
     steps: list[Item]
+    """Every node on the path in order, the start first; empty when there is no path."""
 
     @property
     def found(self) -> bool:
@@ -376,7 +407,9 @@ def _scored(graph: Graph, text: str, limit: int, kinds: list[str] | None) -> lis
 @dataclass
 class SearchResult:
     query: str
+    """The words searched for."""
     results: list[Item]
+    """Matching nodes, best first, each with a ``score``."""
 
     def to_dict(self) -> dict[str, Any]:
         return {'query': self.query, 'results': [r.to_dict() for r in self.results]}
@@ -405,18 +438,31 @@ def search(graph: Graph, text: str, limit: int = 20, kinds: list[str] | None = N
 @dataclass
 class Description:
     node: Item
+    """The node described."""
     relation: str | None = None
+    """For a relation, its warehouse name."""
     parent: str | None = None
+    """For a column, its relation's id."""
     origins: list[str] = field(default_factory=list)
+    """Inputs the node came from, such as ``dbt`` and ``duckdb``."""
     attrs: dict[str, Any] = field(default_factory=dict)
+    """Every other attribute, such as materialisation, schedule, operator or owner."""
     columns: list[Item] = field(default_factory=list)
+    """A relation's columns, in order."""
     tests: list[str] = field(default_factory=list)
+    """Names of the dbt tests on the node or its columns."""
     upstream: list[str] = field(default_factory=list)
+    """Immediate upstream neighbours, as ``label (kind)``."""
     downstream: list[str] = field(default_factory=list)
+    """Immediate downstream neighbours."""
     tasks: list[str] = field(default_factory=list)
+    """For a DAG or job, its tasks."""
     runs: list[str] = field(default_factory=list)
+    """For a task, what it runs."""
     after: list[str] = field(default_factory=list)
+    """For a task, the tasks it runs after."""
     before: list[str] = field(default_factory=list)
+    """For a task, the tasks that run after it."""
     expression: str | None = None
     """For a column, its SQL over physical columns (see ``konstruct explain``)."""
     conditions: list[str] = field(default_factory=list)
@@ -427,6 +473,7 @@ class Description:
     defines: list[str] = field(default_factory=list)
     """For a term, the columns it is bound to."""
     related: list[str] = field(default_factory=list)
+    """For a term, its related terms."""
 
     LISTS = (
         ('terms', 'Defined by'),
@@ -571,21 +618,37 @@ class TermDefinition:
     """One business term: what it means, who owns it and the columns that hold it."""
 
     name: str
+    """The term."""
     definition: str | None
+    """The agreed wording."""
     status: str
+    """``draft``, ``agreed``, ``approved`` or ``retired``."""
     owner: dict[str, Any] | None = None
+    """``{"name": ..., "role": ...}``, when set."""
     approved: str | None = None
+    """The approval date, ``YYYY-MM-DD``."""
     synonyms: list[str] = field(default_factory=list)
+    """Other names for the term."""
     grain: str | None = None
+    """What one row means, such as ``one row per customer``."""
     columns: list[Item] = field(default_factory=list)
+    """The columns (or relations) that hold the term."""
     filters: list[str] = field(default_factory=list)
+    """Filters any answer about the term must apply, as SQL."""
     unit: str | None = None
+    """Unit of measure, such as ``currency``."""
     currency: str | None = None
+    """ISO 4217 currency code."""
     related: list[str] = field(default_factory=list)
+    """Names of related terms."""
     exceptions: str | None = None
+    """Known exceptions to the definition."""
     path: str | None = None
+    """The definitions file."""
     line: int | None = None
+    """The line the term starts on."""
     id: str = ''
+    """The node id, ``term.<slug>``."""
 
     def to_dict(self) -> dict[str, Any]:
         data = {f.name: getattr(self, f.name) for f in fields(self)}
@@ -623,7 +686,9 @@ class Definitions:
     """The answer to `konstruct define`: the terms a name or column refers to, approved first."""
 
     query: str
+    """What was asked for."""
     terms: list[TermDefinition] = field(default_factory=list)
+    """Matching terms, approved first and retired last."""
     column: Item | None = None
     """When the query named a column, that column."""
 
@@ -708,7 +773,9 @@ def define(graph: Graph, ref: str) -> Definitions:
 @dataclass
 class Listing:
     kinds: list[str]
+    """The node kinds listed."""
     items: list[Item]
+    """Every node of those kinds."""
 
     def to_dict(self) -> dict[str, Any]:
         return {'kinds': self.kinds, 'items': [i.to_dict() for i in self.items]}
@@ -775,12 +842,19 @@ _UPSTREAM_WORDS = frozenset(
 @dataclass(frozen=True)
 class EdgeItem:
     source: str
+    """Source node id."""
     target: str
+    """Target node id."""
     kind: str
+    """The edge kind, such as ``feeds``, ``derived_from``, ``runs``, ``tests`` or ``defines``."""
     source_label: str
+    """Short name of the source."""
     target_label: str
+    """Short name of the target."""
     transform: str | None = None
+    """For ``derived_from``, ``direct`` or ``transformed``."""
     role: str | None = None
+    """For ``feeds``, ``reference`` when the source joins, filters or groups."""
 
     def to_dict(self) -> dict[str, Any]:
         return _drop_empty({f.name: getattr(self, f.name) for f in fields(self)})
@@ -793,11 +867,17 @@ class EdgeItem:
 @dataclass
 class QueryResult:
     question: str
+    """The question asked."""
     matches: list[Item] = field(default_factory=list)
+    """The best-matching nodes."""
     edges: list[EdgeItem] = field(default_factory=list)
+    """Edges around the matches."""
     neighbours: list[Item] = field(default_factory=list)
+    """Nodes those edges reach."""
     impact: Walk | None = None
+    """Everything downstream of the first match, when the question asks what breaks."""
     lineage: Walk | None = None
+    """Everything upstream of the first match, when the question asks where it comes from."""
     definitions: list[TermDefinition] = field(default_factory=list)
     """Business terms among the matches, or defining them, with their agreed definitions."""
 

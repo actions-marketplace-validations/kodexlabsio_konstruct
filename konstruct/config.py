@@ -206,6 +206,11 @@ def _usage_settings(data: dict[str, Any]) -> UsageSettings:
 
 
 def load_config(root: Path, out_dir: Path | None = None) -> Config:
+    """Read ``konstruct.toml`` (or ``[tool.konstruct]`` in ``pyproject.toml``) from ``root`` over the defaults.
+
+    Raises:
+        ConfigError: The configuration is invalid.
+    """
     root = root.resolve()
     data: dict[str, Any] = {}
     config_file: Path | None = None

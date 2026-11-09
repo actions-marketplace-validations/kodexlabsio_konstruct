@@ -88,25 +88,41 @@ def file_at(repository: Path, ref: str | None, path: str) -> str | None:
 @dataclass
 class ColumnChange:
     column: str
+    """The column name."""
     change: str
+    """``added``, ``removed`` or ``changed``."""
     before: str | None = None
+    """The canonical expression at the base (CTEs and aliases inlined)."""
     after: str | None = None
+    """The canonical expression at the head."""
     impact: dict[str, Any] | None = None
+    """What is downstream of the column, as ``Walk.to_dict()``."""
     breaks: list[str] = field(default_factory=list)
+    """Relations that still read a removed column, which makes the change breaking."""
 
 
 @dataclass
 class RelationChange:
     path: str
+    """The changed file."""
     label: str
+    """The relation it builds."""
     kind: str
+    """``model``, ``table`` and so on."""
     status: str
+    """``added``, ``removed`` or ``modified``."""
     node_id: str | None = None
+    """The graph node, when there is one."""
     columns: list[ColumnChange] = field(default_factory=list)
+    """Column changes."""
     conditions_added: list[str] = field(default_factory=list)
+    """Join, filter and grouping conditions only at the head."""
     conditions_removed: list[str] = field(default_factory=list)
+    """Conditions only at the base."""
     rows_impact: dict[str, Any] | None = None
+    """What is downstream of a relation whose rows changed."""
     note: str | None = None
+    """Why the relation could not be compared, when it could not."""
 
     @property
     def changed(self) -> bool:
@@ -121,14 +137,23 @@ class RelationChange:
 @dataclass
 class DagChange:
     path: str
+    """The changed DAG file."""
     dag: str
+    """The DAG id."""
     status: str
+    """``added``, ``removed`` or ``modified``."""
     tasks_added: list[str] = field(default_factory=list)
+    """Task ids only at the head."""
     tasks_removed: list[str] = field(default_factory=list)
+    """Task ids only at the base."""
     dependencies_added: list[str] = field(default_factory=list)
+    """Dependencies only at the head, as ``a >> b``."""
     dependencies_removed: list[str] = field(default_factory=list)
+    """Dependencies only at the base."""
     runs_changed: list[str] = field(default_factory=list)
+    """Tasks whose dbt selection changed."""
     sql_changed: list[str] = field(default_factory=list)
+    """Tasks whose SQL changed."""
 
 
 @dataclass
@@ -136,8 +161,11 @@ class DefinitionsChange:
     """What changed in a definitions.yml: terms added or removed, and per term which fields."""
 
     path: str
+    """The changed definitions file."""
     added: list[str] = field(default_factory=list)
+    """Terms only at the head."""
     removed: list[str] = field(default_factory=list)
+    """Terms only at the base."""
     changed: list[str] = field(default_factory=list)
     """One line per changed field, such as ``Order amount: status agreed -> approved``."""
     approved_changed: list[str] = field(default_factory=list)
@@ -216,12 +244,19 @@ class YamlChange:
     """What changed in one dbt YAML file: tests, descriptions, sources and exposures."""
 
     path: str
+    """The changed dbt YAML file."""
     tests_added: list[str] = field(default_factory=list)
+    """Tests only at the head."""
     tests_removed: list[str] = field(default_factory=list)
+    """Tests only at the base."""
     descriptions: list[str] = field(default_factory=list)
+    """Descriptions that changed."""
     sources_added: list[str] = field(default_factory=list)
+    """Source tables only at the head."""
     sources_removed: list[str] = field(default_factory=list)
+    """Source tables only at the base."""
     exposures: list[str] = field(default_factory=list)
+    """Exposures added, removed or changed."""
 
     @property
     def changed(self) -> bool:
@@ -333,8 +368,11 @@ class Selection:
     `state:modified+` would build."""
 
     models: list[str] = field(default_factory=list)
+    """dbt models whose data the change can affect."""
     tests: list[str] = field(default_factory=list)
+    """dbt tests on those models."""
     modified_plus: list[str] = field(default_factory=list)
+    """What ``state:modified+`` would select, for comparison."""
 
     @property
     def selector(self) -> str:
@@ -370,14 +408,23 @@ class Selection:
 @dataclass
 class Diff:
     base: str
+    """The commit compared with."""
     head: str
+    """The commit compared, or ``working tree``."""
     files: dict[str, str]
+    """Every changed file."""
     selection: Selection = field(default_factory=Selection)
+    """The column-aware dbt selection for the change."""
     relations: list[RelationChange] = field(default_factory=list)
+    """Changes to dbt models and SQL."""
     dags: list[DagChange] = field(default_factory=list)
+    """Changes to DAGs."""
     other: list[str] = field(default_factory=list)
+    """Changed files that were not analysed."""
     yaml: list[YamlChange] = field(default_factory=list)
+    """Changes to dbt YAML."""
     definitions: list[DefinitionsChange] = field(default_factory=list)
+    """Changes to definitions.yml."""
 
     @property
     def source_files(self) -> list[str]:

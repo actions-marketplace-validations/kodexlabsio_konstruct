@@ -42,15 +42,25 @@ GRAPH_FORMAT_VERSION = 1
 @dataclass
 class Node:
     id: str
+    """A unique id, such as ``model.<package>.<name>``, ``table.<relation>``, ``<relation id>#<column>``, ``task.<dag>.<task>`` or ``term.<slug>``."""
     kind: NodeKind
+    """What the node is."""
     name: str
+    """Its own name."""
     parent: str | None = None
+    """For a column, its relation's id."""
     relation: str | None = None
+    """For a relation, its lower-case warehouse name, such as ``shop.main.orders``."""
     description: str | None = None
+    """Description from dbt, the warehouse or definitions.yml."""
     data_type: str | None = None
+    """Column type."""
     path: str | None = None
+    """The file that defines it, relative to the project."""
     origins: list[str] = field(default_factory=list)
+    """Inputs it came from."""
     attrs: dict[str, Any] = field(default_factory=dict)
+    """Everything else, such as expressions, conditions, schedules, usage and term fields."""
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {'id': self.id, 'kind': self.kind, 'name': self.name}
@@ -83,9 +93,13 @@ class Node:
 @dataclass
 class Edge:
     source: str
+    """Source node id."""
     target: str
+    """Target node id."""
     kind: EdgeKind
+    """Edge kind; the module docstring gives each direction."""
     attrs: dict[str, Any] = field(default_factory=dict)
+    """Details such as ``transform``, ``role``, ``verified`` and ``via``."""
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -117,9 +131,13 @@ class Step:
     """One node reached by a traversal, with the edge that reached it."""
 
     node: Node
+    """The node reached."""
     depth: int
+    """Steps from the start."""
     via: Edge | None
+    """The edge that reached it."""
     previous: str | None
+    """The id of the node it was reached from."""
 
 
 class Graph:
@@ -185,6 +203,7 @@ class Graph:
         return node
 
     def add_edge(self, source: str, target: str, kind: EdgeKind, **attrs: Any) -> Edge | None:
+        """Add an edge, or merge ``attrs`` into an existing one of the same kind between the same nodes. Self-loops are ignored and return None."""
         if source == target:
             return None
         key = (source, target, kind)
@@ -215,9 +234,11 @@ class Graph:
         return list(self._edges.values())
 
     def out_edges(self, node_id: str, kind: str | None = None) -> list[Edge]:
+        """Edges leaving ``node_id``, optionally only of one kind."""
         return [e for e in self._out.get(node_id, []) if kind is None or e.kind == kind]
 
     def in_edges(self, node_id: str, kind: str | None = None) -> list[Edge]:
+        """Edges arriving at ``node_id``, optionally only of one kind."""
         return [e for e in self._in.get(node_id, []) if kind is None or e.kind == kind]
 
     def node_for_relation(self, key: str) -> Node | None:
@@ -238,12 +259,15 @@ class Graph:
         return (n for n in self.nodes.values() if n.kind in RELATION_KINDS)
 
     def columns_of(self, node_id: str) -> list[Node]:
+        """The columns of a relation, in their order."""
         return [self.nodes[e.target] for e in self.out_edges(node_id, 'contains')]
 
     def column(self, parent_id: str, name: str) -> Node | None:
+        """The column ``name`` of the relation ``parent_id``, or None."""
         return self.nodes.get(column_id(parent_id, name))
 
     def parent_of(self, node: Node) -> Node | None:
+        """A column's relation, or None for anything else."""
         return self.nodes.get(node.parent) if node.parent else None
 
     def label(self, node: Node) -> str:
@@ -476,6 +500,7 @@ class Graph:
     # Serialisation
 
     def to_dict(self) -> dict[str, Any]:
+        """The graph as plain data: ``format_version``, ``meta``, ``nodes``, ``edges`` and ``warnings``."""
         return {
             'format_version': GRAPH_FORMAT_VERSION,
             'meta': self.meta,
@@ -498,11 +523,13 @@ class Graph:
         return graph
 
     def write(self, path: Path) -> None:
+        """Write the graph to ``path`` as JSON (``graph.json``)."""
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_dict(), indent=1, sort_keys=False) + '\n', encoding='utf-8')
 
     @classmethod
     def read(cls, path: Path) -> Graph:
+        """Load a graph from a ``graph.json`` file."""
         return cls.from_dict(json.loads(path.read_text(encoding='utf-8')))
 
     def stats(self) -> dict[str, int]:

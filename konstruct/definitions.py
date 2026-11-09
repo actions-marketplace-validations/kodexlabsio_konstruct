@@ -278,6 +278,7 @@ def _term(entry: dict[str, Any], path: str, problem: Any) -> Term | None:
 
 
 def parse_file(path: Path, relative: str | None = None) -> DefinitionsFile:
+    """Parse a definitions file from disk; ``relative`` is the path reported in problems."""
     return parse(path.read_text(encoding='utf-8'), relative or str(path))
 
 

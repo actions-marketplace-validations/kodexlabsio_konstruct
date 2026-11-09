@@ -87,6 +87,7 @@ class Difference:
     kind: str
     """``formula``, ``source``, ``filter``, ``join`` or ``aggregation``."""
     detail: str
+    """What differs, such as a condition, a source column or two formulas."""
     side: str | None = None
     """Which column has it (``a`` or ``b``) when only one does; None when both differ."""
     path: str | None = None
@@ -99,17 +100,27 @@ class Difference:
 @dataclass
 class Side:
     column: str
+    """The column id."""
     label: str
+    """Its short name."""
     relation_kind: str
+    """The kind of its relation."""
     path: str | None
+    """The file that builds it."""
     expression: str | None
+    """Its own expression."""
     composed: str | None
+    """Its formula in terms of source columns."""
     sources: list[str] = field(default_factory=list)
+    """The source columns it reads."""
     filters: list[tuple[str, str, str | None]] = field(default_factory=list)
     """(relation, condition, file) for each filter on the route back to source."""
     joins: list[tuple[str, str, str | None]] = field(default_factory=list)
+    """(relation, condition, file) for each join on its route back to source."""
     reach: dict[str, int] = field(default_factory=dict)
+    """Counts of what depends on it downstream (exposures, tasks, columns and approved terms)."""
     terms: list[str] = field(default_factory=list)
+    """Business terms bound to it or to anything downstream."""
     carried_into: list[str] = field(default_factory=list)
     """Columns of the same idea that are derived from this one, and so inherit its definition."""
 
@@ -131,11 +142,15 @@ class Side:
 @dataclass
 class Conflict:
     idea: str
-    """What the columns appear to measure: a term name, or the shared words of their names."""
+    """What the columns appear to measure, as a term name or the shared words of their names."""
     reason: str
+    """Why the two columns were compared."""
     a: Side
+    """One side."""
     b: Side
+    """The other side."""
     differences: list[Difference] = field(default_factory=list)
+    """What differs between them."""
 
     @property
     def score(self) -> int:
@@ -179,8 +194,11 @@ def _reach_text(reach: dict[str, int]) -> str:
 @dataclass
 class Conflicts:
     conflicts: list[Conflict] = field(default_factory=list)
+    """Every conflict, most consequential first."""
     candidates: int = 0
+    """Computed columns considered."""
     groups: int = 0
+    """Groups of columns that appear to be one idea."""
 
     def summary(self) -> str:
         if not self.conflicts:

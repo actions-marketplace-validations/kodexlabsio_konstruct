@@ -158,11 +158,24 @@ def sections(changelog: str) -> tuple[str, dict[str, str]]:
     return changelog[: matches[0].start()] if matches else changelog, found
 
 
+def ancestor(ref: str) -> bool:
+    done = subprocess.run(['git', 'merge-base', '--is-ancestor', ref, 'HEAD'], cwd=ROOT, capture_output=True)
+    return done.returncode == 0
+
+
+def above(tag: str) -> bool:
+    """Whether ``tag`` is a release the workflow made from a detached commit: the tagged commit is
+    not part of this history, but its parent is."""
+    return not ancestor(tag) and ancestor(f'{tag}^')
+
+
 def history(changelog: str) -> str:
-    """The changelog's released history, rebuilt from the tags: every released version's section
-    as its own tag records it (so a release the workflow made from a detached commit is recorded,
-    and a section a stale pull request wrote for a version released differently is corrected),
-    falling back to the section here, newest first. Sections for versions never released go."""
+    """The changelog's released history, checked against the tags, newest first.
+
+    A release keeps the section written here (later edits to it stand), unless the workflow made it
+    from a detached commit above this history: then it takes the section its own tag records, which
+    adds a release this changelog has not recorded, and corrects a section a stale pull request
+    wrote for a version that was released differently. Sections for versions never released go."""
     preamble, here = sections(changelog)
     tags = sorted(
         (t for t in git('tag', '--list', 'v*').split() if re.fullmatch(r'v\d+\.\d+\.\d+', t)),
@@ -172,6 +185,9 @@ def history(changelog: str) -> str:
     kept = []
     for tag in tags:
         version = tag[1:]
+        if version in here and not above(tag):
+            kept.append(here[version])
+            continue
         _, recorded = sections(git('show', f'{tag}:CHANGELOG.md'))
         text = recorded.get(version) or here.get(version)
         if text:

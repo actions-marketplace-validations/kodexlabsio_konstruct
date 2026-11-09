@@ -266,3 +266,26 @@ def test_a_stale_section_for_a_released_version_is_corrected(repo: Path) -> None
     newest, released, _oldest = changelog.split('## v0.11.')[1:]
     assert '- Add a thing' in newest and '- Add a thing' not in released
     assert '- **sql**: Order sources' in released
+
+
+def test_edits_to_sections_of_releases_on_main_stand(repo: Path) -> None:
+    # The v0.11.1 section was reworded on main after its release; its tag still has the old words.
+    (repo / 'CHANGELOG.md').write_text('## v0.11.1 (2026-11-08)\n\n### Fix\n\n- Older fix, reworded\n')
+    subprocess.run(
+        [
+            'git',
+            '-c',
+            'user.name=t',
+            '-c',
+            'user.email=t@e',
+            '-c',
+            'commit.gpgsign=false',
+            'commit',
+            '-qam',
+            'docs: Reword',
+        ],
+        cwd=repo,
+        check=True,
+    )
+    assert _prepare('--title', 'fix: More') == 0
+    assert (repo / 'CHANGELOG.md').read_text().endswith('- Older fix, reworded\n')

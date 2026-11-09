@@ -1,0 +1,18 @@
+{
+  "plansDirectory": ".claude/plans",
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run mypy:*)",
+      "Bash(uv run konstruct:*)",
+      "Bash(uv run --group docs sphinx-build:*)",
+      "Bash(pnpm --dir viewer check)",
+      "Bash(pnpm --dir viewer test)",
+      "Bash(pnpm --dir viewer build)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ]
+  }
+}

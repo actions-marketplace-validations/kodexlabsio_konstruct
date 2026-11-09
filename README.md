@@ -142,7 +142,7 @@ Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `L
 |------|----------|
 | `graph.json` | Nodes (`source`, `table`, `column`, `model`, `seed`, `snapshot`, `dag`, `task`, `test`, `exposure`) and edges (below), with descriptions, types, file paths and the inputs each came from |
 | `REPORT.md` | Summary and coverage, the most used columns, orphans, untested models, columns with no lineage, columns documented in dbt but missing from the warehouse, and warnings |
-| `graph.html` | A single offline file: relations and tasks in dependency order, search, a details panel and column lineage in both directions |
+| `graph.html` | A single offline file (open it with `kerplunk open`): tables, models and tasks in dependency order; cards that expand to their columns; column lineage drawn between columns, isolated and fitted to the screen; each column's formula in terms of its sources; the conditions that shape each model; verification results; search, deep links to any table or column, dark and light themes |
 
 | Edge | Direction | Meaning |
 |------|-----------|---------|
@@ -150,10 +150,10 @@ Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `L
 | `feeds` | upstream to downstream | Relation to relation, task to the table it writes, table to the task that reads it. With `role: reference`, a column the target uses in a JOIN, WHERE, GROUP BY, HAVING or QUALIFY |
 | `derived_from` | column to the column it comes from | Column-level lineage, with `transform: direct` or `transformed` |
 | `runs` | DAG to task, task to dbt node | What a DAG or task executes |
-| `precedes` | task to task | Airflow ordering |
+| `precedes` | task to task | Airflow ordering, Dagster op and asset ordering, and sensors that start one job after another |
 | `tests` | test to relation or column | What a dbt test checks |
 
-![graph.html for the jaffle_shop example](docs/graph-html.png)
+![graph.html showing the lineage of customer_ltv.lifetime_value: four columns across an Airflow SQL table, two dbt models and a seed, each verified, with the formula SUM(raw_payments.amount / 100)](docs/graph-html.png)
 
 ## Agent Integration
 

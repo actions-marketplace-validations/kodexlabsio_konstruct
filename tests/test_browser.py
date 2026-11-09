@@ -119,11 +119,15 @@ def test_deep_links_direction_and_isolate(jaffle_built_graph: Path, open_page: A
     assert page.locator(".row.on-path[data-col='model.jaffle_shop.orders#amount']").count() == 0
     page.click("[data-direction='both']")
     assert page.locator(".row.on-path[data-col='model.jaffle_shop.orders#amount']").count() == 1
-    total = page.locator("#nodes [data-id]").count()
-    page.click("#isolate")
+    # A selected column's path is isolated by default; the button shows everything again.
+    assert page.locator("#isolate").get_attribute("aria-pressed") == "true"
     isolated = page.locator("#nodes [data-id]").count()
-    assert 0 < isolated < total
     assert page.locator("[data-id='model.jaffle_shop.stg_customers']").count() == 0
+    page.click("#isolate")
+    assert page.locator("#nodes [data-id]").count() > isolated
+    assert page.locator("[data-id='model.jaffle_shop.stg_customers']").count() == 1
+    page.keyboard.press("Escape")
+    assert page.locator("#isolate").get_attribute("aria-pressed") == "false"
 
 
 @pytest.mark.dbt

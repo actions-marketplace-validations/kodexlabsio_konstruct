@@ -176,8 +176,10 @@ class Project:
         """Check the graph's column lineage against the data by perturbation (see kerplunk.verify).
 
         Needs the models built in a local DuckDB warehouse; by default the one the build read.
-        With ``write``, saves VERIFY.md and verify.json and marks verified edges in graph.json.
+        With ``write``, saves VERIFY.md and verify.json and marks verified edges in graph.json
+        and graph.html.
         """
+        from kerplunk.html import write_html
         from kerplunk.verify import annotate, verify
 
         graph = self.graph
@@ -192,6 +194,8 @@ class Project:
             annotate(graph, result)
             graph.write(self.graph_path)
             self._stamp = self._file_stamp()
+            if (self.out_dir / "graph.html").is_file():
+                write_html(graph, self.out_dir / "graph.html")
             (self.out_dir / "VERIFY.md").write_text(result.markdown(), encoding="utf-8")
             (self.out_dir / "verify.json").write_text(
                 json.dumps(result.to_dict(), indent=1) + "\n", encoding="utf-8"

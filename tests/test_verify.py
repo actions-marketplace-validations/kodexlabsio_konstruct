@@ -142,6 +142,16 @@ def test_annotate_marks_edges(project: Project) -> None:
     assert graph.meta["verification"]["unexplained"] == 0
 
 
+def test_project_verify_writes_its_results_into_the_outputs(project: Project) -> None:
+    project.verify(warehouse=project.root / "shop.duckdb")
+    out = project.out_dir
+    assert (out / "VERIFY.md").is_file() and (out / "verify.json").is_file()
+    assert '"verified":"confirmed"' in (out / "graph.json").read_text().replace(" ", "")
+    page = (out / "graph.html").read_text()
+    assert '"verified":"confirmed"' in page
+    assert '"verification":' in page
+
+
 def test_claims_ignore_relations_without_names(project: Project) -> None:
     node = project.graph.node_for_relation("shop.main.report")
     assert node is not None

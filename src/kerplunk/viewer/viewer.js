@@ -20,7 +20,7 @@
     task: "M17 2l3 3-3 3M20 5H9a5 5 0 0 0-5 5M7 22l-3-3 3-3M4 19h11a5 5 0 0 0 5-5",
     exposure: "M4 20V10M10 20V4M16 20v-7M3 20h18",
   };
-  const W = 268, HEAD = 46, ROW = 28, PAD = 6, COL_GAP = 128, ROW_GAP = 22, SWEEPS = 8;
+  const W = 268, HEAD = 46, ROW = 28, PAD = 6, COL_GAP = 104, ROW_GAP = 22, SWEEPS = 8;
   const MAX_RESULTS = 60, ANIMATE_LIMIT = 400, EXPAND_ALL_LIMIT = 400, AUTO_ISOLATE = 120;
 
   const data = JSON.parse(document.getElementById("kerplunk-data").textContent);
@@ -720,7 +720,9 @@
     state.column = columnId;
     state.collapsed.delete(id);
     computeFocus();
-    if (focus && focus.size > 1 && viewNodes.length > AUTO_ISOLATE && !isolateTouched) setIsolate(true, false);
+    // A column's path, or any selection in a large graph, is shown on its own unless the user
+    // has chosen otherwise with the Isolate button.
+    if (!isolateTouched) setIsolate(!!(focus && focus.size > 1 && (columnId || viewNodes.length > AUTO_ISOLATE)), false);
     // A selected column, or a jump from search or a link, brings its whole lineage into view.
     render({ animate: true, focus: !!columnId || centre, centre: centre ? id : null });
     renderPanel();
@@ -729,6 +731,7 @@
   function clearSelection() {
     state.selected = null;
     state.column = null;
+    if (!isolateTouched) setIsolate(false, false);
     computeFocus();
     document.getElementById("panel").hidden = true;
     render({ animate: true });

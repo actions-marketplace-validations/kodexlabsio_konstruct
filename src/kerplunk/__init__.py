@@ -11,6 +11,7 @@ The main entry point is `Project`::
 
 __version__ = "0.6.0"
 
+from kerplunk.explain import Explanation
 from kerplunk.graph import Edge, Graph, Node
 from kerplunk.project import Project
 from kerplunk.query import (
@@ -29,6 +30,7 @@ __all__ = [
     "Description",
     "Edge",
     "EdgeItem",
+    "Explanation",
     "Graph",
     "Item",
     "Listing",

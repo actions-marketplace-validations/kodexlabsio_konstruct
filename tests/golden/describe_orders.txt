@@ -20,6 +20,10 @@ Columns (9)
   gift_card_amount      DOUBLE  Amount of the order (AUD) paid for by gift card
   amount                DOUBLE  Total amount (AUD) of the order
 
+Joins, filters and grouping (2)
+  GROUP BY: stg_payments.order_id
+  LEFT JOIN ON: stg_orders.order_id = stg_payments.order_id
+
 Tests (10)
   accepted_values_orders_status__placed__shipped__completed__return_pending__returned
   not_null_orders_amount

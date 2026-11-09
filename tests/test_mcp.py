@@ -24,7 +24,16 @@ def structured(result: Any) -> dict[str, Any]:
 
 async def _exercise(client: Client) -> None:
     tools = await client.list_tools()
-    assert {t.name for t in tools.tools} == {"impact", "trace", "search", "describe", "path", "query", "diff"}
+    assert {t.name for t in tools.tools} == {
+        "impact",
+        "trace",
+        "search",
+        "describe",
+        "explain",
+        "path",
+        "query",
+        "diff",
+    }
     assert all(t.description and t.input_schema for t in tools.tools)
     impact = structured(await client.call_tool("impact", {"ref": "stg_payments.amount"}))
     assert impact["exposures"][0]["label"] == "customer_dashboard"
@@ -36,6 +45,8 @@ async def _exercise(client: Client) -> None:
     assert len(search["results"]) == 2
     describe = structured(await client.call_tool("describe", {"ref": "customers"}))
     assert describe["kind"] == "model"
+    explained = structured(await client.call_tool("explain", {"ref": "customer_ltv.lifetime_value"}))
+    assert explained["composed"] == "SUM(raw_payments.amount / 100)"
     path = structured(await client.call_tool("path", {"start": "raw_orders", "end": "orders"}))
     assert path["found"] is True
     answer = structured(

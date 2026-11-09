@@ -240,6 +240,12 @@ def cmd_describe(args: argparse.Namespace, console: Console) -> int:
     return 0
 
 
+def cmd_explain(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    _emit(console, project.explain(args.ref), args.json)
+    return 0
+
+
 def _singular(kind: str) -> str:
     kind = kind.lower()
     return kind[:-1] if kind.endswith("s") and kind[:-1] in NODE_KINDS else kind
@@ -465,6 +471,11 @@ def parser() -> argparse.ArgumentParser:
     describe.add_argument("ref", metavar="NAME")
     _query_options(describe)
     describe.set_defaults(func=cmd_describe)
+
+    explaining = add("explain", "a column's formula, composed down to its source columns")
+    explaining.add_argument("ref", metavar="COLUMN", help="e.g. orders.amount")
+    _query_options(explaining)
+    explaining.set_defaults(func=cmd_explain)
 
     listing = add("list", "list nodes by kind (default: tables, models, sources, seeds and snapshots)")
     listing.add_argument(

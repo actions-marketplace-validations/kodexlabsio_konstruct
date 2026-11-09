@@ -218,8 +218,15 @@ class Builder:
         for read in statement.reads:
             source = self.relation(read, origin)
             record(self.graph.add_edge(source.id, target.id, "feeds", **attrs))
+        if statement.conditions:
+            # Joins, filters and grouping, in terms of physical columns: what shapes the rows.
+            target.attrs["conditions"] = statement.conditions
         for name, sources in statement.columns.items():
             out = self.column(target, name, origin)
+            expression = statement.expressions.get(name)
+            if expression and not expression.endswith(".*"):
+                # The column as SQL over physical columns, with CTEs and aliases inlined.
+                out.attrs["expression"] = expression
             for item in sources:
                 upstream = self.column(self.relation(item.relation, origin), item.column, origin)
                 record(

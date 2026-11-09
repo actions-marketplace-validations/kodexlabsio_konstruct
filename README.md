@@ -96,6 +96,7 @@ kerplunk  /src/jaffle_shop
 | `kerplunk trace <table.column>` | Everything upstream, each step marked `direct` (passed through or renamed) or `transformed` |
 | `kerplunk path <a> <b>` | Shortest connection between two tables or columns |
 | `kerplunk search <words>` | Find nodes by name or description, optionally `--kind model` |
+| `kerplunk explain <table.column>` | How a column is calculated: its expression as SQL with CTEs and aliases inlined, the same formula composed down to source columns, and step by step each column on the way with the joins, filters and grouping that shape its rows (see [Explaining a Column](#explaining-a-column)) |
 | `kerplunk describe <name>` | Columns, types, descriptions, tests and neighbours of one node; for a task, what it runs and its neighbours in the DAG |
 | `kerplunk list [kind ...]` | Every node of the given kinds (`models`, `tables`, `sources`, `tasks`, ...; default all relations) |
 | `kerplunk open` | Open `graph.html` in a browser |
@@ -124,6 +125,7 @@ for column in walk.columns:
 
 print(project.trace("customer_ltv.lifetime_value"))  # the same text the CLI prints
 project.describe("orders").columns  # typed results
+project.explain("orders.amount").composed  # "SUM(raw_payments.amount / 100)"
 project.path_between("raw_payments", "customer_dashboard").found
 project.search("lifetime value", kinds=["column"]).results
 project.list(["model"]).items
@@ -132,7 +134,7 @@ project.diff(base="origin/main").breaking  # removed columns still read downstre
 project.verify(seed=7).totals()  # {"claimed": 36, "confirmed": 36, "unexplained": 0, ...}
 ```
 
-Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult` made of `Item`s, plus `Diff` and `Verification`). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `kerplunk.QueryError` with suggestions. `project.graph` is the underlying `kerplunk.Graph` for anything the API does not cover.
+Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult` made of `Item`s, plus `Explanation`, `Diff` and `Verification`). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `kerplunk.QueryError` with suggestions. `project.graph` is the underlying `kerplunk.Graph` for anything the API does not cover.
 
 ## Outputs
 
@@ -224,6 +226,34 @@ namespaces = ["sales"]
 [warehouse.properties]            # passed to pyiceberg.catalog.load_catalog
 credential = "${ICEBERG_CREDENTIAL}"
 ```
+
+## Explaining a Column
+
+Lineage says which columns a value comes from. `kerplunk explain` says how it is calculated. Each column's SQL is kept with its CTEs, subqueries and aliases inlined, then composed through every model and SQL task upstream, so the formula is stated in terms of the source columns:
+
+```text
+$ kerplunk explain customer_ltv.lifetime_value
+customer_ltv.lifetime_value  (DOUBLE)
+
+  = customers.customer_lifetime_value
+
+In terms of sources
+  = SUM(raw_payments.amount / 100)
+
+Sources (1)
+  raw_payments.amount
+
+Step by step
+  customer_ltv.lifetime_value = customers.customer_lifetime_value  [verified]
+      WHERE: customers.customer_lifetime_value > 0
+  customers.customer_lifetime_value = SUM(stg_payments.amount)  [verified]
+      GROUP BY: stg_orders.customer_id
+      LEFT JOIN ON: stg_customers.customer_id = stg_orders.customer_id
+      LEFT JOIN ON: stg_payments.order_id = stg_orders.order_id
+  stg_payments.amount = raw_payments.amount / 100  [verified]
+```
+
+That chain crosses an Airflow SQL file, a dbt mart and a dbt staging model. The composed formula describes the value; which rows feed it is decided by the joins, filters and grouping listed under each step, which is why they are listed rather than folded in. For chains without joins, filters or aggregation, a test evaluates the composed formula directly on the source table and checks it gives the final model's values row for row. `describe` shows a column's expression and a model's conditions too, and the `explain` MCP tool answers "how is this number calculated?" for an agent.
 
 ## Reviewing Changes
 

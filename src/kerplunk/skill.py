@@ -48,6 +48,8 @@ lineage parsed from the SQL. Query it instead of reading every model by hand.
      renaming, dropping, retyping or changing the logic of a column or model.
    - `kerplunk trace <table.column>`: everything upstream; where a value comes from.
    - `kerplunk describe <name>`: columns, types, descriptions, tests, neighbours of one node.
+   - `kerplunk explain <table.column>`: how a column is calculated, as SQL composed down to its
+     source columns, with the joins and filters on the way.
    - `kerplunk path <a> <b>`: how two tables or columns are connected.
    - `kerplunk search <words>`: find nodes when you do not know the exact name.
    - `kerplunk list models` (or tables, sources, tasks, ...): what exists.

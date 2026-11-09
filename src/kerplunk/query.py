@@ -398,8 +398,13 @@ class Description:
     runs: list[str] = field(default_factory=list)
     after: list[str] = field(default_factory=list)
     before: list[str] = field(default_factory=list)
+    expression: str | None = None
+    """For a column, its SQL over physical columns (see ``kerplunk explain``)."""
+    conditions: list[str] = field(default_factory=list)
+    """For a relation, the joins, filters and grouping that shape its rows."""
 
     LISTS = (
+        ("conditions", "Joins, filters and grouping"),
         ("tests", "Tests"),
         ("upstream", "Upstream"),
         ("downstream", "Downstream"),
@@ -408,11 +413,13 @@ class Description:
         ("after", "After"),
         ("before", "Before"),
     )
-    HIDDEN_ATTRS = frozenset({"fqn", "dbt_name", "checksum", "view_sql"})
+    HIDDEN_ATTRS = frozenset({"fqn", "dbt_name", "checksum", "view_sql", "expression", "conditions"})
 
     def to_dict(self) -> dict[str, Any]:
         data = self.node.to_dict()
-        data.update(_drop_empty({"relation": self.relation, "parent": self.parent}))
+        data.update(
+            _drop_empty({"relation": self.relation, "parent": self.parent, "expression": self.expression})
+        )
         data["origins"] = self.origins
         data["attrs"] = self.attrs
         if self.node.kind in RELATION_KINDS:
@@ -429,6 +436,7 @@ class Description:
             ("path", node.path),
             ("data_type", node.data_type),
             ("description", node.description),
+            ("expression", self.expression),
         ):
             if value:
                 lines.append(f"  {key}: {value}")
@@ -465,8 +473,14 @@ def describe(graph: Graph, ref: str) -> Description:
         relation=node.relation,
         parent=node.parent,
         origins=sorted(node.origins),
-        attrs=dict(node.attrs),
+        attrs={k: v for k, v in node.attrs.items() if k not in ("expression", "conditions")},
     )
+    if node.attrs.get("expression") or node.attrs.get("conditions"):
+        from kerplunk.explain import short_sql
+
+        if isinstance(node.attrs.get("expression"), str):
+            result.expression = short_sql(graph, node.attrs["expression"])
+        result.conditions = [short_sql(graph, c, condition=True) for c in node.attrs.get("conditions", [])]
     if node.kind in RELATION_KINDS:
         result.columns = [item(graph, c) for c in graph.columns_of(node.id)]
     checked = [node.id, *(c.id for c in graph.columns_of(node.id))]

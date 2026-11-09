@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from kerplunk.build import BuildResult
     from kerplunk.config import Config
     from kerplunk.diff import Diff
+    from kerplunk.explain import Explanation
     from kerplunk.verify import Verification
 
 OUT_DIR = "kerplunk-out"
@@ -148,6 +149,17 @@ class Project:
 
     def describe(self, ref: str) -> query.Description:
         return query.describe(self.graph, ref)
+
+    def explain(self, ref: str) -> Explanation:
+        """A column's formula, composed down to source columns, with the conditions on the way."""
+        from kerplunk.explain import explain
+
+        node = query.resolve_one(self.graph, ref)
+        if node.kind != "column":
+            raise query.QueryError(
+                f"{ref!r} is a {node.kind}; explain takes a column such as {self.graph.label(node)}.<column>"
+            )
+        return explain(self.graph, node)
 
     def list(self, kinds: list[str] | None = None) -> query.Listing:
         return query.list_nodes(self.graph, kinds)

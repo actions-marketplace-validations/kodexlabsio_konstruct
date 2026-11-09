@@ -490,6 +490,11 @@ class Description:
 
 def _attr_text(value: Any) -> str:
     """Attribute values as people write them: lists comma-separated, an owner as name (role)."""
+    if isinstance(value, dict) and "queries" in value:
+        return (
+            f"{value['queries']} queries by {value['users']} users in {value.get('days', '?')} days "
+            f"(score {value.get('score', '?')})"
+        )
     if isinstance(value, dict) and "name" in value:
         return f"{value['name']} ({value['role']})" if value.get("role") else str(value["name"])
     if isinstance(value, (list, tuple)):

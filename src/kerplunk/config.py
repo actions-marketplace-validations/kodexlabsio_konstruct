@@ -23,6 +23,11 @@ Example ``kerplunk.toml``::
     [definitions]
     paths = ["definitions.yml"]           # business terms; default: every definitions.yml
 
+    [usage]                               # column usage from query history (off by default)
+    enabled = true                        # Snowflake, BigQuery and Databricks warehouses
+    days = 90
+    exclude_users = ["DBT_SERVICE"]       # leave out pipeline accounts
+
     [[warehouse]]
     type = "postgres"
     dsn = "${WAREHOUSE_DSN}"              # ${VAR} reads the environment
@@ -46,9 +51,12 @@ import tomllib
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    from kerplunk.usage import UsageSettings
 
 from kerplunk.dbt import SKIP_DIRS, DbtProject, walk_dirs
 from kerplunk.warehouse import (
@@ -172,6 +180,7 @@ class Config:
     warehouses: list[WarehouseConfig] | None = None
     discover_warehouses: bool = True
     config_file: Path | None = None
+    usage: UsageSettings = field(default_factory=lambda: _usage_settings({}))
 
     def excluded(self, path: Path) -> bool:
         try:
@@ -179,6 +188,21 @@ class Config:
         except ValueError:
             return False
         return any(fnmatch(relative, pattern) for pattern in self.exclude)
+
+
+def _usage_settings(data: dict[str, Any]) -> UsageSettings:
+    from kerplunk.usage import UsageSettings
+
+    objects = str(data.get("objects", "direct")).lower()
+    if objects not in ("direct", "base"):
+        raise ConfigError(f"[usage] objects must be 'direct' or 'base', not {objects!r}")
+    return UsageSettings(
+        enabled=bool(data.get("enabled", False)),
+        days=int(data.get("days", 90)),
+        exclude_users=[str(u) for u in data.get("exclude_users", [])],
+        objects=objects,
+        max_queries=int(data.get("max_queries", 50_000)),
+    )
 
 
 def load_config(root: Path, out_dir: Path | None = None) -> Config:
@@ -215,6 +239,7 @@ def load_config(root: Path, out_dir: Path | None = None) -> Config:
         if "paths" in data.get("dagster", {})
         else None,
         sql_paths=list(sql["paths"]) if "paths" in sql else None,
+        usage=_usage_settings(data.get("usage", {})),
         definitions_paths=[root / p for p in data.get("definitions", {}).get("paths", [])]
         if "paths" in data.get("definitions", {})
         else None,

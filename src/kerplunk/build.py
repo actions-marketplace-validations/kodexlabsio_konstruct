@@ -289,6 +289,7 @@ class Builder:
         self.load_dagster(schema_key)
         self.load_sql_files(projects, used_sql, schema_key)
         self.load_definitions()
+        self.load_usage()
         self.graph.meta["dialect"] = self.dialect
         self.graph.meta["default_catalog"] = self.default_catalog
         self.graph.meta["default_schema"] = self.default_schema
@@ -332,6 +333,7 @@ class Builder:
 
     def load_warehouses(self, projects: list[dbt.DbtProject]) -> None:
         count = 0
+        self.usage_connectors: list[tuple[Any, Any]] = []
         for warehouse in discover_warehouses(self.config, projects):
             try:
                 connector = warehouse.connector(self.config.root)
@@ -362,6 +364,7 @@ class Builder:
                 )
                 continue
             count += 1
+            self.usage_connectors.append((warehouse, connector))
             self.sources.append(
                 {
                     "input": warehouse.type,
@@ -772,6 +775,103 @@ class Builder:
                 self.dagster_sensor(sensor, tasks, job_tasks, self.rel_path(file.path))
         self.inputs["dagster_assets"] = sum(len(f.assets) for f in files)
         self.inputs["dagster_ops"] = sum(len(j.ops) for f in files for j in f.jobs)
+
+    def usage_columns(self, sql: str) -> list[tuple[str, str]]:
+        """The (relation, column) pairs one query reads: its output columns' sources and the
+        columns it joins, filters and groups on."""
+        found: set[tuple[str, str]] = set()
+        for statement in analyse(
+            sql,
+            dialect=self.dialect,
+            schema=self.schema_columns(),
+            default_catalog=self.default_catalog,
+            default_db=self.default_schema,
+        ):
+            for sources in statement.columns.values():
+                found.update((s.relation, s.column) for s in sources)
+            found.update(statement.references)
+        return sorted(found)
+
+    def load_usage(self) -> None:
+        """Query history from the warehouses that have it, as usage counts on columns."""
+        from kerplunk import usage
+
+        settings = self.config.usage
+        if not settings.enabled:
+            return
+        totals: dict[str, dict[str, Any]] = {}
+        unmatched = 0
+        sources: list[str] = []
+        for warehouse, connector in getattr(self, "usage_connectors", []):
+            if warehouse.type not in usage.SUPPORTED:
+                continue
+            name = warehouse.describe(self.config.root)
+            # Query history moves slowly and costs a warehouse query, so it is read once a day.
+            key = Cache.key(
+                "usage",
+                warehouse.type,
+                name,
+                settings.days,
+                settings.objects,
+                sorted(settings.exclude_users),
+                time.strftime("%Y-%m-%d"),
+            )
+
+            def compute(connector: Any = connector) -> list[dict[str, Any]]:
+                return [u.__dict__ for u in usage.fetch(connector, settings, self.usage_columns)]
+
+            try:
+                rows = self.cache.get_or_compute(key, compute, count=False)
+            except usage.MissingDriver as error:
+                self.graph.warn(f"usage: {name}: {error}")
+                continue
+            except Exception as error:  # permissions, edition or network: a warning, not a failure
+                message = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
+                self.graph.warn(f"usage: {name}: cannot read query history: {message}")
+                continue
+            sources.append(usage.SOURCES[warehouse.type])
+            columns_by_relation: dict[str, dict[str, Node]] = {}
+            for row in rows:
+                relation = self.graph.node_for_relation(
+                    str(row["relation"]).replace('"', "").replace("`", "").lower()
+                )
+                if relation is None:
+                    unmatched += 1
+                    continue
+                index = columns_by_relation.setdefault(
+                    relation.id, {c.name.lower(): c for c in self.graph.columns_of(relation.id)}
+                )
+                column = index.get(str(row["column"]).lower())
+                if column is None:
+                    unmatched += 1
+                    continue
+                entry = totals.setdefault(column.id, {"queries": 0, "users": 0})
+                entry["queries"] += int(row["queries"])
+                entry["users"] += int(row["users"])
+        if not sources:
+            return
+        import math
+
+        most = max((e["queries"] for e in totals.values()), default=0)
+        for column_id, entry in totals.items():
+            # A 0 to 100 score on a log scale, so the long tail is still told apart.
+            entry["score"] = round(100 * math.log1p(entry["queries"]) / math.log1p(most)) if most else 0
+            entry["days"] = settings.days
+            self.graph.nodes[column_id].attrs["usage"] = entry
+        self.graph.meta["usage"] = {
+            "days": settings.days,
+            "sources": sorted(set(sources)),
+            "columns": len(totals),
+            "unmatched": unmatched,
+        }
+        self.sources.append(
+            {
+                "input": "usage",
+                "path": ", ".join(sorted(set(sources))),
+                "detail": f"{len(totals)} columns queried in the last {settings.days} days"
+                + (f"; {unmatched} not in the graph" if unmatched else ""),
+            }
+        )
 
     def load_definitions(self) -> None:
         """Business terms from definitions.yml, attached to the columns they name."""

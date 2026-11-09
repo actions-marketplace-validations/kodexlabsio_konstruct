@@ -157,6 +157,42 @@ def render(graph: Graph) -> str:
         lines += [f"| `{graph.label(node)}` | {count} |" for node, count in findings.hubs]
     else:
         lines.append("None.")
+    usage = graph.meta.get("usage")
+    if usage:
+        queried = sorted(
+            (n for n in graph.nodes.values() if n.kind == "column" and n.attrs.get("usage")),
+            key=lambda n: (-int(n.attrs["usage"]["queries"]), graph.label(n)),
+        )
+        lines += [
+            "",
+            "## Most queried columns",
+            "",
+            f"From {', '.join(usage['sources'])}, the last {usage['days']} days: the columns people, "
+            "dashboards and jobs actually read.",
+            "",
+        ]
+        if queried:
+            lines += ["| Column | Queries | Users | Score |", "|--------|---------|-------|-------|"]
+            for node in queried[:25]:
+                use = node.attrs["usage"]
+                lines.append(
+                    f"| `{graph.label(node)}` | {use['queries']} | {use['users']} | {use['score']} |"
+                )
+            unread = [
+                n
+                for n in graph.nodes.values()
+                if n.kind == "column"
+                and not n.attrs.get("usage")
+                and graph.parent_of(n) is not None
+                and _is_produced(graph, graph.parent_of(n))  # type: ignore[arg-type]
+            ]
+            lines += [
+                "",
+                f"{len(unread)} column{'s' if len(unread) != 1 else ''} of models and built tables "
+                f"{'were' if len(unread) != 1 else 'was'} not queried in that time.",
+            ]
+        else:
+            lines.append("No queries matched columns in the graph.")
     terms = sorted((n for n in graph.nodes.values() if n.kind == "term"), key=lambda n: n.name.lower())
     if terms:
         lines += [

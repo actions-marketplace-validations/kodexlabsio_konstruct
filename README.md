@@ -155,7 +155,7 @@ Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `L
 | File | Contents |
 |------|----------|
 | `graph.json` | Nodes (`source`, `table`, `column`, `model`, `seed`, `snapshot`, `dag`, `task`, `test`, `exposure`, `term`) and edges (below), with descriptions, types, file paths and the inputs each came from |
-| `REPORT.md` | Summary and coverage, business terms, the most used columns, orphans, untested models, columns with no lineage, columns documented in dbt but missing from the warehouse, and warnings |
+| `REPORT.md` | Summary and coverage, the most queried columns (with usage on), business terms, the most used columns, orphans, untested models, columns with no lineage, columns documented in dbt but missing from the warehouse, and warnings |
 | `graph.html` | A single offline file (open it with `kerplunk open`): tables, models and tasks in dependency order; cards that expand to their columns; column lineage drawn between columns, isolated and fitted to the screen; each column's formula in terms of its sources; the conditions that shape each model; verification results; search, deep links to any table or column, dark and light themes |
 
 | Edge | Direction | Meaning |
@@ -224,6 +224,14 @@ dags = ["orchestration/dags"]     # default: Python files that look like DAGs
 
 [sql]
 paths = ["sql/**/*.sql"]          # default: .sql files outside dbt folders and not used by DAGs
+
+[definitions]
+paths = ["definitions.yml"]       # business terms; default: every definitions.yml
+
+[usage]                           # column usage from query history; off by default
+enabled = true
+days = 90
+exclude_users = ["DBT_SERVICE"]
 
 [[warehouse]]                     # setting any warehouse turns discovery off
 type = "postgres"
@@ -308,6 +316,26 @@ Customer lifetime value  [approved, Priya Shah (Head of Finance), approved 2026-
 - **Pull requests review them.** `kerplunk diff` reports terms added, removed and changed field by field, and flags an approved term whose definition, grain, columns or filters changed while it stayed approved with the same date.
 
 kerplunk reads every `definitions.yml` (or `.yaml`) in the repository; `[definitions] paths` in `kerplunk.toml` pins the files. The example project has five terms in [`examples/jaffle_shop/definitions.yml`](examples/jaffle_shop/definitions.yml).
+
+## Column Usage from Query History
+
+The graph knows what depends on what; it does not know what people actually read. With usage on, kerplunk reads the warehouse's query history, counts the queries and distinct users that read each column over a window, and adds that to the graph: a usage score on each column (0 to 100 on a log scale), a "Most queried columns" table in `REPORT.md`, a line in `describe`, and a tag in graph.html. It reads metadata only, once a day, and nothing is sent anywhere.
+
+```toml
+[usage]
+enabled = true                  # off by default
+days = 90
+exclude_users = ["DBT_SERVICE"] # leave out pipeline and orchestrator accounts
+# objects = "base"              # Snowflake: count underlying tables rather than what queries named
+```
+
+| Warehouse | Source | Columns from | History | Access needed |
+|-----------|--------|--------------|---------|---------------|
+| Snowflake | [`SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY`](https://docs.snowflake.com/en/sql-reference/account-usage/access_history) | The columns recorded for each object the query named (`DIRECT_OBJECTS_ACCESSED`), or with `objects = "base"` the underlying tables' columns, including those used only in filters and joins | 365 days; up to 3 hours behind; Enterprise Edition or higher | The `SNOWFLAKE.GOVERNANCE_VIEWER` database role, or `IMPORTED PRIVILEGES` on the SNOWFLAKE database ([access](https://docs.snowflake.com/en/sql-reference/account-usage)) |
+| BigQuery | [`region-REGION.INFORMATION_SCHEMA.JOBS`](https://cloud.google.com/bigquery/docs/information-schema-jobs) | The view records tables but not columns, so kerplunk parses each distinct query text with its own SQL analysis, counting output columns' sources and the columns used in joins, filters and grouping | 180 days | `bigquery.jobs.listAll` on the project (BigQuery Resource Viewer) |
+| Databricks | [`system.access.column_lineage`](https://docs.databricks.com/aws/en/admin/system-tables/lineage) | Every column a query read, including reads with no target table | 395 days | `USE CATALOG` on `system`, `USE SCHEMA` and `SELECT` on `system.access` ([system tables](https://docs.databricks.com/aws/en/admin/system-tables/)) |
+
+The view names, retention and permissions above were checked against each vendor's documentation in November 2026. Without the access, the build carries on and warns `cannot read query history` with the warehouse's message. BigQuery takes the region from the warehouse's `location` (default `us`).
 
 ## Finding Conflicting Definitions
 
@@ -584,6 +612,7 @@ uv run pytest --cov                             # everything, with branch covera
 | End to end | `test_build`, `test_cli`, `test_query`, `test_mcp` | The example built with real dbt, every CLI command, the Python API, and the MCP server in process and over stdio |
 | Golden files | `test_golden`, `tests/golden/` | The exact text of the CLI output and REPORT.md; regenerate with `KERPLUNK_UPDATE_GOLDEN=1` and review the diff |
 | Browser | `test_browser` | graph.html in Chromium: selection, column rows and edges, formulas, deep links, isolate, direction, filters, themes, search, hostile text, a 400-relation graph |
+| Usage | `test_usage` | The SQL sent to Snowflake, BigQuery and Databricks, query text parsing for BigQuery, usage on columns, in the report and describe, the daily cache, off by default, and missing permissions as a warning, against stub drivers in each vendor's row shapes |
 | Conflicts | `test_conflicts` | Two revenue definitions that differ by one filter (the pair, the filter and its file), different sources, ranking, grouping by business terms, copies left out, no false conflicts on the example |
 | Definitions | `test_definitions` | The definitions.yml format and its errors, terms in the build, `define`, describe, search, query and impact, the glossary, warnings for missing columns and filters (including a renamed bound column in the example), and `diff` on definitions |
 | Formulas | `test_explain` | `explain` on dbt and Airflow SQL, and composed formulas evaluated on the data against the final model, row for row; the viewer's formula cache |
@@ -616,7 +645,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/), che
 | `src/kerplunk/graph.py` | Graph model, name resolution, impact, trace and path |
 | `src/kerplunk/sql.py` | sqlglot column lineage, canonical expressions and conditions |
 | `src/kerplunk/dbt.py`, `jinja.py`, `airflow.py`, `dagster.py`, `warehouse.py`, `definitions.py` | Inputs, the sandboxed dbt renderer and business definitions |
-| `src/kerplunk/config.py`, `build.py` | Configuration, discovery, the build and its cache |
+| `src/kerplunk/config.py`, `build.py`, `usage.py` | Configuration, discovery, the build and its cache, and usage from query history |
 | `src/kerplunk/query.py`, `explain.py`, `conflicts.py`, `diff.py`, `verify.py` | Questions over the graph: impact and the rest, formulas, conflicting definitions, change review, lineage against data |
 | `src/kerplunk/report.py`, `html.py`, `viewer/`, `export.py` | REPORT.md, graph.html (its HTML, CSS, script and fonts) and the export formats |
 | `src/kerplunk/project.py` | The Python API |

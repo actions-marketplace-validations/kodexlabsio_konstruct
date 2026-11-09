@@ -1242,6 +1242,12 @@
   }
 
   function renderColumn(n) {
+    const used = attr(n, "usage");
+    if (used) {
+      const tags = el("div", "tags");
+      tags.append(el("span", "tag", used.queries.toLocaleString("en-GB") + " queries, " + used.users + " users in " + used.days + " days"));
+      head.append(tags);
+    }
     termsSection(termsOf(n.id));
     const info = formulas[n.id];
     if (info && info.e) {

@@ -240,6 +240,13 @@ def cmd_describe(args: argparse.Namespace, console: Console) -> int:
     return 0
 
 
+def cmd_define(args: argparse.Namespace, console: Console) -> int:
+    project = _ready(_project(args), args, console)
+    result = project.define(" ".join(args.ref))
+    _emit(console, result, args.json)
+    return 0 if result.terms else 3
+
+
 def cmd_explain(args: argparse.Namespace, console: Console) -> int:
     project = _ready(_project(args), args, console)
     _emit(console, project.explain(args.ref), args.json)
@@ -484,6 +491,13 @@ def parser() -> argparse.ArgumentParser:
     describe.add_argument("ref", metavar="NAME")
     _query_options(describe)
     describe.set_defaults(func=cmd_describe)
+
+    defining = add("define", "what a business term means, who owns it and which columns hold it")
+    defining.add_argument(
+        "ref", nargs="+", metavar="TERM", help="a term, a synonym, or a column such as orders.amount"
+    )
+    _query_options(defining)
+    defining.set_defaults(func=cmd_define)
 
     explaining = add("explain", "a column's formula, composed down to its source columns")
     explaining.add_argument("ref", metavar="COLUMN", help="e.g. orders.amount")

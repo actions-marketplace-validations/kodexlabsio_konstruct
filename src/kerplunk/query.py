@@ -64,6 +64,7 @@ class Item:
     through: str | None = None
     direction: str | None = None
     score: float | None = None
+    status: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return _drop_empty({f.name: getattr(self, f.name) for f in fields(self)})
@@ -71,7 +72,9 @@ class Item:
     def __str__(self) -> str:
         meta = [self.relation_kind or self.kind]
         meta += [
-            str(v) for v in (self.data_type, self.transform, self.verified, self.role, self.command) if v
+            str(v)
+            for v in (self.data_type, self.status, self.transform, self.verified, self.role, self.command)
+            if v
         ]
         if self.through:
             meta.append(f"via {self.through}")
@@ -94,6 +97,8 @@ def item(graph: Graph, node: Node, step: Step | None = None, **extra: Any) -> It
         data["path"] = node.path
     data["data_type"] = node.data_type
     data["description"] = node.description
+    if node.kind == "term":
+        data["status"] = node.attrs.get("status")
     if step is not None:
         data["depth"] = step.depth
         if step.via is not None:
@@ -132,6 +137,7 @@ class Walk:
     tests: list[Item] = field(default_factory=list)
     exposures: list[Item] = field(default_factory=list)
     tasks: list[Item] = field(default_factory=list)
+    terms: list[Item] = field(default_factory=list)
 
     SECTIONS = (
         ("columns", "Columns"),
@@ -141,6 +147,7 @@ class Walk:
         ("tests", "Tests"),
         ("exposures", "Exposures"),
         ("tasks", "Orchestration"),
+        ("terms", "Business terms"),
     )
 
     @property
@@ -156,6 +163,7 @@ class Walk:
                 (len(self.tests), "test"),
                 (len(self.exposures), "exposure"),
                 (len(self.tasks), "task"),
+                (len(self.terms), "business term"),
             )
             if count
         ]
@@ -214,6 +222,12 @@ def _walk(graph: Graph, start: Node, steps: list[Step], direction: Literal["down
             listed.add(node.id)
     for relation_id in sorted(relation_ids - listed):
         walk.relations.append(item(graph, graph.nodes[relation_id]))
+    # Business terms bound to the node itself and, downstream, to anything a change reaches.
+    reached = set(start_ids) | {start.id}
+    if direction == "downstream":
+        reached |= {s.node.id for s in steps} | relation_ids
+    terms = {e.source for target in reached for e in graph.in_edges(target, "defines")}
+    walk.terms = [item(graph, graph.nodes[t]) for t in sorted(terms)]
     return walk
 
 
@@ -321,7 +335,8 @@ def _scored(graph: Graph, text: str, limit: int, kinds: list[str] | None) -> lis
     frequency: Counter[str] = Counter()
     names: dict[str, set[str]] = {}
     for node in graph.nodes.values():
-        words = set(_TOKEN.findall(f"{graph.label(node)} {node.relation or ''}".lower()))
+        synonyms = " ".join(node.attrs.get("synonyms", [])) if node.kind == "term" else ""
+        words = set(_TOKEN.findall(f"{graph.label(node)} {node.relation or ''} {synonyms}".lower()))
         names[node.id] = words
         frequency.update(words)
     scored: list[tuple[Node, float]] = []
@@ -343,9 +358,13 @@ def _scored(graph: Graph, text: str, limit: int, kinds: list[str] | None) -> lis
                 score += 0.5 * weight
         if not score:
             continue
-        if label == needle or node.name.lower() == needle:
+        synonym = node.kind == "term" and needle in (s.lower() for s in node.attrs.get("synonyms", []))
+        if label == needle or node.name.lower() == needle or synonym:
             score += 10
-        if node.kind in RELATION_KINDS:
+        if node.kind == "term":
+            # A business term is what a person asking in words usually means.
+            score *= 1.5
+        elif node.kind in RELATION_KINDS:
             score *= 1.2
         elif node.kind == "test":
             score *= 0.5
@@ -403,7 +422,16 @@ class Description:
     conditions: list[str] = field(default_factory=list)
     """For a relation, the joins, filters and grouping that shape its rows."""
 
+    terms: list[str] = field(default_factory=list)
+    """For a column or relation, the business terms that define it."""
+    defines: list[str] = field(default_factory=list)
+    """For a term, the columns it is bound to."""
+    related: list[str] = field(default_factory=list)
+
     LISTS = (
+        ("terms", "Defined by"),
+        ("defines", "Columns"),
+        ("related", "Related terms"),
         ("conditions", "Joins, filters and grouping"),
         ("tests", "Tests"),
         ("upstream", "Upstream"),
@@ -444,7 +472,7 @@ class Description:
             lines.append(f"  from: {', '.join(self.origins)}")
         for key, value in self.attrs.items():
             if key not in self.HIDDEN_ATTRS and value not in (None, "", [], {}):
-                lines.append(f"  {key.replace('_', ' ')}: {value}")
+                lines.append(f"  {key.replace('_', ' ')}: {_attr_text(value)}")
         if self.columns:
             lines += ["", f"Columns ({len(self.columns)})"]
             width = max(len(c.name) for c in self.columns)
@@ -460,6 +488,19 @@ class Description:
         return "\n".join(lines)
 
 
+def _attr_text(value: Any) -> str:
+    """Attribute values as people write them: lists comma-separated, an owner as name (role)."""
+    if isinstance(value, dict) and "name" in value:
+        return f"{value['name']} ({value['role']})" if value.get("role") else str(value["name"])
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_attr_text(v) for v in value)
+    return str(value)
+
+
+def _term_label(graph: Graph, node: Node) -> str:
+    return f"{node.name} ({node.attrs.get('status', 'draft')})"
+
+
 def _neighbour(graph: Graph, node_id: str) -> str:
     node = graph.nodes[node_id]
     return f"{graph.label(node)} ({node.kind})"
@@ -473,7 +514,13 @@ def describe(graph: Graph, ref: str) -> Description:
         relation=node.relation,
         parent=node.parent,
         origins=sorted(node.origins),
-        attrs={k: v for k, v in node.attrs.items() if k not in ("expression", "conditions")},
+        # A term's columns and related terms are listed below, with their resolved names.
+        attrs={
+            k: v
+            for k, v in node.attrs.items()
+            if k not in ("expression", "conditions")
+            and not (node.kind == "term" and k in ("columns", "related", "line"))
+        },
     )
     if node.attrs.get("expression") or node.attrs.get("conditions"):
         from kerplunk.explain import short_sql
@@ -491,6 +538,17 @@ def describe(graph: Graph, ref: str) -> Description:
     result.downstream = sorted(
         {_neighbour(graph, o) for _, o in graph.downstream_edges(node.id) if graph.nodes[o].kind != "dag"}
     )
+    result.terms = sorted(
+        _term_label(graph, graph.nodes[e.source]) for e in graph.in_edges(node.id, "defines")
+    )
+    if node.kind == "term":
+        result.defines = sorted(
+            graph.label(graph.nodes[e.target]) for e in graph.out_edges(node.id, "defines")
+        )
+        result.related = sorted(
+            {graph.nodes[e.target].name for e in graph.out_edges(node.id, "relates_to")}
+            | {graph.nodes[e.source].name for e in graph.in_edges(node.id, "relates_to")}
+        )
     if node.kind == "dag":
         result.tasks = [graph.nodes[e.target].name for e in graph.out_edges(node.id, "runs")]
     if node.kind == "task":
@@ -498,6 +556,145 @@ def describe(graph: Graph, ref: str) -> Description:
         result.after = sorted(graph.nodes[e.source].name for e in graph.in_edges(node.id, "precedes"))
         result.before = sorted(graph.nodes[e.target].name for e in graph.out_edges(node.id, "precedes"))
     return result
+
+
+# Define
+
+
+@dataclass
+class TermDefinition:
+    """One business term: what it means, who owns it and the columns that hold it."""
+
+    name: str
+    definition: str | None
+    status: str
+    owner: dict[str, Any] | None = None
+    approved: str | None = None
+    synonyms: list[str] = field(default_factory=list)
+    grain: str | None = None
+    columns: list[Item] = field(default_factory=list)
+    filters: list[str] = field(default_factory=list)
+    unit: str | None = None
+    currency: str | None = None
+    related: list[str] = field(default_factory=list)
+    exceptions: str | None = None
+    path: str | None = None
+    line: int | None = None
+    id: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        data = {f.name: getattr(self, f.name) for f in fields(self)}
+        data["columns"] = [c.to_dict() for c in self.columns]
+        return _drop_empty(data)
+
+    def __str__(self) -> str:
+        owner = _attr_text(self.owner) if self.owner else "no owner"
+        head = f"{self.name}  [{self.status}, {owner}"
+        head += f", approved {self.approved}]" if self.approved else "]"
+        lines = [head]
+        if self.definition:
+            lines.append(f"  {self.definition}")
+        for key, value in (
+            ("also called", ", ".join(self.synonyms)),
+            ("grain", self.grain),
+            ("unit", " ".join(v for v in (self.unit, self.currency) if v)),
+            ("required filters", "; ".join(self.filters)),
+            ("exceptions", self.exceptions),
+            ("related", ", ".join(self.related)),
+            ("defined in", f"{self.path}:{self.line}" if self.path else None),
+        ):
+            if value:
+                lines.append(f"  {key}: {value}")
+        if self.columns:
+            lines.append("  columns:")
+            lines += [f"    {c.label}" + (f"  {c.data_type}" if c.data_type else "") for c in self.columns]
+        else:
+            lines.append("  columns: none bound")
+        return "\n".join(lines)
+
+
+@dataclass
+class Definitions:
+    """The answer to `kerplunk define`: the terms a name or column refers to, approved first."""
+
+    query: str
+    terms: list[TermDefinition] = field(default_factory=list)
+    column: Item | None = None
+    """When the query named a column, that column."""
+
+    def to_dict(self) -> dict[str, Any]:
+        return _drop_empty(
+            {
+                "query": self.query,
+                "column": self.column.to_dict() if self.column else None,
+                "terms": [t.to_dict() for t in self.terms],
+            }
+        )
+
+    def __str__(self) -> str:
+        if not self.terms:
+            target = self.column.label if self.column else repr(self.query)
+            return f"No business term defines {target}. Add one to definitions.yml."
+        heading = f"Terms defining {self.column.label}" if self.column else None
+        body = "\n\n".join(str(t) for t in self.terms)
+        return f"{heading}\n\n{body}" if heading else body
+
+
+_STATUS_ORDER = {"approved": 0, "agreed": 1, "draft": 2, "retired": 3}
+
+
+def term_definition(graph: Graph, node: Node) -> TermDefinition:
+    attrs = node.attrs
+    columns = [item(graph, graph.nodes[e.target]) for e in graph.out_edges(node.id, "defines")]
+    return TermDefinition(
+        id=node.id,
+        name=node.name,
+        definition=node.description,
+        status=str(attrs.get("status", "draft")),
+        owner=attrs.get("owner"),
+        approved=attrs.get("approved"),
+        synonyms=list(attrs.get("synonyms", [])),
+        grain=attrs.get("grain"),
+        columns=sorted(columns, key=lambda c: c.label),
+        filters=list(attrs.get("filters", [])),
+        unit=attrs.get("unit"),
+        currency=attrs.get("currency"),
+        related=list(attrs.get("related", [])),
+        exceptions=attrs.get("exceptions"),
+        path=node.path,
+        line=attrs.get("line"),
+    )
+
+
+def define(graph: Graph, ref: str) -> Definitions:
+    """The business terms ``ref`` names (by name or synonym), or the terms that define the column
+    or relation ``ref`` names. Approved terms come first, retired ones last."""
+    needle = " ".join(ref.split()).lower()
+    terms = [
+        n
+        for n in graph.nodes.values()
+        if n.kind == "term"
+        and (
+            needle in (n.name.lower(), n.id.lower())
+            or needle in (s.lower() for s in n.attrs.get("synonyms", []))
+        )
+    ]
+    column: Item | None = None
+    if not terms:
+        found = [n for n in graph.resolve(ref) if n.kind != "term"]
+        if len(found) == 1:
+            target = found[0]
+            column = item(graph, target)
+            terms = [graph.nodes[e.source] for e in graph.in_edges(target.id, "defines")]
+        elif len(found) > 1:
+            raise QueryError(f"{ref!r} is ambiguous; use one of: {', '.join(n.id for n in found[:10])}")
+        else:
+            hints = [n.name for n in search_nodes(graph, ref, limit=5, kinds=["term"])]
+            hints = hints or [graph.label(n) for n in search_nodes(graph, ref, limit=5)]
+            suffix = f"; did you mean {', '.join(hints)}?" if hints else ""
+            raise QueryError(f"no term or column matches {ref!r}{suffix}")
+    ordered = sorted(terms, key=lambda n: (_STATUS_ORDER.get(str(n.attrs.get("status")), 9), n.name))
+    return Definitions(query=ref, terms=[term_definition(graph, n) for n in ordered], column=column)
 
 
 # List
@@ -596,6 +793,8 @@ class QueryResult:
     neighbours: list[Item] = field(default_factory=list)
     impact: Walk | None = None
     lineage: Walk | None = None
+    definitions: list[TermDefinition] = field(default_factory=list)
+    """Business terms among the matches, or defining them, with their agreed definitions."""
 
     EDGE_LIMIT = 80
 
@@ -610,6 +809,8 @@ class QueryResult:
             data["impact"] = self.impact.to_dict()
         if self.lineage is not None:
             data["lineage"] = self.lineage.to_dict()
+        if self.definitions:
+            data["definitions"] = [d.to_dict() for d in self.definitions]
         return data
 
     def __str__(self) -> str:
@@ -618,7 +819,10 @@ class QueryResult:
                 f"Nothing in the graph matches {self.question!r}. "
                 "Try `kerplunk search` with a table or column name."
             )
-        lines = ["Best matches"]
+        lines = []
+        if self.definitions:
+            lines += ["Definitions", *("  " + str(d).replace("\n", "\n  ") for d in self.definitions), ""]
+        lines.append("Best matches")
         for match in self.matches:
             lines.append(f"  {match}")
             if match.description:
@@ -676,7 +880,17 @@ def query(graph: Graph, question: str, limit: int = 8, depth: int = 1) -> QueryR
             frontier = following
     chosen_ids = {n.id for n in chosen}
     result.neighbours = [item(graph, graph.nodes[i]) for i in sorted(seen - chosen_ids)][:60]
-    top = chosen[0]
+    # Definitions: terms that match nearly as well as the best match, and the terms that define
+    # the best matching column or relation.
+    terms: dict[str, Node] = {n.id: n for n, score in seeds if n.kind == "term" and score >= top_score * 0.6}
+    first = next((n for n in chosen if n.kind != "term"), None)
+    if first is not None:
+        for edge in graph.in_edges(first.id, "defines"):
+            terms.setdefault(edge.source, graph.nodes[edge.source])
+    ordered = sorted(terms.values(), key=lambda n: (_STATUS_ORDER.get(str(n.attrs.get("status")), 9), n.name))
+    result.definitions = [term_definition(graph, n) for n in ordered]
+    # Impact or lineage follows the first matching column or relation, not a term.
+    top = next((n for n in chosen if n.kind != "term"), chosen[0])
     if words & _DOWNSTREAM_WORDS:
         result.impact = impact(graph, top.id)
     elif words & _UPSTREAM_WORDS:

@@ -20,6 +20,9 @@ Example ``kerplunk.toml``::
     [sql]
     paths = ["sql/**/*.sql"]              # default: discovered *.sql outside dbt projects
 
+    [definitions]
+    paths = ["definitions.yml"]           # business terms; default: every definitions.yml
+
     [[warehouse]]
     type = "postgres"
     dsn = "${WAREHOUSE_DSN}"              # ${VAR} reads the environment
@@ -164,6 +167,7 @@ class Config:
     dbt_projects: list[Path] | None = None
     dag_paths: list[Path] | None = None
     dagster_paths: list[Path] | None = None
+    definitions_paths: list[Path] | None = None
     sql_paths: list[str] | None = None
     warehouses: list[WarehouseConfig] | None = None
     discover_warehouses: bool = True
@@ -211,6 +215,9 @@ def load_config(root: Path, out_dir: Path | None = None) -> Config:
         if "paths" in data.get("dagster", {})
         else None,
         sql_paths=list(sql["paths"]) if "paths" in sql else None,
+        definitions_paths=[root / p for p in data.get("definitions", {}).get("paths", [])]
+        if "paths" in data.get("definitions", {})
+        else None,
         warehouses=[
             WarehouseConfig(str(w.get("type", "")).lower(), {k: v for k, v in w.items() if k != "type"})
             for w in warehouses
@@ -287,6 +294,21 @@ def discover_dagster_files(config: Config) -> list[Path]:
         if looks_like_dagster_file(text):
             found.append(path)
     return found
+
+
+def discover_definitions_files(config: Config) -> list[Path]:
+    """``definitions.yml`` files: the configured paths, or every one in the repository."""
+    from kerplunk.definitions import FILE_NAMES
+
+    if config.definitions_paths is not None:
+        files: list[Path] = []
+        for path in config.definitions_paths:
+            if path.is_dir():
+                files.extend(sorted(p for name in FILE_NAMES for p in path.rglob(name)))
+            elif path.is_file():
+                files.append(path)
+        return files
+    return [p for p in [*iter_files(config, ".yml"), *iter_files(config, ".yaml")] if p.name in FILE_NAMES]
 
 
 def discover_sql_files(config: Config, projects: list[DbtProject], used: set[Path]) -> list[Path]:

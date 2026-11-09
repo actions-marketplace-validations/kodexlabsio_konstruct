@@ -29,6 +29,7 @@ async def _exercise(client: Client) -> None:
         "trace",
         "search",
         "describe",
+        "define",
         "explain",
         "path",
         "query",
@@ -45,6 +46,13 @@ async def _exercise(client: Client) -> None:
     assert len(search["results"]) == 2
     describe = structured(await client.call_tool("describe", {"ref": "customers"}))
     assert describe["kind"] == "model"
+    # Acceptance: "define lifetime value" returns the approved definition and its bound column.
+    defined = structured(await client.call_tool("define", {"ref": "lifetime value"}))
+    [term] = defined["terms"]
+    assert term["name"] == "Customer lifetime value" and term["status"] == "approved"
+    assert term["definition"].startswith("Total value of every payment a customer has made")
+    assert term["owner"] == {"name": "Priya Shah", "role": "Head of Finance"}
+    assert "customers.customer_lifetime_value" in [c["label"] for c in term["columns"]]
     explained = structured(await client.call_tool("explain", {"ref": "customer_ltv.lifetime_value"}))
     assert explained["composed"] == "SUM(raw_payments.amount / 100)"
     path = structured(await client.call_tool("path", {"start": "raw_orders", "end": "orders"}))

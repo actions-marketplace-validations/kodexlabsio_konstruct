@@ -151,17 +151,52 @@ def test_columns_theme_and_filters(jaffle_built_graph: Path, open_page: Any) -> 
 
 
 @pytest.mark.dbt
+def test_business_terms(jaffle_built_graph: Path, open_page: Any) -> None:
+    graph = jaffle_built_graph / "kerplunk-out" / "graph.html"
+    page = open_page(graph)
+    assert "5\nbusiness terms" in page.inner_text("#stats")
+    page.fill("#search", "ltv")
+    assert (
+        page.eval_on_selector_all("#results .label", "els => els.map(e => e.textContent)")[0]
+        == "Customer lifetime value"
+    )
+    page.press("#search", "Enter")
+    panel = page.inner_text("#panel")
+    assert "Customer lifetime value" in page.inner_text("#panel h2")
+    assert "Priya Shah, Head of Finance" in panel and "one row per customer" in panel
+    assert "= SUM(raw_payments.amount / 100)" in panel
+    assert (
+        page.locator(".row.on-path[data-col='model.jaffle_shop.customers#customer_lifetime_value']").count()
+        == 1
+    )
+    assert page.evaluate("location.hash") == "#term.customer_lifetime_value"
+    page.locator("#panel").get_by_role("button", name="Order amount", exact=True).click()
+    assert "Order amount" in page.inner_text("#panel h2")
+    # A column shows the terms that define it.
+    page.goto(graph.as_uri() + "#model.jaffle_shop.orders%23amount")
+    page.wait_for_selector("#panel:not([hidden])")
+    assert "Defined by" in (page.locator("#panel").text_content() or "")
+    page.locator("#panel").get_by_role("button", name="Order amount", exact=True).click()
+    assert page.evaluate("location.hash") == "#term.order_amount"
+
+
+@pytest.mark.dbt
 def test_search(jaffle_built_graph: Path, open_page: Any) -> None:
     page = open_page(jaffle_built_graph / "kerplunk-out" / "graph.html")
     page.fill("#search", "lifetime")
     results = page.eval_on_selector_all("#results .label", "els => els.map(e => e.textContent)")
-    assert results[:2] == ["customer_ltv.lifetime_value", "customers.customer_lifetime_value"]
+    # The business term comes first, then the columns.
+    assert results[:3] == [
+        "Customer lifetime value",
+        "customer_ltv.lifetime_value",
+        "customers.customer_lifetime_value",
+    ]
     assert page.inner_text("#match-count") == f"{len(results)} matches"
     page.press("#search", "ArrowDown")
     page.press("#search", "ArrowUp")
     page.press("#search", "Enter")
     assert page.locator("#panel").is_visible()
-    assert "lifetime" in page.inner_text("#panel h2")
+    assert "lifetime" in page.inner_text("#panel h2").lower()
     page.fill("#search", "zzzz")
     assert page.inner_text("#match-count") == "No matches"
 

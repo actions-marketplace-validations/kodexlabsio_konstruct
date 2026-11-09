@@ -49,7 +49,7 @@ def test_build_prints_what_it_found(
     assert data["nodes"]["model"] == 5
     assert data["lineage"] == {"covered": 32, "columns": 32}
     assert data["cache"] == {"hits": 7, "misses": 0}
-    assert {i["input"] for i in data["inputs"]} == {"dbt", "duckdb", "airflow"}
+    assert {i["input"] for i in data["inputs"]} == {"dbt", "duckdb", "airflow", "definitions"}
 
 
 @pytest.mark.dbt
@@ -59,14 +59,14 @@ def test_query_commands(jaffle_built_graph: Path, capsys: pytest.CaptureFixture[
     assert code == 0
     assert out.splitlines()[:2] == [
         "Downstream of stg_payments.amount (model)",
-        "7 columns, 3 relations, 5 tests, 1 exposure and 2 tasks downstream.",
+        "7 columns, 3 relations, 5 tests, 1 exposure, 2 tasks and 2 business terms downstream.",
     ]
     code, out, _ = run(capsys, "-C", project, "trace", "orders.amount", "--json")
     assert code == 0 and json.loads(out)["direction"] == "upstream"
     code, out, _ = run(capsys, "path", "raw_orders", "orders", "--project", project)
     assert code == 0 and "-feeds-> orders (model)" in out
     code, out, _ = run(capsys, "search", "lifetime", "value", "-C", project, "-n", "1")
-    assert code == 0 and out.startswith("customers.customer_lifetime_value")
+    assert code == 0 and out.startswith("Customer lifetime value")
     graph_file = str(jaffle_built_graph / "kerplunk-out" / "graph.json")
     code, out, _ = run(capsys, "describe", "customers", "--graph", graph_file)
     assert code == 0 and out.startswith("customers (model)")

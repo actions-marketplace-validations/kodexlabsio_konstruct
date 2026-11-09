@@ -8,7 +8,7 @@
   const KIND_ORDER = ["source", "seed", "snapshot", "table", "model", "column", "test", "exposure", "dag", "task"];
   const KIND_NAMES = {
     source: "Source", seed: "Seed", snapshot: "Snapshot", table: "Table", model: "Model", task: "Task",
-    exposure: "Exposure", column: "Column", test: "Test", dag: "DAG",
+    exposure: "Exposure", column: "Column", test: "Test", dag: "DAG", term: "Business term",
   };
   // Line icons on a 24 point grid, 1.8 stroke, round caps (DESIGN.md section 7).
   const ICONS = {
@@ -19,6 +19,7 @@
     model: "M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9",
     task: "M17 2l3 3-3 3M20 5H9a5 5 0 0 0-5 5M7 22l-3-3 3-3M4 19h11a5 5 0 0 0 5-5",
     exposure: "M4 20V10M10 20V4M16 20v-7M3 20h18",
+    term: "M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z",
   };
   const W = 268, HEAD = 46, ROW = 28, PAD = 6, COL_GAP = 104, ROW_GAP = 22, SWEEPS = 8;
   const MAX_RESULTS = 60, ANIMATE_LIMIT = 400, EXPAND_ALL_LIMIT = 400, AUTO_ISOLATE = 120;
@@ -212,6 +213,7 @@
   const state = {
     selected: null,
     column: null,
+    term: null,
     direction: "both",
     isolate: false,
     allColumns: false,
@@ -253,10 +255,22 @@
     }
     return found;
   }
+  function boundTo(termId) {
+    return outs(termId, "defines").map((e) => e.target).filter((id) => byId.has(id));
+  }
+  function termsOf(id) {
+    return ins(id, "defines").map((e) => byId.get(e.source)).filter(Boolean);
+  }
   function computeFocus() {
     focus = null;
     pathColumns = null;
     references = [];
+    if (state.term) {
+      const bound = boundTo(state.term);
+      pathColumns = new Set(bound.filter((id) => byId.get(id).kind === "column"));
+      focus = new Set(bound.map(viewOf).filter(Boolean));
+      return;
+    }
     if (!state.selected) return;
     const up = state.direction !== "downstream";
     const down = state.direction !== "upstream";
@@ -548,7 +562,7 @@
     const lit = focus || matched;
     for (const [id, item] of drawn.nodes) {
       const g = item.g;
-      g.classList.toggle("selected", id === state.selected && !state.column);
+      g.classList.toggle("selected", id === state.selected && !state.column && !state.term);
       g.classList.toggle("on-path", !!(focus && focus.has(id)));
       g.classList.toggle("match", !focus && !!matched && matched.has(id));
       g.classList.toggle("dim", !!lit && !lit.has(id));
@@ -714,8 +728,19 @@
 
   // Selection
 
+  function selectTerm(id) {
+    state.term = id;
+    state.column = null;
+    state.selected = boundTo(id).map(viewOf).find(Boolean) || null;
+    computeFocus();
+    if (!isolateTouched) setIsolate(!!(focus && focus.size > 0), false);
+    render({ animate: true, focus: true });
+    renderPanel();
+    writeHash();
+  }
   function select(id, columnId, centre) {
     if (!inView.has(id)) return;
+    state.term = null;
     state.selected = id;
     state.column = columnId;
     state.collapsed.delete(id);
@@ -731,6 +756,7 @@
   function clearSelection() {
     state.selected = null;
     state.column = null;
+    state.term = null;
     if (!isolateTouched) setIsolate(false, false);
     computeFocus();
     document.getElementById("panel").hidden = true;
@@ -819,6 +845,10 @@
       [columnEdges.length, "column edges"],
       verified ? [Math.round((100 * verified) / columnEdges.length) + "%", "verified on data"] : [counts.get("task") || 0, "tasks"],
     ];
+    if (counts.get("term")) {
+      const approved = nodes.filter((n) => n.kind === "term" && attr(n, "status") === "approved").length;
+      stats.push([counts.get("term"), "business terms"], [approved, "approved"]);
+    }
     const box = document.getElementById("stats");
     for (const [value, text] of stats) {
       const stat = el("div", "stat");
@@ -877,6 +907,10 @@
   for (const n of nodes) {
     if (inView.has(n.id) || (n.kind === "column" && viewOf(n.id))) {
       haystack.push({ id: n.id, text: label(n.id).toLowerCase(), extra: ((n.relation || "") + " " + (n.description || "")).toLowerCase() });
+    } else if (n.kind === "term") {
+      const synonyms = (attr(n, "synonyms") || []).join(" ");
+      const names = [n.name].concat(attr(n, "synonyms") || []).map((x) => x.toLowerCase());
+      haystack.push({ id: n.id, text: (n.name + " " + synonyms).toLowerCase(), extra: (n.description || "").toLowerCase(), term: true, names });
     }
   }
   let active = 0;
@@ -899,7 +933,7 @@
       let score = 0;
       for (const w of words) {
         const at = item.text.indexOf(w);
-        if (at >= 0) score += at === 0 || item.text[at - 1] === "." || item.text[at - 1] === "_" ? 3 : 2;
+        if (at >= 0) score += at === 0 || ". _".includes(item.text[at - 1]) ? 3 : 2;
         else if (item.extra.includes(w)) score += 1;
         else {
           score = 0;
@@ -907,13 +941,14 @@
         }
       }
       if (!score) continue;
-      if (item.text === q || item.text.endsWith("." + q)) score += 5;
+      if (item.text === q || item.text.endsWith("." + q) || (item.names && item.names.includes(q))) score += 5;
       if (inView.has(item.id)) score += 0.5;
+      if (item.term) score += 1;
       scored.push([score, item]);
     }
     scored.sort((a, b) => b[0] - a[0] || a[1].text.length - b[1].text.length || a[1].text.localeCompare(b[1].text));
     found = scored.slice(0, MAX_RESULTS).map((s) => s[1].id);
-    state.matches = new Set(scored.map((s) => viewOf(s[1].id)).filter(Boolean));
+    state.matches = new Set(scored.flatMap((s) => (s[1].term ? boundTo(s[1].id).map(viewOf) : [viewOf(s[1].id)])).filter(Boolean));
     counter.textContent = scored.length ? scored.length + (scored.length === 1 ? " match" : " matches") : "No matches";
     found.forEach((id, i) => {
       const n = byId.get(id);
@@ -922,7 +957,8 @@
       if (i === 0) li.classList.add("active");
       const button = el("button");
       button.type = "button";
-      button.append(icon(n.kind === "column" ? byId.get(n.parent).kind : n.kind, 18), el("span", "label", label(id)), el("span", "kind", n.kind === "column" ? "column" : KIND_NAMES[n.kind] || n.kind));
+      const kindText = n.kind === "column" ? "column" : n.kind === "term" ? "term" : KIND_NAMES[n.kind] || n.kind;
+      button.append(icon(n.kind === "column" ? byId.get(n.parent).kind : n.kind, 18), el("span", "label", label(id)), el("span", "kind", kindText));
       button.addEventListener("click", () => openResult(id));
       li.append(button);
       results.append(li);
@@ -931,7 +967,8 @@
   }
   function openResult(id) {
     const n = byId.get(id);
-    if (n.kind === "column") select(n.parent, id, true);
+    if (n.kind === "term") selectTerm(id);
+    else if (n.kind === "column") select(n.parent, id, true);
     else select(id, null, true);
   }
   function moveActive(delta) {
@@ -1028,7 +1065,80 @@
     return /^[\w.]+$/.test(text) ? text : JSON.stringify(text);
   }
 
+  function termLink(t) {
+    const button = el("button", "link", t.name);
+    button.type = "button";
+    button.title = "Show the definition of " + t.name;
+    button.addEventListener("click", () => selectTerm(t.id));
+    return button;
+  }
+  function termsSection(items) {
+    if (!items.length) return;
+    body.append(section("Defined by", items.length));
+    body.append(list(items, (li, t) => {
+      li.append(termLink(t));
+      li.append(el("span", "grow"));
+      li.append(el("span", attr(t, "status") === "approved" ? "ok" : "meta", attr(t, "status") || "draft"));
+    }));
+  }
+  function renderTerm(n) {
+    head.append(el("p", "eyebrow", "Business term"));
+    head.append(el("h2", null, n.name));
+    const owner = attr(n, "owner");
+    const tags = el("div", "tags");
+    tags.append(el("span", "tag", attr(n, "status") || "draft"));
+    if (owner) tags.append(el("span", "tag", owner.role ? owner.name + ", " + owner.role : owner.name));
+    head.append(tags);
+    if (n.description) head.append(el("p", "description", n.description));
+    const facts = [
+      ["Also called", (attr(n, "synonyms") || []).join(", ")],
+      ["Grain", attr(n, "grain")],
+      ["Unit", [attr(n, "unit"), attr(n, "currency")].filter(Boolean).join(" ")],
+      ["Approved", attr(n, "approved")],
+      ["Exceptions", attr(n, "exceptions")],
+    ].filter(([, v]) => v);
+    if (facts.length) body.append(list(facts, (li, [k, v]) => li.append(el("span", "meta", k), el("span", "grow", v))));
+    const filters = attr(n, "filters") || [];
+    if (filters.length) {
+      body.append(section("Required filters", filters.length));
+      const box = el("div", "conditions");
+      for (const f of filters) box.append(el("code", null, f));
+      body.append(box);
+    }
+    const bound = boundTo(n.id);
+    body.append(section("Columns", bound.length));
+    if (!bound.length) body.append(el("p", "note", "Not bound to any column yet."));
+    for (const id of bound) {
+      const row = el("div");
+      row.append(byId.get(id).kind === "column" ? columnLink(id) : relationLink(id));
+      body.append(row);
+      const info = formulas[id];
+      if (info && (info.c || info.e)) body.append(formula(info.c || info.e));
+    }
+    const related = outs(n.id, "relates_to").concat(ins(n.id, "relates_to")).map((e) => byId.get(e.source === n.id ? e.target : e.source)).filter(Boolean);
+    if (related.length) {
+      body.append(section("Related terms", related.length));
+      body.append(list(related, (li, t) => li.append(termLink(t))));
+    }
+    if (n.path) {
+      body.append(section("Where"));
+      body.append(list([["File", n.path + (attr(n, "line") ? ":" + attr(n, "line") : "")]], (li, [k, v]) => li.append(el("span", "meta", k), el("span", "grow mono", v))));
+    }
+    body.append(section("Ask kerplunk"));
+    const commands = el("div", "commands");
+    commands.append(command("kerplunk define " + (/^[\w.]+$/.test(n.name) ? n.name : JSON.stringify(n.name))));
+    body.append(commands);
+  }
+
   function renderPanel() {
+    if (state.term) {
+      panel.hidden = false;
+      head.replaceChildren();
+      body.replaceChildren();
+      renderTerm(byId.get(state.term));
+      panel.scrollTop = 0;
+      return;
+    }
     const relation = byId.get(state.selected);
     const n = state.column ? byId.get(state.column) : relation;
     panel.hidden = false;
@@ -1068,6 +1178,8 @@
     }
     body.append(facts);
 
+    const relationTerms = Array.from(new Set(termsOf(n.id).concat(columns.flatMap((c) => termsOf(c.id)))));
+    termsSection(relationTerms);
     if (columns.length) {
       body.append(section("Columns", columns.length));
       const table = el("table", "columns");
@@ -1130,6 +1242,7 @@
   }
 
   function renderColumn(n) {
+    termsSection(termsOf(n.id));
     const info = formulas[n.id];
     if (info && info.e) {
       body.append(section("Formula"));
@@ -1188,7 +1301,8 @@
 
   let writing = false;
   function writeHash() {
-    const next = state.selected ? "#" + encodeURIComponent(state.column || state.selected) : "";
+    const target = state.term || state.column || state.selected;
+    const next = target ? "#" + encodeURIComponent(target) : "";
     if (location.hash === next) return;
     writing = true;
     history.replaceState(null, "", next || location.pathname + location.search);
@@ -1199,7 +1313,8 @@
     const id = decodeURIComponent(location.hash.slice(1));
     const n = byId.get(id);
     if (!n) return false;
-    if (n.kind === "column" && n.parent && inView.has(n.parent)) select(n.parent, id, true);
+    if (n.kind === "term") selectTerm(id);
+    else if (n.kind === "column" && n.parent && inView.has(n.parent)) select(n.parent, id, true);
     else if (inView.has(id)) select(id, null, true);
     else return false;
     return true;

@@ -12,6 +12,8 @@ Every edge is stored as ``source -> target`` with these meanings:
 ``runs``          DAG -> task, and task -> the dbt node or table it executes
 ``precedes``      upstream task -> downstream task (Airflow ``>>``)
 ``tests``         test -> the relation or column it tests
+``defines``       business term -> the column (or relation) that holds it
+``relates_to``    business term -> a related term
 
 `downstream()` and `upstream()` hide those directions so callers think only in data flow.
 """
@@ -26,9 +28,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 NodeKind = Literal[
-    "source", "table", "column", "model", "seed", "snapshot", "dag", "task", "test", "exposure"
+    "source", "table", "column", "model", "seed", "snapshot", "dag", "task", "test", "exposure", "term"
 ]
-EdgeKind = Literal["contains", "feeds", "derived_from", "runs", "precedes", "tests"]
+EdgeKind = Literal["contains", "feeds", "derived_from", "runs", "precedes", "tests", "defines", "relates_to"]
 
 RELATION_KINDS: frozenset[str] = frozenset({"source", "table", "model", "seed", "snapshot"})
 # When several nodes describe one physical relation (a seed and the dbt source that reads it), SQL
@@ -284,7 +286,10 @@ class Graph:
             for n in self.nodes.values()
             if n.kind not in RELATION_KINDS
             and n.kind != "column"
-            and needle in (n.name.lower(), self.label(n).lower())
+            and (
+                needle in (n.name.lower(), self.label(n).lower())
+                or (n.kind == "term" and needle in (s.lower() for s in n.attrs.get("synonyms", [])))
+            )
         ]
         if others:
             return others

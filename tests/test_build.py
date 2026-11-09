@@ -41,6 +41,7 @@ def test_example_builds_every_output(jaffle_built_graph: Path, jaffle_graph: Gra
         "airflow_dags": 1,
         "dagster_assets": 0,
         "dagster_ops": 0,
+        "definitions": 5,
         "sql_files": 0,
     }
     assert jaffle_graph.meta["build_seconds"] < 60

@@ -1,5 +1,5 @@
 Downstream of stg_orders (model)
-9 columns, 3 relations, 8 tests, 1 exposure and 4 tasks downstream.
+9 columns, 3 relations, 8 tests, 1 exposure, 4 tasks and 1 business term downstream.
 
 Columns (9)
    1  customers.first_order  [model, DATE, transformed]  models/customers.sql
@@ -35,3 +35,6 @@ Orchestration (4)
    2  jaffle_shop_daily.build_customer_ltv  [task]  dags/jaffle_shop_daily.py
    2  jaffle_shop_daily.dbt_run_marts  [task, run]  dags/jaffle_shop_daily.py
    3  jaffle_shop_daily  [dag]  dags/jaffle_shop_daily.py
+
+Business terms (1)
+  Completed order  [term, agreed]  definitions.yml

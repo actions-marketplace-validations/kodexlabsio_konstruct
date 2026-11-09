@@ -157,6 +157,35 @@ def render(graph: Graph) -> str:
         lines += [f"| `{graph.label(node)}` | {count} |" for node, count in findings.hubs]
     else:
         lines.append("None.")
+    terms = sorted((n for n in graph.nodes.values() if n.kind == "term"), key=lambda n: n.name.lower())
+    if terms:
+        lines += [
+            "",
+            "## Business terms",
+            "",
+            "From definitions.yml. Problems with them are listed under Warnings.",
+            "",
+            "| Term | Status | Owner | Columns |",
+            "|------|--------|-------|---------|",
+        ]
+        for term in terms:
+            owner = term.attrs.get("owner") or {}
+            who = (
+                f"{owner['name']} ({owner['role']})" if owner.get("role") else owner.get("name", "")
+            ) or "none"
+            columns = sorted(graph.label(graph.nodes[e.target]) for e in graph.out_edges(term.id, "defines"))
+            bound = ", ".join(f"`{c}`" for c in columns) or "none"
+            lines.append(f"| {term.name} | {term.attrs.get('status', 'draft')} | {who} | {bound} |")
+        approved = {
+            e.target
+            for t in terms
+            if t.attrs.get("status") == "approved"
+            for e in graph.out_edges(t.id, "defines")
+        }
+        lines += [
+            "",
+            f"{len(approved)} column{'s' if len(approved) != 1 else ''} hold an approved definition.",
+        ]
     lines += [
         "",
         "## Orphans",

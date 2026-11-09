@@ -320,3 +320,4 @@ table.columns tr.current td { background: var(--accent-soft); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+#panel-body > ul.list:first-child { margin-top: 16px; }

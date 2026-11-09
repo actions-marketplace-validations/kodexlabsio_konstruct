@@ -150,6 +150,11 @@ class Project:
     def describe(self, ref: str) -> query.Description:
         return query.describe(self.graph, ref)
 
+    def define(self, ref: str) -> query.Definitions:
+        """The business terms a name or synonym refers to, or the terms that define a column,
+        from definitions.yml: definition, owner, status and bound columns, approved first."""
+        return query.define(self.graph, ref)
+
     def explain(self, ref: str) -> Explanation:
         """A column's formula, composed down to source columns, with the conditions on the way."""
         from kerplunk.explain import explain

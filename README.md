@@ -89,6 +89,7 @@ kerplunk  /src/jaffle_shop
 | **Postgres** | Tables, views, materialised views, partitioned tables, columns, types, comments and view definitions, read only | v0 |
 | **Iceberg** | Any PyIceberg catalog, REST included: namespaces, tables, columns (nested struct fields as `parent.child`), field ids, identifier fields, partitioning, current snapshot. Metadata only; no data files are read | v0 |
 | **Dagster** | Definition files parsed statically (never imported): `@asset`, `@multi_asset` and `@dbt_assets` (with its dbt selection), keys and prefixes, dependencies from parameters, `ins=` and `deps=`, groups, asset jobs with their selections, and schedules. An asset's data is the dbt model, warehouse table or SQL target of the same name, and SQL an asset runs gets column lineage. Op-based jobs: `@op`, `@graph` and `@job` (nested graphs, `.alias()`, fan-in, `.map()`/`.collect()`, `graph.to_job()`), one task per op invocation named by its Dagster handle, with column lineage from each op's SQL and dbt runs from `dbt.cli([...])`. `@schedule` and sensors (`@sensor`, `@asset_sensor`, `@multi_asset_sensor`, `@run_status_sensor`, `@run_failure_sensor`): an asset sensor orders its job after the asset, a success sensor after the monitored job | v0 |
+| **Business definitions** | `definitions.yml` files: each term's name, synonyms, definition, owner, status (draft, agreed, approved, retired), approval date, grain, bound columns, required filters, unit, currency, related terms and exceptions. Terms become `term` nodes with `defines` edges to their columns, and the build warns when a bound column or filter column no longer exists (see [Business Definitions](#business-definitions)) | v0 |
 | **Snowflake** | Tables, views, columns, types, comments and view definitions from each database's `information_schema`, through `kerplunk[snowflake]`. Tested against fakesnow, an emulator of Snowflake's Python connector | v0 |
 | **BigQuery** | Datasets, tables, views and view queries through the client API, with nested `RECORD` fields and their descriptions, through `kerplunk[bigquery]`. Tested against the BigQuery emulator | v0 |
 | **Databricks** | Unity Catalog `information_schema` for each catalogue, including struct columns, through `kerplunk[databricks]`. Tested against a stub driver only: there is no Databricks emulator | v0 |
@@ -104,6 +105,7 @@ kerplunk  /src/jaffle_shop
 | `kerplunk trace <table.column>` | Everything upstream, each step marked `direct` (passed through or renamed) or `transformed` |
 | `kerplunk path <a> <b>` | Shortest connection between two tables or columns |
 | `kerplunk search <words>` | Find nodes by name or description, optionally `--kind model` |
+| `kerplunk define <term>` | What a business term means: its definition, owner, status, grain, required filters and the columns that hold it. Takes a term, a synonym or a column (to list the terms that define it). Exit status 3 when no term matches |
 | `kerplunk explain <table.column>` | How a column is calculated: its expression as SQL with CTEs and aliases inlined, the same formula composed down to source columns, and step by step each column on the way with the joins, filters and grouping that shape its rows (see [Explaining a Column](#explaining-a-column)) |
 | `kerplunk describe <name>` | Columns, types, descriptions, tests and neighbours of one node; for a task, what it runs and its neighbours in the DAG |
 | `kerplunk list [kind ...]` | Every node of the given kinds (`models`, `tables`, `sources`, `tasks`, ...; default all relations) |
@@ -135,6 +137,7 @@ for column in walk.columns:
 print(project.trace("customer_ltv.lifetime_value"))  # the same text the CLI prints
 project.describe("orders").columns  # typed results
 project.explain("orders.amount").composed  # "SUM(raw_payments.amount / 100)"
+project.define("lifetime value").terms[0].owner  # {"name": "Priya Shah", "role": "Head of Finance"}
 project.path_between("raw_payments", "customer_dashboard").found
 project.search("lifetime value", kinds=["column"]).results
 project.list(["model"]).items
@@ -143,14 +146,14 @@ project.diff(base="origin/main").breaking  # removed columns still read downstre
 project.verify(seed=7).totals()  # {"claimed": 36, "confirmed": 36, "unexplained": 0, ...}
 ```
 
-Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult` made of `Item`s, plus `Explanation`, `Diff` and `Verification`). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `kerplunk.QueryError` with suggestions. `project.graph` is the underlying `kerplunk.Graph` for anything the API does not cover.
+Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `Listing`, `QueryResult` made of `Item`s, plus `Definitions` of `TermDefinition`s, `Explanation`, `Diff` and `Verification`). `str(result)` gives the CLI's text and `result.to_dict()` the JSON the CLI and MCP server return. A name that matches nothing, or several things, raises `kerplunk.QueryError` with suggestions. `project.graph` is the underlying `kerplunk.Graph` for anything the API does not cover.
 
 ## Outputs
 
 | File | Contents |
 |------|----------|
-| `graph.json` | Nodes (`source`, `table`, `column`, `model`, `seed`, `snapshot`, `dag`, `task`, `test`, `exposure`) and edges (below), with descriptions, types, file paths and the inputs each came from |
-| `REPORT.md` | Summary and coverage, the most used columns, orphans, untested models, columns with no lineage, columns documented in dbt but missing from the warehouse, and warnings |
+| `graph.json` | Nodes (`source`, `table`, `column`, `model`, `seed`, `snapshot`, `dag`, `task`, `test`, `exposure`, `term`) and edges (below), with descriptions, types, file paths and the inputs each came from |
+| `REPORT.md` | Summary and coverage, business terms, the most used columns, orphans, untested models, columns with no lineage, columns documented in dbt but missing from the warehouse, and warnings |
 | `graph.html` | A single offline file (open it with `kerplunk open`): tables, models and tasks in dependency order; cards that expand to their columns; column lineage drawn between columns, isolated and fitted to the screen; each column's formula in terms of its sources; the conditions that shape each model; verification results; search, deep links to any table or column, dark and light themes |
 
 | Edge | Direction | Meaning |
@@ -161,6 +164,8 @@ Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `L
 | `runs` | DAG to task, task to dbt node | What a DAG or task executes |
 | `precedes` | task to task | Airflow ordering, Dagster op and asset ordering, and sensors that start one job after another |
 | `tests` | test to relation or column | What a dbt test checks |
+| `defines` | term to column or relation | The column that holds a business term |
+| `relates_to` | term to term | Related business terms |
 
 With **Columns** on, graph.html is a column-level map of the whole project:
 
@@ -195,7 +200,7 @@ The tests validate every OpenLineage event, and its column lineage and schema fa
 | `--mcp` | With `--target`, also register `kerplunk mcp` in `.mcp.json` (Claude Code) and `.cursor/mcp.json` (Cursor), keeping any other servers |
 | `--force` | Replace a skill that was edited by hand; otherwise a reinstall only replaces kerplunk's own earlier versions |
 
-The MCP server exposes `impact`, `trace`, `search`, `describe`, `path` and `query`, returns the same structured results as `--json`, and rereads `graph.json` when a build changes it.
+The MCP server exposes `impact`, `trace`, `search`, `describe`, `define`, `explain`, `path`, `query` and `diff`, returns the same structured results as `--json`, and rereads `graph.json` when a build changes it.
 
 ## Configuration
 
@@ -255,6 +260,52 @@ namespaces = ["sales"]
 [warehouse.properties]            # passed to pyiceberg.catalog.load_catalog
 credential = "${ICEBERG_CREDENTIAL}"
 ```
+
+## Business Definitions
+
+Lineage says where a number comes from; it does not say what the business means by it. `definitions.yml` records that in the repository, next to the models, reviewed in pull requests like code:
+
+```yaml
+version: 1
+terms:
+  - name: Customer lifetime value
+    synonyms: [lifetime value, LTV, CLV]
+    definition: Total value of every payment a customer has made, in Australian dollars.
+    owner: {name: Priya Shah, role: Head of Finance}
+    status: approved              # draft, agreed, approved or retired
+    approved: 2026-10-30
+    grain: one row per customer
+    columns: [customers.customer_lifetime_value, customer_ltv.lifetime_value]
+    filters: ["orders.status <> 'returned'"]   # filters any answer must apply
+    unit: currency
+    currency: AUD
+    related: [Order amount]
+    exceptions: Refunds are not netted off.
+```
+
+The build attaches each term to the columns it names, so the definition travels with the lineage:
+
+```text
+$ kerplunk define lifetime value
+Customer lifetime value  [approved, Priya Shah (Head of Finance), approved 2026-10-30]
+  Total value of every payment a customer has made, across all orders and payment methods, in Australian dollars.
+  also called: lifetime value, LTV, CLV
+  grain: one row per customer
+  unit: currency AUD
+  exceptions: Refunds are not netted off; returned orders still count.
+  related: Order amount, Customer
+  defined in: definitions.yml:5
+  columns:
+    customer_ltv.lifetime_value  DOUBLE
+    customers.customer_lifetime_value  DOUBLE
+```
+
+- **Agents get the agreed answer.** The `define` MCP tool returns the approved definition, owner, required filters and columns for a term or a column, and `query` puts definitions first, so an agent asked "what is our lifetime value?" starts from the wording the business approved.
+- **Changes show what they touch.** `impact` lists the business terms a change reaches, so changing `stg_payments.amount` names *Customer lifetime value* and *Order amount*. `describe` shows the terms that define a column. graph.html searches terms by name and synonym and highlights their columns.
+- **Definitions cannot drift silently.** The build warns, and fails under `--strict`, when a bound column or a column in a required filter no longer exists (naming the likely rename), when an approved term has no owner or approval date, when an agreed or approved term is bound to nothing, when two terms share a name or synonym, and when a related term is not defined. `REPORT.md` lists every term with its status, owner and columns.
+- **Pull requests review them.** `kerplunk diff` reports terms added, removed and changed field by field, and flags an approved term whose definition, grain, columns or filters changed while it stayed approved with the same date.
+
+kerplunk reads every `definitions.yml` (or `.yaml`) in the repository; `[definitions] paths` in `kerplunk.toml` pins the files. The example project has five terms in [`examples/jaffle_shop/definitions.yml`](examples/jaffle_shop/definitions.yml).
 
 ## Explaining a Column
 
@@ -507,6 +558,7 @@ uv run pytest --cov                             # everything, with branch covera
 | End to end | `test_build`, `test_cli`, `test_query`, `test_mcp` | The example built with real dbt, every CLI command, the Python API, and the MCP server in process and over stdio |
 | Golden files | `test_golden`, `tests/golden/` | The exact text of the CLI output and REPORT.md; regenerate with `KERPLUNK_UPDATE_GOLDEN=1` and review the diff |
 | Browser | `test_browser` | graph.html in Chromium: selection, column rows and edges, formulas, deep links, isolate, direction, filters, themes, search, hostile text, a 400-relation graph |
+| Definitions | `test_definitions` | The definitions.yml format and its errors, terms in the build, `define`, describe, search, query and impact, the glossary, warnings for missing columns and filters (including a renamed bound column in the example), and `diff` on definitions |
 | Formulas | `test_explain` | `explain` on dbt and Airflow SQL, and composed formulas evaluated on the data against the final model, row for row; the viewer's formula cache |
 | Export | `test_export` | OpenLineage events validated against the OpenLineage JSON schemas; Mermaid, DOT and CSV |
 | Scale | `test_scale` | A generated 300-model project: full build and `--update` times |
@@ -528,7 +580,7 @@ The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end 
 
 ### Commits
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/), checked by commitizen and by `.kodex/scripts/check_commit_message.py`, which applies the Kodex Labs rules: a fixed list of scopes, sentence-case subjects, lines of at most 100 characters, and no AI attribution lines. The scopes are `airflow`, `dagster`, `dbt`, `iceberg`, `sql`, `warehouse`, `build`, `graph`, `html`, `lineage`, `query`, `report`, `cli`, `mcp`, `skill`, `examples`, `readme`, `tests`, `ci`, `config`, `deps`, `deps-dev` and `release`.
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/), checked by commitizen and by `.kodex/scripts/check_commit_message.py`, which applies the Kodex Labs rules: a fixed list of scopes, sentence-case subjects, lines of at most 100 characters, and no AI attribution lines. The scopes are `airflow`, `dagster`, `dbt`, `definitions`, `iceberg`, `sql`, `warehouse`, `build`, `graph`, `html`, `lineage`, `query`, `report`, `cli`, `mcp`, `skill`, `examples`, `readme`, `tests`, `ci`, `config`, `deps`, `deps-dev` and `release`.
 
 ### Repository Layout
 
@@ -536,7 +588,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/), che
 |------|----------|
 | `src/kerplunk/graph.py` | Graph model, name resolution, impact, trace and path |
 | `src/kerplunk/sql.py` | sqlglot column lineage, canonical expressions and conditions |
-| `src/kerplunk/dbt.py`, `jinja.py`, `airflow.py`, `dagster.py`, `warehouse.py` | Inputs, and the sandboxed dbt renderer |
+| `src/kerplunk/dbt.py`, `jinja.py`, `airflow.py`, `dagster.py`, `warehouse.py`, `definitions.py` | Inputs, the sandboxed dbt renderer and business definitions |
 | `src/kerplunk/config.py`, `build.py` | Configuration, discovery, the build and its cache |
 | `src/kerplunk/query.py`, `explain.py`, `diff.py`, `verify.py` | Questions over the graph: impact and the rest, formulas, change review, lineage against data |
 | `src/kerplunk/report.py`, `html.py`, `viewer/`, `export.py` | REPORT.md, graph.html (its HTML, CSS, script and fonts) and the export formats |

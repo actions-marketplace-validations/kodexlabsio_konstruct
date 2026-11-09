@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from kerplunk import airflow, dbt
+from kerplunk.definitions import FILE_NAMES as DEFINITION_FILES
 from kerplunk.graph import RELATION_KINDS, Graph, Node
 from kerplunk.jinja import Renderer, render_model
 from kerplunk.query import Walk, impact
@@ -128,6 +129,86 @@ class DagChange:
     dependencies_removed: list[str] = field(default_factory=list)
     runs_changed: list[str] = field(default_factory=list)
     sql_changed: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DefinitionsChange:
+    """What changed in a definitions.yml: terms added or removed, and per term which fields."""
+
+    path: str
+    added: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    changed: list[str] = field(default_factory=list)
+    """One line per changed field, such as ``Order amount: status agreed -> approved``."""
+    approved_changed: list[str] = field(default_factory=list)
+    """Approved terms whose meaning changed (definition, columns or filters) but stayed approved."""
+
+    @property
+    def changed_any(self) -> bool:
+        return bool(self.added or self.removed or self.changed)
+
+    def lines(self) -> list[str]:
+        return [
+            *(f"term added: {t}" for t in self.added),
+            *(f"term removed: {t}" for t in self.removed),
+            *self.changed,
+            *(
+                f"{t}: approved, but its meaning changed; check it was re-approved"
+                for t in self.approved_changed
+            ),
+        ]
+
+
+_TERM_FIELDS = (
+    "definition",
+    "status",
+    "owner",
+    "approved",
+    "grain",
+    "columns",
+    "filters",
+    "unit",
+    "currency",
+    "synonyms",
+    "related",
+    "exceptions",
+)
+_MEANING = ("definition", "columns", "filters", "grain")
+
+
+def compare_definitions(path: str, before: str | None, after: str | None) -> DefinitionsChange:
+    from kerplunk.definitions import parse
+
+    old = {t.name: t for t in parse(before or "", path).terms}
+    new = {t.name: t for t in parse(after or "", path).terms}
+    result = DefinitionsChange(path=path)
+    result.added = sorted(set(new) - set(old))
+    result.removed = sorted(set(old) - set(new))
+
+    def shown(value: Any) -> str:
+        if isinstance(value, list):
+            return ", ".join(value) or "none"
+        return str(value) if value not in (None, "") else "none"
+
+    for name in sorted(set(old) & set(new)):
+        a, b = old[name], new[name]
+        for key in _TERM_FIELDS:
+            va, vb = getattr(a, key), getattr(b, key)
+            if va == vb:
+                continue
+            if key == "definition":
+                result.changed.append(f"{name}: definition changed: {shown(va)!r} -> {shown(vb)!r}")
+            elif isinstance(va, list):
+                plus = [v for v in vb if v not in va]
+                minus = [v for v in va if v not in vb]
+                parts = [*(f"+{v}" for v in plus), *(f"-{v}" for v in minus)]
+                result.changed.append(f"{name}: {key} {' '.join(parts)}")
+            else:
+                result.changed.append(f"{name}: {key} {shown(va)} -> {shown(vb)}")
+        meaning = any(getattr(a, k) != getattr(b, k) for k in _MEANING)
+        if meaning and a.status == "approved" and b.status == "approved" and a.approved == b.approved:
+            result.approved_changed.append(name)
+    return result
 
 
 @dataclass
@@ -296,6 +377,7 @@ class Diff:
     dags: list[DagChange] = field(default_factory=list)
     other: list[str] = field(default_factory=list)
     yaml: list[YamlChange] = field(default_factory=list)
+    definitions: list[DefinitionsChange] = field(default_factory=list)
 
     @property
     def source_files(self) -> list[str]:
@@ -327,11 +409,15 @@ class Diff:
             "tests_removed": sum(len(y.tests_removed) for y in self.yaml),
             "tests_added": sum(len(y.tests_added) for y in self.yaml),
             "exposures": len(exposures),
+            "terms": sum(
+                len(d.added) + len(d.removed) + len({line.split(":")[0] for line in d.changed})
+                for d in self.definitions
+            ),
         }
 
     def summary(self) -> str:
         c = self.counts()
-        if not c["relations"] and not c["dags"] and not self.yaml:
+        if not c["relations"] and not c["dags"] and not self.yaml and not self.definitions:
             return "No change to models, SQL or DAGs."
         parts = []
         if c["breaking"]:
@@ -351,6 +437,8 @@ class Diff:
             parts.append(f"{c['tests_added']} dbt test{'s' if c['tests_added'] != 1 else ''} added")
         if c["exposures"]:
             parts.append(f"{c['exposures']} exposure{'s' if c['exposures'] != 1 else ''} affected")
+        if c["terms"]:
+            parts.append(f"{c['terms']} business term{'s' if c['terms'] != 1 else ''} changed")
         text = ", ".join(parts)
         return text[:1].upper() + text[1:] + "."
 
@@ -382,6 +470,7 @@ class Diff:
             "dags": [d.__dict__ for d in self.dags],
             "other": self.other,
             "yaml": [y.__dict__ for y in self.yaml if y.changed],
+            "definitions": [d.__dict__ for d in self.definitions],
             "dbt": self.selection.to_dict(),
         }
 
@@ -440,6 +529,9 @@ class Diff:
         for yaml_change in self.yaml:
             lines += ["", f"{yaml_change.path}  (dbt YAML)"]
             lines += [f"  {line}" for line in yaml_change.lines()]
+        for definitions_change in self.definitions:
+            lines += ["", f"{definitions_change.path}  (business definitions)"]
+            lines += [f"  {line}" for line in definitions_change.lines()]
         if self.selection.modified_plus:
             lines += ["", f"dbt: {self.selection.summary()}", f"  {self.selection.command()}"]
         if self.other:
@@ -495,6 +587,13 @@ class Diff:
                 lines += [f"**DAG `{dag.dag}`** ({dag.path})", "", *(f"- {i}" for i in items), ""]
         for yaml_change in self.yaml:
             lines += [f"**{yaml_change.path}**", "", *(f"- {line}" for line in yaml_change.lines()), ""]
+        for definitions_change in self.definitions:
+            lines += [
+                f"**Business definitions** ({definitions_change.path})",
+                "",
+                *(f"- {line}" for line in definitions_change.lines()),
+                "",
+            ]
         if self.selection.modified_plus:
             lines += [f"**dbt:** {self.selection.summary()}", "", f"```\n{self.selection.command()}\n```", ""]
         lines.append(
@@ -592,6 +691,10 @@ def diff(graph: Graph, root: Path, *, base: str | None = None, head: str | None 
                 result.relations.append(_compare_model(context, model, in_project, before, after))
         elif in_project.endswith(".sql") and (nodes or before or after):
             result.relations.extend(_compare_sql_file(context, in_project, before, after))
+        elif Path(in_project).name in DEFINITION_FILES and (before or after):
+            definitions_change = compare_definitions(in_project, before, after)
+            if definitions_change.changed_any or definitions_change.approved_changed:
+                result.definitions.append(definitions_change)
         elif in_project.endswith((".yml", ".yaml")) and (before or after):
             yaml_change = compare_yaml(in_project, before, after)
             if yaml_change.changed:

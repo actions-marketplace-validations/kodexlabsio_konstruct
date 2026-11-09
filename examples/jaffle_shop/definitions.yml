@@ -1,0 +1,52 @@
+# Business definitions for the jaffle_shop example: what each term means, who owns it, and the
+# columns that hold it. kerplunk attaches them to the graph and warns when they drift.
+version: 1
+terms:
+  - name: Customer lifetime value
+    synonyms: [lifetime value, LTV, CLV]
+    definition: >
+      Total value of every payment a customer has made, across all orders and payment methods,
+      in Australian dollars.
+    owner: {name: Priya Shah, role: Head of Finance}
+    status: approved
+    approved: 2026-10-30
+    grain: one row per customer
+    columns: [customers.customer_lifetime_value, customer_ltv.lifetime_value]
+    unit: currency
+    currency: AUD
+    related: [Order amount, Customer]
+    exceptions: Refunds are not netted off; returned orders still count.
+
+  - name: Order amount
+    synonyms: [order value, order total]
+    definition: Total of all payments recorded against an order, in Australian dollars.
+    owner: {name: Priya Shah, role: Head of Finance}
+    status: approved
+    approved: 2026-10-30
+    grain: one row per order
+    columns: [orders.amount]
+    unit: currency
+    currency: AUD
+    related: [Completed order]
+
+  - name: Completed order
+    definition: An order the customer has received and not returned.
+    owner: {name: Tom Okafor, role: Operations Manager}
+    status: agreed
+    grain: one row per order
+    columns: [orders.status]
+    filters: ["orders.status = 'completed'"]
+
+  - name: Customer
+    synonyms: [shopper]
+    definition: A person with an account, whether or not they have ordered.
+    owner: {name: Tom Okafor, role: Operations Manager}
+    status: approved
+    approved: 2026-11-02
+    grain: one row per customer
+    columns: [customers.customer_id]
+
+  - name: Payment method
+    definition: How a payment was made, as recorded by the payment provider.
+    status: draft
+    columns: [stg_payments.payment_method]

@@ -24,6 +24,7 @@ SCOPES = {
     "airflow",
     "dagster",
     "dbt",
+    "definitions",
     "iceberg",
     "sql",
     "warehouse",

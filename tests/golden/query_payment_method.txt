@@ -1,23 +1,27 @@
+Definitions
+  Payment method  [draft, no owner]
+    How a payment was made, as recorded by the payment provider.
+    defined in: definitions.yml:49
+    columns:
+      stg_payments.payment_method  VARCHAR
+
 Best matches
+  Payment method  [term, draft]  definitions.yml
+      How a payment was made, as recorded by the payment provider.
   raw_payments.payment_method  [seed, VARCHAR]  seeds/raw_payments.csv
   stg_payments.payment_method  [model, VARCHAR]  models/staging/stg_payments.sql
-  accepted_values_stg_payments_payment_method__credit_card__coupon__bank_transfer__gift_card  [test]  models/staging/schema.yml
-  stg_payments.payment_id  [model, INTEGER]  models/staging/stg_payments.sql
 
 Connections
+  Payment method -defines-> stg_payments.payment_method
   stg_payments.payment_method -derived_from-> raw_payments.payment_method (direct)
   accepted_values_stg_payments_payment_method__credit_card__coupon__bank_transfer__gift_card -tests-> stg_payments.payment_method
   orders.credit_card_amount -derived_from-> stg_payments.payment_method (transformed)
   orders.coupon_amount -derived_from-> stg_payments.payment_method (transformed)
   orders.bank_transfer_amount -derived_from-> stg_payments.payment_method (transformed)
   orders.gift_card_amount -derived_from-> stg_payments.payment_method (transformed)
-  jaffle_shop_daily.dbt_test -runs-> accepted_values_stg_payments_payment_method__credit_card__coupon__bank_transfer__gift_card
-  stg_payments.payment_id -derived_from-> raw_payments.id (direct)
-  unique_stg_payments_payment_id -tests-> stg_payments.payment_id
-  not_null_stg_payments_payment_id -tests-> stg_payments.payment_id
 
 Downstream of raw_payments.payment_method (seed)
-5 columns, 2 relations, 5 tests, 1 exposure and 2 tasks downstream.
+5 columns, 2 relations, 5 tests, 1 exposure, 2 tasks and 1 business term downstream.
 
 Columns (5)
    1  stg_payments.payment_method  [model, VARCHAR, direct]  models/staging/stg_payments.sql
@@ -43,3 +47,6 @@ Exposures (1)
 Orchestration (2)
    2  jaffle_shop_daily.dbt_run_staging  [task, run]  dags/jaffle_shop_daily.py
    3  jaffle_shop_daily.dbt_run_marts  [task, run]  dags/jaffle_shop_daily.py
+
+Business terms (1)
+  Payment method  [term, draft]  definitions.yml

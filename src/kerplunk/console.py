@@ -39,7 +39,8 @@ class Console:
         print(text, file=self.out)
 
     def row(self, key: str, value: str, width: int = 11, *, style: tuple[str, ...] = ()) -> None:
-        self.print(f"  {self.style(key.ljust(width), 'dim')}{self.style(value, *style) if style else value}")
+        label = key.ljust(width) if len(key) < width else key + " "
+        self.print(f"  {self.style(label, 'dim')}{self.style(value, *style) if style else value}")
 
     def info(self, text: str) -> None:
         """Progress and hints on stderr, so stdout stays clean for --json and pipes."""

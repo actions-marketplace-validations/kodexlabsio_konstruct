@@ -1,5 +1,5 @@
 Upstream of customer_ltv.lifetime_value (table)
-3 columns, 3 relations and 5 tasks upstream.
+3 columns, 3 relations, 5 tasks and 1 business term upstream.
 
 Columns (3)
    1  customers.customer_lifetime_value  [model, DOUBLE, direct, via jaffle_shop_daily.build_customer_ltv]  models/customers.sql
@@ -20,3 +20,6 @@ Orchestration (5)
    2  jaffle_shop_daily.dbt_run_marts  [task, run]  dags/jaffle_shop_daily.py
    3  jaffle_shop_daily.dbt_run_staging  [task, run]  dags/jaffle_shop_daily.py
    4  jaffle_shop_daily.dbt_seed  [task, seed]  dags/jaffle_shop_daily.py
+
+Business terms (1)
+  Customer lifetime value  [term, approved]  definitions.yml

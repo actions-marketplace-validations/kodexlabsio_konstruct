@@ -22,7 +22,7 @@ kerplunk answers questions about this repository's data stack: dbt models, sourc
 exposures; warehouse and Iceberg tables; Airflow DAGs and tasks; and column-level lineage.
 Refer to tables as `name` or `schema.name` and to columns as `table.column`.
 Use `impact` before changing a model, table or column, `trace` to find where a value comes from,
-`explain` for how a column is calculated, `describe` for one node's columns and tests, `search` when unsure of a name, and `path` to see how
+`define` for what a business term means and which columns hold it, `explain` for how a column is calculated, `describe` for one node's columns and tests, `search` when unsure of a name, and `path` to see how
 two nodes connect. If a tool says there is no graph, ask the user to run `kerplunk build`."""
 
 
@@ -63,6 +63,15 @@ def build_server(root: Path) -> MCPServer:
         """One node in detail: description, path, columns with types and descriptions, tests,
         immediate upstream and downstream neighbours, and for tasks what they run."""
         return run(project.describe, ref)
+
+    @server.tool()
+    def define(ref: str) -> dict[str, Any]:
+        """The business definition of a term, by name or synonym (e.g. `lifetime value`), or the
+        terms that define a column (e.g. `customers.customer_lifetime_value`): the agreed wording,
+        owner, status (draft, agreed, approved, retired), grain, required filters, unit and the
+        columns that hold it. Approved terms come first. Use before answering a business question,
+        so the answer follows the approved definition and its required filters."""
+        return run(project.define, ref)
 
     @server.tool()
     def explain(ref: str) -> dict[str, Any]:

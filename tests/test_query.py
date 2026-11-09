@@ -61,8 +61,11 @@ def test_impact_of_a_staging_column(project: Project) -> None:
     assert "not_null_orders_amount" in labels(walk.tests)
     ltv = next(c for c in walk.columns if c.label == "customer_ltv.lifetime_value")
     assert (ltv.depth, ltv.transform, ltv.through) == (2, "direct", "jaffle_shop_daily.build_customer_ltv")
-    assert walk.total == 7 + 2 + 1 + 5 + 1 + 2
-    assert walk.summary() == "7 columns, 3 relations, 5 tests, 1 exposure and 2 tasks downstream."
+    assert walk.total == 7 + 2 + 1 + 5 + 1 + 2 + 2
+    assert (
+        walk.summary()
+        == "7 columns, 3 relations, 5 tests, 1 exposure, 2 tasks and 2 business terms downstream."
+    )
 
 
 def test_impact_of_a_join_key_and_of_a_relation(project: Project) -> None:
@@ -104,7 +107,11 @@ def test_path(project: Project) -> None:
 
 def test_search_and_list(project: Project) -> None:
     result = project.search("lifetime value")
-    assert result.results[0].label == "customers.customer_lifetime_value"
+    # The business term, then the columns that hold it.
+    assert [r.label for r in result.results[:2]] == [
+        "Customer lifetime value",
+        "customers.customer_lifetime_value",
+    ]
     assert result.results[0].score is not None
     assert project.search("payments", kinds=["seed"]).results[0].label == "raw_payments"
     assert str(project.search("zzz")) == "Nothing matches 'zzz'."
@@ -138,13 +145,17 @@ def test_describe(project: Project) -> None:
 
 def test_query(project: Project) -> None:
     result = project.query("what breaks if I change the payment method in stg_payments?")
-    assert result.matches[0].label == "stg_payments.payment_method"
+    assert [m.label for m in result.matches[:2]] == ["Payment method", "stg_payments.payment_method"]
+    assert [d.name for d in result.definitions] == ["Payment method"]
+    # Impact follows the column, not the term.
     assert result.impact is not None and result.lineage is None
+    assert result.impact.target.label == "stg_payments.payment_method"
     lineage = project.query("where does customer lifetime value come from")
     assert lineage.lineage is not None
     assert lineage.lineage.target.label == "customers.customer_lifetime_value"
     assert str(project.query("zzz qqq")).startswith("Nothing in the graph matches")
-    assert str(result).startswith("Best matches")
+    assert str(result).startswith("Definitions\n  Payment method  [draft, no owner]")
+    assert "\nBest matches\n" in str(result)
 
 
 def test_results_serialise_to_json(project: Project) -> None:

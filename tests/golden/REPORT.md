@@ -13,6 +13,7 @@ Built <time> from `<root>` by kerplunk <version> in <seconds>s. SQL dialect: duc
 | dagster assets | 0 |
 | dagster ops | 0 |
 | sql files | 0 |
+| definitions | 5 |
 
 | Node kind | Count |
 |-----------|-------|
@@ -23,14 +24,17 @@ Built <time> from `<root>` by kerplunk <version> in <seconds>s. SQL dialect: duc
 | seed | 3 |
 | table | 1 |
 | task | 6 |
+| term | 5 |
 | test | 20 |
 
 | Edge kind | Count |
 |-----------|-------|
 | contains | 44 |
+| defines | 6 |
 | derived_from | 36 |
 | feeds | 21 |
 | precedes | 5 |
+| relates_to | 3 |
 | runs | 34 |
 | tests | 21 |
 
@@ -52,6 +56,20 @@ Columns with the most direct dependants (derived columns and joins).
 | `stg_orders.customer_id` | 2 |
 | `stg_payments.order_id` | 2 |
 | `customers.customer_id` | 1 |
+
+## Business terms
+
+From definitions.yml. Problems with them are listed under Warnings.
+
+| Term | Status | Owner | Columns |
+|------|--------|-------|---------|
+| Completed order | agreed | Tom Okafor (Operations Manager) | `orders.status` |
+| Customer | approved | Tom Okafor (Operations Manager) | `customers.customer_id` |
+| Customer lifetime value | approved | Priya Shah (Head of Finance) | `customer_ltv.lifetime_value`, `customers.customer_lifetime_value` |
+| Order amount | approved | Priya Shah (Head of Finance) | `orders.amount` |
+| Payment method | draft | none | `stg_payments.payment_method` |
+
+4 columns hold an approved definition.
 
 ## Orphans
 

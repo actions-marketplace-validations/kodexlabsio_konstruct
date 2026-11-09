@@ -1,5 +1,5 @@
 Downstream of stg_payments.amount (model)
-7 columns, 3 relations, 5 tests, 1 exposure and 2 tasks downstream.
+7 columns, 3 relations, 5 tests, 1 exposure, 2 tasks and 2 business terms downstream.
 
 Columns (7)
    1  customers.customer_lifetime_value  [model, DOUBLE, transformed]  models/customers.sql
@@ -30,3 +30,7 @@ Exposures (1)
 Orchestration (2)
    2  jaffle_shop_daily.build_customer_ltv  [task]  dags/jaffle_shop_daily.py
    2  jaffle_shop_daily.dbt_run_marts  [task, run]  dags/jaffle_shop_daily.py
+
+Business terms (2)
+  Customer lifetime value  [term, approved]  definitions.yml
+  Order amount  [term, approved]  definitions.yml

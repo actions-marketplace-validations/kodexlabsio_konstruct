@@ -14,6 +14,7 @@ from kerplunk.config import (
     Config,
     WarehouseConfig,
     discover_dag_files,
+    discover_definitions_files,
     discover_sql_files,
     discover_warehouses,
     load_config,
@@ -30,6 +31,7 @@ class Status:
     warehouses: list[dict[str, str]] = field(default_factory=list)
     dag_files: list[str] = field(default_factory=list)
     sql_files: list[str] = field(default_factory=list)
+    definitions_files: list[str] = field(default_factory=list)
     graph: dict[str, Any] = field(default_factory=dict)
     skills: list[str] = field(default_factory=list)
 
@@ -42,6 +44,7 @@ class Status:
             "warehouses": self.warehouses,
             "dag_files": self.dag_files,
             "sql_files": self.sql_files,
+            "definitions_files": self.definitions_files,
             "graph": self.graph,
             "skills": self.skills,
         }
@@ -61,6 +64,7 @@ class Status:
             rows.append(("warehouse", f"{warehouse['name']}{source}"))
         rows.append(("airflow", _files(self.dag_files, "DAG file")))
         rows.append(("sql", _files(self.sql_files, "SQL file")))
+        rows.append(("definitions", _files(self.definitions_files, "definitions file")))
         graph = self.graph
         if graph.get("exists"):
             state = (
@@ -77,7 +81,9 @@ class Status:
         return rows
 
     def __str__(self) -> str:
-        return "\n".join(f"{key:<12}{value}" for key, value in self.lines())
+        return "\n".join(
+            f"{key:<12} {value}" if len(key) >= 12 else f"{key:<12}{value}" for key, value in self.lines()
+        )
 
 
 def _files(files: list[str], noun: str) -> str:
@@ -151,6 +157,7 @@ def inspect(path: Path, out_dir: Path | None = None, home: Path | None = None) -
     dags = discover_dag_files(config)
     status.dag_files = [_relative(p, root) for p in dags]
     status.sql_files = [_relative(p, root) for p in discover_sql_files(config, projects, _sql_used_by(dags))]
+    status.definitions_files = [_relative(p, root) for p in discover_definitions_files(config)]
 
     out = out_dir or find_out_dir(root)
     graph_path = out / "graph.json"
@@ -203,6 +210,12 @@ def render_config(config: Config, status: Status, warehouses: list[WarehouseConf
     lines += ["", "[sql]"]
     lines.append(
         f"paths = {_toml_list(status.sql_files)}" if status.sql_files else '# paths = ["sql/**/*.sql"]'
+    )
+    lines += ["", "[definitions]"]
+    lines.append(
+        f"paths = {_toml_list(status.definitions_files)}"
+        if status.definitions_files
+        else '# paths = ["definitions.yml"]        # business terms; default: every definitions.yml'
     )
     lines.append("")
     if warehouses:

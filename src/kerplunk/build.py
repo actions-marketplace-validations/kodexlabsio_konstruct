@@ -13,12 +13,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from kerplunk import __version__, airflow, dagster, dbt
+from kerplunk import __version__, airflow, dagster, dbt, definitions
 from kerplunk.config import (
     Config,
     ConfigError,
     discover_dag_files,
     discover_dagster_files,
+    discover_definitions_files,
     discover_sql_files,
     discover_warehouses,
 )
@@ -287,6 +288,7 @@ class Builder:
         used_sql = self.load_airflow(schema_key)
         self.load_dagster(schema_key)
         self.load_sql_files(projects, used_sql, schema_key)
+        self.load_definitions()
         self.graph.meta["dialect"] = self.dialect
         self.graph.meta["default_catalog"] = self.default_catalog
         self.graph.meta["default_schema"] = self.default_schema
@@ -771,6 +773,100 @@ class Builder:
         self.inputs["dagster_assets"] = sum(len(f.assets) for f in files)
         self.inputs["dagster_ops"] = sum(len(j.ops) for f in files for j in f.jobs)
 
+    def load_definitions(self) -> None:
+        """Business terms from definitions.yml, attached to the columns they name."""
+        terms: list[definitions.Term] = []
+        for path in discover_definitions_files(self.config):
+            self.watch(path)
+            rel = self.rel_path(path)
+            try:
+                parsed = definitions.parse_file(path, rel)
+            except OSError as error:
+                self.graph.warn(f"definitions: cannot read {rel}: {error}")
+                continue
+            for problem in parsed.errors:
+                self.graph.warn(f"definitions: {problem}")
+            terms.extend(parsed.terms)
+            count = len(parsed.terms)
+            self.sources.append(
+                {"input": "definitions", "path": rel, "detail": f"{count} term{'s' if count != 1 else ''}"}
+            )
+        for problem in definitions.validate(terms):
+            self.graph.warn(f"definitions: {problem}")
+        nodes: dict[str, Node] = {}
+        for term in terms:
+            where = f"definitions: {term.path}:{term.line}: term {term.name!r}"
+            node_id = f"term.{term.slug}"
+            if node_id in self.graph.nodes:
+                self.graph.warn(f"{where}: has the same id as another term ({node_id}); skipped")
+                continue
+            node = self.graph.add_node(
+                Node(
+                    id=node_id,
+                    kind="term",
+                    name=term.name,
+                    description=term.definition or None,
+                    path=term.path,
+                    origins=["definitions"],
+                    attrs={
+                        k: v
+                        for k, v in {
+                            "synonyms": term.synonyms,
+                            "status": term.status,
+                            "owner": {"name": term.owner.name, "role": term.owner.role}
+                            if term.owner
+                            else None,
+                            "approved": term.approved,
+                            "grain": term.grain,
+                            "columns": term.columns,
+                            "filters": term.filters,
+                            "unit": term.unit,
+                            "currency": term.currency,
+                            "related": term.related,
+                            "exceptions": term.exceptions,
+                            "line": term.line,
+                        }.items()
+                        if v not in (None, [], "")
+                    },
+                )
+            )
+            for name in term.names:
+                nodes[name.lower()] = node
+            bound: list[Node] = []
+            for ref in term.columns:
+                target, reason = _bind(self.graph, ref)
+                if target is None:
+                    self.graph.warn(f"{where}: bound column {reason}")
+                    continue
+                bound.append(target)
+                self.graph.add_edge(node.id, target.id, "defines")
+            for condition in term.filters:
+                columns = _filter_columns(condition, self.dialect)
+                if columns is None:
+                    self.graph.warn(f"{where}: required filter {condition!r} is not valid SQL")
+                    continue
+                for table, column in columns:
+                    candidates = (
+                        [f"{table}.{column}"]
+                        if table
+                        else [
+                            f"{self.graph.label(b if b.kind != 'column' else self.graph.parent_of(b) or b)}.{column}"
+                            for b in bound
+                        ]
+                    )
+                    if not any(_bind(self.graph, c)[0] is not None for c in candidates):
+                        shown = f"{table}.{column}" if table else column
+                        self.graph.warn(
+                            f"{where}: required filter {condition!r} reads {shown!r}, which does not exist"
+                        )
+        for term in terms:
+            source = nodes.get(term.name.lower())
+            for related in term.related:
+                target = nodes.get(related.lower())
+                if source is not None and target is not None and target is not source:
+                    self.graph.add_edge(source.id, target.id, "relates_to")
+        self.inputs["definitions"] = len(terms)
+
     def dagster_ops(
         self,
         job: dagster.JobInfo,
@@ -981,6 +1077,79 @@ class Builder:
                 target.path = target.path or rel
                 self.apply(statement, target=target, origin="sql", label=f"sql {rel}", via=rel)
         self.inputs["sql_files"] = len(files)
+
+
+def _bind(graph: Graph, ref: str) -> tuple[Node | None, str | None]:
+    """The column (or relation) a definition names, or None with the reason."""
+    found = [n for n in graph.resolve(ref) if n.kind == "column" or n.kind in RELATION_KINDS]
+    if len(found) == 1:
+        return found[0], None
+    if found:
+        return None, f"{ref!r} is ambiguous ({', '.join(n.id for n in found[:5])}); qualify it"
+    hint_list = _similar_columns(graph, ref)
+    hint = f"; did you mean {', '.join(hint_list)}?" if hint_list else ""
+    return None, f"{ref!r} does not exist{hint}"
+
+
+def _similar_columns(graph: Graph, ref: str, limit: int = 3) -> list[str]:
+    """Columns a missing reference probably meant: in the same relation first, those sharing a
+    word with the missing name or spelt like it (a rename), then the closest names anywhere."""
+    import difflib
+    import re
+
+    from kerplunk.query import search_nodes
+
+    found: list[str] = []
+    relation_part, _, column_part = ref.rpartition(".")
+    if relation_part:
+        relations = [n for n in graph.resolve(relation_part) if n.kind in RELATION_KINDS]
+        if len(relations) == 1:
+
+            def split(name: str) -> set[str]:
+                return set(re.split(r"[^a-z0-9]+", name.lower())) - {""}
+
+            names = [c.name for c in graph.columns_of(relations[0].id)]
+            words = split(column_part)
+            # Rare words say more: "lifetime" in two column names beats "customer" in forty.
+            frequency: dict[str, int] = {}
+            for node in graph.nodes.values():
+                if node.kind == "column":
+                    for word in split(node.name):
+                        frequency[word] = frequency.get(word, 0) + 1
+            scored = sorted(
+                (
+                    (
+                        sum(1 / frequency.get(w, 1) for w in words & split(n)),
+                        difflib.SequenceMatcher(None, column_part, n).ratio(),
+                        n,
+                    )
+                    for n in names
+                    if words & split(n)
+                ),
+                reverse=True,
+            )
+            sharing = [n for _, _, n in scored]
+            close = difflib.get_close_matches(column_part, names, n=limit, cutoff=0.5)
+            for name in [*sharing, *close]:
+                label = f"{graph.label(relations[0])}.{name}"
+                if label not in found:
+                    found.append(label)
+    for node in search_nodes(graph, ref.replace(".", " "), limit=limit, kinds=["column"]):
+        if graph.label(node) not in found:
+            found.append(graph.label(node))
+    return found[:limit]
+
+
+def _filter_columns(sql: str, dialect: str | None) -> list[tuple[str | None, str]] | None:
+    """(table, column) pairs a required filter reads, or None if it is not valid SQL."""
+    import sqlglot
+    from sqlglot import exp
+
+    try:
+        tree = sqlglot.parse_one(sql, read=dialect)
+    except (sqlglot.errors.ParseError, sqlglot.errors.TokenError, ValueError):
+        return None
+    return [(c.table or None, c.name) for c in tree.find_all(exp.Column)]
 
 
 def _dagster_detail(file: dagster.DagsterFile) -> str:

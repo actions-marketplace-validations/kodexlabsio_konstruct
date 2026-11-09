@@ -15,6 +15,7 @@ from kerplunk.explain import Explanation
 from kerplunk.graph import Edge, Graph, Node
 from kerplunk.project import Project
 from kerplunk.query import (
+    Definitions,
     Description,
     EdgeItem,
     Item,
@@ -23,10 +24,12 @@ from kerplunk.query import (
     QueryError,
     QueryResult,
     SearchResult,
+    TermDefinition,
     Walk,
 )
 
 __all__ = [
+    "Definitions",
     "Description",
     "Edge",
     "EdgeItem",
@@ -40,6 +43,7 @@ __all__ = [
     "QueryError",
     "QueryResult",
     "SearchResult",
+    "TermDefinition",
     "Walk",
     "__version__",
 ]

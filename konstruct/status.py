@@ -1,4 +1,4 @@
-"""`konstruct status` and `konstruct init`: what konstruct finds in a project, without building."""
+"""`konstruct status` and `konstruct init`: what Konstruct finds in a project, without building."""
 
 from __future__ import annotations
 
@@ -37,69 +37,69 @@ class Status:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "root": str(self.root),
-            "config_file": self.config_file,
-            "dbt_projects": self.dbt_projects,
-            "dbt_on_path": self.dbt_on_path,
-            "warehouses": self.warehouses,
-            "dag_files": self.dag_files,
-            "sql_files": self.sql_files,
-            "definitions_files": self.definitions_files,
-            "graph": self.graph,
-            "skills": self.skills,
+            'root': str(self.root),
+            'config_file': self.config_file,
+            'dbt_projects': self.dbt_projects,
+            'dbt_on_path': self.dbt_on_path,
+            'warehouses': self.warehouses,
+            'dag_files': self.dag_files,
+            'sql_files': self.sql_files,
+            'definitions_files': self.definitions_files,
+            'graph': self.graph,
+            'skills': self.skills,
         }
 
     def lines(self) -> list[tuple[str, str]]:
-        rows: list[tuple[str, str]] = [("config", self.config_file or "none; inputs are discovered")]
+        rows: list[tuple[str, str]] = [('config', self.config_file or 'none; inputs are discovered')]
         if self.dbt_projects:
             for project in self.dbt_projects:
-                rows.append(("dbt", f"{project['name']} ({project['path']}): {project['artefacts']}"))
+                rows.append(('dbt', f'{project["name"]} ({project["path"]}): {project["artefacts"]}'))
         else:
-            rows.append(("dbt", "no dbt projects found"))
+            rows.append(('dbt', 'no dbt projects found'))
         rows.append(
-            ("dbt on PATH", "yes" if self.dbt_on_path else "no (konstruct uses existing target/ artefacts)")
+            ('dbt on PATH', 'yes' if self.dbt_on_path else 'no (Konstruct uses existing target/ artefacts)')
         )
-        for warehouse in self.warehouses or [{"name": "none found", "source": ""}]:
-            source = f" ({warehouse['source']})" if warehouse.get("source") else ""
-            rows.append(("warehouse", f"{warehouse['name']}{source}"))
-        rows.append(("airflow", _files(self.dag_files, "DAG file")))
-        rows.append(("sql", _files(self.sql_files, "SQL file")))
-        rows.append(("definitions", _files(self.definitions_files, "definitions file")))
+        for warehouse in self.warehouses or [{'name': 'none found', 'source': ''}]:
+            source = f' ({warehouse["source"]})' if warehouse.get('source') else ''
+            rows.append(('warehouse', f'{warehouse["name"]}{source}'))
+        rows.append(('airflow', _files(self.dag_files, 'DAG file')))
+        rows.append(('sql', _files(self.sql_files, 'SQL file')))
+        rows.append(('definitions', _files(self.definitions_files, 'definitions file')))
         graph = self.graph
-        if graph.get("exists"):
+        if graph.get('exists'):
             state = (
-                "up to date"
-                if not graph["changed"]
-                else f"{len(graph['changed'])} input(s) changed since: " + ", ".join(graph["changed"][:5])
+                'up to date'
+                if not graph['changed']
+                else f'{len(graph["changed"])} input(s) changed since: ' + ', '.join(graph['changed'][:5])
             )
-            rows.append(("graph", f"{graph['path']}, built {graph['age']}; {state}"))
+            rows.append(('graph', f'{graph["path"]}, built {graph["age"]}; {state}'))
         else:
-            rows.append(("graph", "not built yet; run `konstruct build`"))
+            rows.append(('graph', 'not built yet; run `konstruct build`'))
         rows.append(
-            ("skill", ", ".join(self.skills) if self.skills else "not installed; run `konstruct install`")
+            ('skill', ', '.join(self.skills) if self.skills else 'not installed; run `konstruct install`')
         )
         return rows
 
     def __str__(self) -> str:
-        return "\n".join(
-            f"{key:<12} {value}" if len(key) >= 12 else f"{key:<12}{value}" for key, value in self.lines()
+        return '\n'.join(
+            f'{key:<12} {value}' if len(key) >= 12 else f'{key:<12}{value}' for key, value in self.lines()
         )
 
 
 def _files(files: list[str], noun: str) -> str:
     if not files:
-        return f"no {noun}s found"
-    shown = ", ".join(files[:4]) + (f" and {len(files) - 4} more" if len(files) > 4 else "")
-    return f"{len(files)} {noun}{'s' if len(files) != 1 else ''}: {shown}"
+        return f'no {noun}s found'
+    shown = ', '.join(files[:4]) + (f' and {len(files) - 4} more' if len(files) > 4 else '')
+    return f'{len(files)} {noun}{"s" if len(files) != 1 else ""}: {shown}'
 
 
 def _age(timestamp: float) -> str:
     seconds = max(0, int(time.time() - timestamp))
-    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
+    for size, unit in ((86400, 'day'), (3600, 'hour'), (60, 'minute')):
         if seconds >= size:
             count = seconds // size
-            return f"{count} {unit}{'s' if count != 1 else ''} ago"
-    return "just now"
+            return f'{count} {unit}{"s" if count != 1 else ""} ago'
+    return 'just now'
 
 
 def _relative(path: Path, root: Path) -> str:
@@ -139,19 +139,19 @@ def inspect(path: Path, out_dir: Path | None = None, home: Path | None = None) -
     )
     for project in projects:
         if not project.manifest_path.is_file():
-            artefacts = "no target/manifest.json yet"
+            artefacts = 'no target/manifest.json yet'
         elif dbt.artefacts_stale(project):
-            artefacts = "target/manifest.json is older than the project files"
+            artefacts = 'target/manifest.json is older than the project files'
         else:
-            artefacts = "artefacts up to date" + (
-                "" if project.catalog_path.is_file() else " (no catalog.json)"
+            artefacts = 'artefacts up to date' + (
+                '' if project.catalog_path.is_file() else ' (no catalog.json)'
             )
         status.dbt_projects.append(
-            {"name": project.name, "path": _relative(project.root, root), "artefacts": artefacts}
+            {'name': project.name, 'path': _relative(project.root, root), 'artefacts': artefacts}
         )
-    status.dbt_on_path = shutil.which("dbt") is not None
+    status.dbt_on_path = shutil.which('dbt') is not None
     status.warehouses = [
-        {"type": w.type, "name": w.describe(root), "source": w.source}
+        {'type': w.type, 'name': w.describe(root), 'source': w.source}
         for w in discover_warehouses(config, projects)
     ]
     dags = discover_dag_files(config)
@@ -160,29 +160,29 @@ def inspect(path: Path, out_dir: Path | None = None, home: Path | None = None) -
     status.definitions_files = [_relative(p, root) for p in discover_definitions_files(config)]
 
     out = out_dir or find_out_dir(root)
-    graph_path = out / "graph.json"
+    graph_path = out / 'graph.json'
     if graph_path.is_file():
         graph = Graph.read(graph_path)
         status.graph = {
-            "exists": True,
-            "path": _relative(graph_path, root),
-            "built_at": datetime.fromtimestamp(graph_path.stat().st_mtime).isoformat(timespec="seconds"),
-            "age": _age(graph_path.stat().st_mtime),
-            "changed": changed_inputs(graph_path, graph),
-            "nodes": len(graph.nodes),
-            "warnings": len(graph.warnings),
+            'exists': True,
+            'path': _relative(graph_path, root),
+            'built_at': datetime.fromtimestamp(graph_path.stat().st_mtime).isoformat(timespec='seconds'),
+            'age': _age(graph_path.stat().st_mtime),
+            'changed': changed_inputs(graph_path, graph),
+            'nodes': len(graph.nodes),
+            'warnings': len(graph.warnings),
         }
     else:
-        status.graph = {"exists": False, "path": _relative(graph_path, root)}
+        status.graph = {'exists': False, 'path': _relative(graph_path, root)}
 
     home = home or Path.home()
     for base, agent in (
-        (root / ".claude" / "skills", "project (Claude Code and Cursor)"),
-        (root / ".cursor" / "skills", "project (Cursor)"),
-        (home / ".claude" / "skills", "user (Claude Code and Cursor)"),
-        (home / ".cursor" / "skills", "user (Cursor)"),
+        (root / '.claude' / 'skills', 'project (Claude Code and Cursor)'),
+        (root / '.cursor' / 'skills', 'project (Cursor)'),
+        (home / '.claude' / 'skills', 'user (Claude Code and Cursor)'),
+        (home / '.cursor' / 'skills', 'user (Cursor)'),
     ):
-        if (base / "konstruct" / "SKILL.md").is_file():
+        if (base / 'konstruct' / 'SKILL.md').is_file():
             status.skills.append(agent)
     return status
 
@@ -190,55 +190,55 @@ def inspect(path: Path, out_dir: Path | None = None, home: Path | None = None) -
 def render_config(config: Config, status: Status, warehouses: list[WarehouseConfig]) -> str:
     """A commented konstruct.toml that spells out what discovery found, ready to edit."""
     lines = [
-        "# konstruct configuration. Everything is optional: without this file konstruct discovers its",
-        "# inputs, and this file records what it found so you can pin or change it.",
-        "# See https://github.com/kodexlabsio/konstruct#configuration",
-        "",
+        '# Konstruct configuration. Everything is optional: without this file Konstruct discovers its',
+        '# inputs, and this file records what it found so you can pin or change it.',
+        '# See https://github.com/kodexlabsio/konstruct#configuration',
+        '',
         '# dialect = "duckdb"              # SQL dialect; default: the dbt adapter, then the warehouse',
         '# default_catalog = "analytics"   # for unqualified tables in Airflow and SQL files',
         '# default_schema = "public"',
         '# exclude = ["scratch/**"]',
-        "",
-        "[dbt]",
+        '',
+        '[dbt]',
     ]
-    projects = [p["path"] for p in status.dbt_projects]
-    lines.append(f"projects = {_toml_list(projects)}" if projects else "# projects = []")
-    lines += ["run = true                        # run `dbt docs generate` when artefacts are stale", ""]
-    lines += ["[airflow]"]
-    dag_dirs = sorted({str(Path(f).parent) if str(Path(f).parent) != "." else f for f in status.dag_files})
-    lines.append(f"dags = {_toml_list(dag_dirs)}" if dag_dirs else "# dags = []")
-    lines += ["", "[sql]"]
+    projects = [p['path'] for p in status.dbt_projects]
+    lines.append(f'projects = {_toml_list(projects)}' if projects else '# projects = []')
+    lines += ['run = true                        # run `dbt docs generate` when artefacts are stale', '']
+    lines += ['[airflow]']
+    dag_dirs = sorted({str(Path(f).parent) if str(Path(f).parent) != '.' else f for f in status.dag_files})
+    lines.append(f'dags = {_toml_list(dag_dirs)}' if dag_dirs else '# dags = []')
+    lines += ['', '[sql]']
     lines.append(
-        f"paths = {_toml_list(status.sql_files)}" if status.sql_files else '# paths = ["sql/**/*.sql"]'
+        f'paths = {_toml_list(status.sql_files)}' if status.sql_files else '# paths = ["sql/**/*.sql"]'
     )
-    lines += ["", "[definitions]"]
+    lines += ['', '[definitions]']
     lines.append(
-        f"paths = {_toml_list(status.definitions_files)}"
+        f'paths = {_toml_list(status.definitions_files)}'
         if status.definitions_files
         else '# paths = ["definitions.yml"]        # business terms; default: every definitions.yml'
     )
-    lines.append("")
+    lines.append('')
     if warehouses:
-        lines.append("# Listing any warehouse here turns warehouse discovery off.")
+        lines.append('# Listing any warehouse here turns warehouse discovery off.')
     for warehouse in warehouses:
-        lines += ["[[warehouse]]", f'type = "{warehouse.type}"']
-        if warehouse.type == "duckdb":
+        lines += ['[[warehouse]]', f'type = "{warehouse.type}"']
+        if warehouse.type == 'duckdb':
             lines.append(f'path = "{_relative(Path(str(warehouse.options["path"])), config.root)}"')
-        elif warehouse.type in ("postgres", "postgresql"):
+        elif warehouse.type in ('postgres', 'postgresql'):
             lines.append(
                 'dsn = "${WAREHOUSE_DSN}"           # read from the environment; never commit secrets'
             )
-            lines.append(f"# found in {warehouse.source}")
-        lines.append("")
+            lines.append(f'# found in {warehouse.source}')
+        lines.append('')
     if not warehouses:
         lines += [
-            "# [[warehouse]]",
+            '# [[warehouse]]',
             '# type = "postgres"                # duckdb, postgres or iceberg',
             '# dsn = "${WAREHOUSE_DSN}"',
-            "",
+            '',
         ]
-    return "\n".join(lines).rstrip() + "\n"
+    return '\n'.join(lines).rstrip() + '\n'
 
 
 def _toml_list(values: list[str]) -> str:
-    return "[" + ", ".join(f'"{v}"' for v in values) + "]"
+    return '[' + ', '.join(f'"{v}"' for v in values) + ']'

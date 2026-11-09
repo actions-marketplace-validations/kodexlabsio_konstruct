@@ -18,7 +18,7 @@ from konstruct.project import Project
 from konstruct.query import QueryError
 
 INSTRUCTIONS = """\
-konstruct answers questions about this repository's data stack: dbt models, sources, tests and
+Konstruct answers questions about this repository's data stack: dbt models, sources, tests and
 exposures; warehouse and Iceberg tables; Airflow DAGs and tasks; and column-level lineage.
 Refer to tables as `name` or `schema.name` and to columns as `table.column`.
 Use `impact` before changing a model, table or column, `trace` to find where a value comes from,
@@ -28,11 +28,11 @@ two nodes connect. If a tool says there is no graph, ask the user to run `konstr
 
 def build_server(root: Path) -> MCPServer:
     project = Project(root)
-    server = MCPServer("konstruct", version=__version__, instructions=INSTRUCTIONS)
+    server = MCPServer('konstruct', version=__version__, instructions=INSTRUCTIONS)
 
     def run(func: Callable[..., Any], *args: Any) -> dict[str, Any]:
         if not project.has_graph():
-            raise ToolError(f"no graph at {project.graph_path}; run `konstruct build` in the project first")
+            raise ToolError(f'no graph at {project.graph_path}; run `konstruct build` in the project first')
         try:
             result: dict[str, Any] = func(*args).to_dict()
         except QueryError as error:
@@ -117,4 +117,4 @@ def build_server(root: Path) -> MCPServer:
 
 
 def serve(root: Path) -> None:
-    build_server(root).run("stdio")
+    build_server(root).run('stdio')

@@ -9,7 +9,7 @@
 
 **Column-level lineage for dbt, SQL, Airflow and Dagster: explained as formulas, checked against the data, and reviewed on every pull request.**
 
-konstruct reads a data repository and its warehouse and builds a graph of every table, column, model, task, test and dashboard, with column-level lineage parsed from the SQL that connects them. It runs locally in one command, with no server and no account, and answers from the command line, a Python API, an MCP server and `/konstruct` skill for coding agents, a GitHub Action, and a single offline HTML page.
+Konstruct reads a data repository and its warehouse and builds a graph of every table, column, model, task, test and dashboard, with column-level lineage parsed from the SQL that connects them. It runs locally in one command, with no server and no account, and answers from the command line, a Python API, an MCP server and `/konstruct` skill for coding agents, a GitHub Action, and a single offline HTML page.
 
 What it does that lineage tools usually leave out:
 
@@ -24,7 +24,7 @@ What it does that lineage tools usually leave out:
 
 ## Quick Start
 
-konstruct is not on PyPI yet, so install it from GitHub with [uv](https://docs.astral.sh/uv/):
+Konstruct is not on PyPI yet, so install it from GitHub with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv tool install git+https://github.com/kodexlabsio/konstruct
@@ -80,7 +80,7 @@ konstruct  /src/jaffle_shop
 
 ## Supported Inputs
 
-| Input | What konstruct reads | Status |
+| Input | What Konstruct reads | Status |
 |-------|---------------------|--------|
 | **dbt** | `target/manifest.json` and `catalog.json`: models, seeds, snapshots, sources, tests (attached to columns), exposures, descriptions, column types. Compiled SQL for lineage; `ref()` and `source()` are resolved from the manifest when only raw SQL is available | v0 |
 | **SQL** | Column-level lineage with [sqlglot](https://github.com/tobymao/sqlglot) for dbt models, warehouse views, Airflow SQL and standalone `.sql` files (`CREATE ... AS`, `INSERT ... SELECT`, `MERGE`, `UPDATE`, `DELETE`, `COPY`). Dialect from the dbt adapter or configuration | v0 |
@@ -99,7 +99,7 @@ konstruct  /src/jaffle_shop
 | Command | Purpose |
 |---------|---------|
 | `konstruct build [path] [-u]` | Build `konstruct-out/`. `-u/--update` reuses cached analyses of anything unchanged (keyed by file hashes, compiled SQL, manifest checksums and the upstream columns each model sees). `--no-dbt`, `--no-warehouse`, `--dialect`, `--out`, `--json` (a machine-readable summary), `--strict` (exit 1 on warnings) |
-| `konstruct status` | What konstruct finds (configuration, dbt projects and whether their artefacts are current, warehouses, DAG and SQL files), whether the graph is out of date and which inputs changed, and whether the skill is installed |
+| `konstruct status` | What Konstruct finds (configuration, dbt projects and whether their artefacts are current, warehouses, DAG and SQL files), whether the graph is out of date and which inputs changed, and whether the skill is installed |
 | `konstruct init` | Write a commented `konstruct.toml` from what discovery found (`--stdout` to print it) |
 | `konstruct impact <table.column>` | Everything downstream: derived columns, relations, models that join, filter or group on it, tests, exposures and the DAG tasks that run them |
 | `konstruct trace <table.column>` | Everything upstream, each step marked `direct` (passed through or renamed) or `transformed` |
@@ -114,11 +114,11 @@ konstruct  /src/jaffle_shop
 | `konstruct export <format>` | The graph as OpenLineage events, Mermaid, Graphviz DOT or CSV (see [Exporting](#exporting)). `-s NAME` for the lineage of one table or column, `--columns` to draw columns, `-o FILE` |
 | `konstruct diff [--base REF]` | What the working tree (or `--head REF`) changes compared with the base (default: the merge base with main): columns added, removed or changed with their expressions before and after, changed join and filter conditions, breaking changes, DAG changes, dbt tests, sources and exposures added or removed in YAML, the downstream impact of each, and a column-aware `dbt build --select` that rebuilds only what the change affects. `--format markdown` for a pull request comment, `--fail-on-breaking` for CI |
 | `konstruct verify` | Test the column lineage against the data in a local DuckDB warehouse by perturbation; writes `VERIFY.md` and `verify.json` and marks confirmed edges in the graph. `--seed`, `--rows`, `--model`, `--strict` |
-| `konstruct query "<question>"` | Free-text question: ranks nodes by its words and returns them with their connections, plus impact or lineage when the question asks for it. There is no language model in konstruct; the agent reads the result |
+| `konstruct query "<question>"` | Free-text question: ranks nodes by its words and returns them with their connections, plus impact or lineage when the question asks for it. There is no language model in Konstruct; the agent reads the result |
 | `konstruct install` | Register the `/konstruct` skill (see Agent Integration) |
 | `konstruct mcp` | Run the MCP server on stdio |
 
-Tables and columns can be named as `orders`, `main.orders`, `orders.amount`, `jaffle_shop.main.orders.amount`, `ecom.raw_orders` for a dbt source, `dag_id.task_id` for a task, or by dbt unique id. When nothing matches, konstruct suggests close names; when a name is ambiguous, it lists the candidates.
+Tables and columns can be named as `orders`, `main.orders`, `orders.amount`, `jaffle_shop.main.orders.amount`, `ecom.raw_orders` for a dbt source, `dag_id.task_id` for a task, or by dbt unique id. When nothing matches, Konstruct suggests close names; when a name is ambiguous, it lists the candidates.
 
 Every command takes `-C DIR` (before or after the command name) to work on another directory; query commands also find `konstruct-out` in any parent directory. Query commands build the graph if there is none, warn when inputs changed since the last build, and take `--refresh` to update it first, `--json` for structured output and `--graph FILE` to read a specific graph. Output is coloured on a terminal unless `NO_COLOR` is set or `--no-color` is given. Exit status is 0 on success, 1 on an error, 2 on a usage error and 3 when `path` finds no connection.
 
@@ -127,24 +127,24 @@ Every command takes `-C DIR` (before or after the command name) to work on anoth
 ```python
 import konstruct
 
-project = konstruct.Project("path/to/repo")
+project = konstruct.Project('path/to/repo')
 project.build(update=True)
 
-walk = project.impact("stg_payments.amount")
+walk = project.impact('stg_payments.amount')
 print(walk.summary())  # 7 columns, 3 relations, 5 tests, 1 exposure and 2 tasks downstream.
 for column in walk.columns:
     print(column.label, column.transform, column.path)
 
-print(project.trace("customer_ltv.lifetime_value"))  # the same text the CLI prints
-project.describe("orders").columns  # typed results
-project.explain("orders.amount").composed  # "SUM(raw_payments.amount / 100)"
+print(project.trace('customer_ltv.lifetime_value'))  # the same text the CLI prints
+project.describe('orders').columns  # typed results
+project.explain('orders.amount').composed  # "SUM(raw_payments.amount / 100)"
 project.conflicts().conflicts[0].differences  # what two revenue columns disagree on
-project.define("lifetime value").terms[0].owner  # {"name": "Priya Shah", "role": "Head of Finance"}
-project.path_between("raw_payments", "customer_dashboard").found
-project.search("lifetime value", kinds=["column"]).results
-project.list(["model"]).items
+project.define('lifetime value').terms[0].owner  # {"name": "Priya Shah", "role": "Head of Finance"}
+project.path_between('raw_payments', 'customer_dashboard').found
+project.search('lifetime value', kinds=['column']).results
+project.list(['model']).items
 project.changed_inputs()  # files changed since the last build
-project.diff(base="origin/main").breaking  # removed columns still read downstream
+project.diff(base='origin/main').breaking  # removed columns still read downstream
 project.verify(seed=7).totals()  # {"claimed": 36, "confirmed": 36, "unexplained": 0, ...}
 ```
 
@@ -315,11 +315,11 @@ Customer lifetime value  [approved, Priya Shah (Head of Finance), approved 2026-
 - **Definitions cannot drift silently.** The build warns, and fails under `--strict`, when a bound column or a column in a required filter no longer exists (naming the likely rename), when an approved term has no owner or approval date, when an agreed or approved term is bound to nothing, when two terms share a name or synonym, and when a related term is not defined. `REPORT.md` lists every term with its status, owner and columns.
 - **Pull requests review them.** `konstruct diff` reports terms added, removed and changed field by field, and flags an approved term whose definition, grain, columns or filters changed while it stayed approved with the same date.
 
-konstruct reads every `definitions.yml` (or `.yaml`) in the repository; `[definitions] paths` in `konstruct.toml` pins the files. The example project has five terms in [`examples/jaffle_shop/definitions.yml`](examples/jaffle_shop/definitions.yml).
+Konstruct reads every `definitions.yml` (or `.yaml`) in the repository; `[definitions] paths` in `konstruct.toml` pins the files. The example project has five terms in [`examples/jaffle_shop/definitions.yml`](examples/jaffle_shop/definitions.yml).
 
 ## Column Usage from Query History
 
-The graph knows what depends on what; it does not know what people actually read. With usage on, konstruct reads the warehouse's query history, counts the queries and distinct users that read each column over a window, and adds that to the graph: a usage score on each column (0 to 100 on a log scale), a "Most queried columns" table in `REPORT.md`, a line in `describe`, and a tag in graph.html. It reads metadata only, once a day, and nothing is sent anywhere.
+The graph knows what depends on what; it does not know what people actually read. With usage on, Konstruct reads the warehouse's query history, counts the queries and distinct users that read each column over a window, and adds that to the graph: a usage score on each column (0 to 100 on a log scale), a "Most queried columns" table in `REPORT.md`, a line in `describe`, and a tag in graph.html. It reads metadata only, once a day, and nothing is sent anywhere.
 
 ```toml
 [usage]
@@ -332,7 +332,7 @@ exclude_users = ["DBT_SERVICE"] # leave out pipeline and orchestrator accounts
 | Warehouse | Source | Columns from | History | Access needed |
 |-----------|--------|--------------|---------|---------------|
 | Snowflake | [`SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY`](https://docs.snowflake.com/en/sql-reference/account-usage/access_history) | The columns recorded for each object the query named (`DIRECT_OBJECTS_ACCESSED`), or with `objects = "base"` the underlying tables' columns, including those used only in filters and joins | 365 days; up to 3 hours behind; Enterprise Edition or higher | The `SNOWFLAKE.GOVERNANCE_VIEWER` database role, or `IMPORTED PRIVILEGES` on the SNOWFLAKE database ([access](https://docs.snowflake.com/en/sql-reference/account-usage)) |
-| BigQuery | [`region-REGION.INFORMATION_SCHEMA.JOBS`](https://cloud.google.com/bigquery/docs/information-schema-jobs) | The view records tables but not columns, so konstruct parses each distinct query text with its own SQL analysis, counting output columns' sources and the columns used in joins, filters and grouping | 180 days | `bigquery.jobs.listAll` on the project (BigQuery Resource Viewer) |
+| BigQuery | [`region-REGION.INFORMATION_SCHEMA.JOBS`](https://cloud.google.com/bigquery/docs/information-schema-jobs) | The view records tables but not columns, so Konstruct parses each distinct query text with its own SQL analysis, counting output columns' sources and the columns used in joins, filters and grouping | 180 days | `bigquery.jobs.listAll` on the project (BigQuery Resource Viewer) |
 | Databricks | [`system.access.column_lineage`](https://docs.databricks.com/aws/en/admin/system-tables/lineage) | Every column a query read, including reads with no target table | 395 days | `USE CATALOG` on `system`, `USE SCHEMA` and `SELECT` on `system.access` ([system tables](https://docs.databricks.com/aws/en/admin/system-tables/)) |
 
 The view names, retention and permissions above were checked against each vendor's documentation in November 2026. Without the access, the build carries on and warns `cannot read query history` with the warehouse's message. BigQuery takes the region from the warehouse's `location` (default `us`).
@@ -423,7 +423,7 @@ dbt models are compared by rendering their Jinja without dbt (see How Lineage Wo
 
 ### On Pull Requests
 
-konstruct is also a GitHub Action. It reviews every pull request column by column, posts the review as a comment (updated in place on each push), writes it to the job summary, annotates each breaking change, and fails the check when a change removes a column that something downstream still reads:
+Konstruct is also a GitHub Action. It reviews every pull request column by column, posts the review as a comment (updated in place on each push), writes it to the job summary, annotates each breaking change, and fails the check when a change removes a column that something downstream still reads:
 
 ```yaml
 # .github/workflows/konstruct.yml
@@ -447,7 +447,7 @@ jobs:
 | `comment` | `true` | Post the review on the pull request |
 | `fail-on-breaking` | `true` | Fail the check on a breaking change |
 | `build-args` | `--no-warehouse --no-dbt` | Arguments for `konstruct build`. The default needs no credentials and never runs the pull request's dbt macros |
-| `extras` | none | konstruct extras, such as `snowflake` |
+| `extras` | none | Konstruct extras, such as `snowflake` |
 
 The outputs `breaking`, `summary`, `report` (markdown) and `json` let later steps act on the result. CI runs the action against a breaking change and a safe one on every commit. Pin a release (`@v0.7.0`) for a fixed version; `@v0` moves to each new 0.x release. [`docs/konstruct-pull-request.yml`](docs/konstruct-pull-request.yml) shows the same steps written out, for adding a `dbt parse` or other setup first.
 
@@ -491,18 +491,18 @@ Time grows linearly with the size of the project. Query times are medians over f
 
 ## How Lineage Works
 
-- konstruct qualifies each statement against the columns it knows (from the dbt catalog, the warehouse, or the lineage of upstream models, processed in dependency order), so `SELECT *` expands. sqlglot then follows every output column through CTEs, subqueries, aliases, unions and window functions to physical columns.
+- Konstruct qualifies each statement against the columns it knows (from the dbt catalog, the warehouse, or the lineage of upstream models, processed in dependency order), so `SELECT *` expands. sqlglot then follows every output column through CTEs, subqueries, aliases, unions and window functions to physical columns.
 - A path made only of column references and renames is `direct`; anything else (arithmetic, functions, aggregates, `CASE`, window functions) is `transformed`.
 - Columns that change which rows a model returns, without being selected (join keys, filters, GROUP BY, HAVING, QUALIFY), are recorded as `feeds` edges with `role: reference`, traced through CTEs. Impact reports the relations that use them but does not then mark every downstream column, which would bury the answer.
 - Nested data is followed: `o.customer.address.city`, `customer['country']`, `items[1].sku`, `unnest(items)` and `FROM t, UNNEST(t.items) AS i` with `i.sku` trace to the nested column (`orders.items.sku`), in outputs and in conditions, through CTEs; reading a field or unnesting a list counts as a direct pass-through. Struct columns, and the structs inside lists and map values, are listed field by field for every engine, named the way SQL reads them.
-- Without compiled SQL, dbt models are rendered by konstruct in a sandbox: loops, variables, `ref`, `source`, `config`, the project's and packages' macros (`dbt_utils.*`), `adapter.dispatch` and dbt's cross-database macros (`dbt.date_trunc`, `dbt.cast`, `dbt.concat`, `dbt.hash`, `dbt.date_spine` and others). An unknown macro becomes a function call that keeps its arguments, so the columns passed to it stay in the lineage.
+- Without compiled SQL, dbt models are rendered by Konstruct in a sandbox: loops, variables, `ref`, `source`, `config`, the project's and packages' macros (`dbt_utils.*`), `adapter.dispatch` and dbt's cross-database macros (`dbt.date_trunc`, `dbt.cast`, `dbt.concat`, `dbt.hash`, `dbt.date_spine` and others). An unknown macro becomes a function call that keeps its arguments, so the columns passed to it stay in the lineage.
 - dbt models, warehouse tables with the same relation name, Airflow SQL targets and Iceberg tables merge into one node, so lineage crosses tools: a column computed in dbt, copied into a reporting table by an Airflow task, and used by a dashboard is one chain.
 
 ## Limitations
 
 - Lineage is static. SQL built at runtime, Jinja that dbt has not compiled, Python models, stored procedures and UDF internals are not followed; each gap is listed under Warnings in `REPORT.md`.
 - Without compiled SQL, macros that query the warehouse while compiling (`run_query`, introspective `dbt_utils.get_column_values`) render as empty results, so models that depend on them may differ from dbt's compiled SQL.
-- `SELECT *` over a relation whose columns konstruct cannot learn (no warehouse, no catalog) still gets lineage for the columns the query goes on to use, and is reported as a warning; columns passed straight through by the star to the output are not known.
+- `SELECT *` over a relation whose columns Konstruct cannot learn (no warehouse, no catalog) still gets lineage for the columns the query goes on to use, and is reported as a warning; columns passed straight through by the star to the output are not known.
 - Dagster ops compose statically only: a graph body built in a loop is counted once (with a warning), ops created by factories are not seen, and sensors that choose a job at run time (`RunRequest(job_name=...)` without `job=`) are not linked. Op inputs and outputs are not tracked as data; lineage comes from the SQL an op runs.
 - Airflow parsing covers the common ways of writing DAGs. Task ids or SQL built in loops or from runtime values, dynamic task mapping over computed lists, and DAG factories are skipped with a warning. Selections by `--selector`, `state:`, `result:` and `source_status:` are not resolved.
 - Identifiers are matched case-insensitively. Two relations whose names differ only by case are treated as one.
@@ -630,16 +630,16 @@ The dev dependencies include dbt-core and dbt-duckdb, so the dbt and end-to-end 
 
 ### The Graph Viewer
 
-graph.html is a Svelte 5 and TypeScript app in `viewer/`, built with Vite into one self-contained file, `konstruct/viewer/index.html`, with its script, styles and fonts inlined. That file is committed, so installing konstruct needs no Node.js; konstruct fills its two data placeholders when it writes graph.html.
+graph.html is a Svelte 5 and TypeScript app in `viewer/`, built with Vite into one self-contained file, `konstruct/viewer.html`, with its script, styles and fonts inlined (the font licences are in `licenses/`). That file is committed, so installing Konstruct needs no Node.js; Konstruct fills its two data placeholders when it writes graph.html.
 
 ```bash
 cd viewer
 pnpm install
 mkdir -p dev && cp ../examples/jaffle_shop/konstruct-out/graph.json dev/   # data for the dev server
-pnpm dev                     # http://localhost:5173, reloading as you edit
+pnpm dev                     # http://localhost:5173/viewer.html, reloading as you edit
 pnpm check                   # svelte-check (strict TypeScript)
 pnpm test                    # Vitest: layout, focus, search and the graph model
-pnpm build                   # writes ../konstruct/viewer/index.html; commit it with the source
+pnpm build                   # writes ../konstruct/viewer.html; commit it with the source
 ```
 
 Pre-commit hooks check formatting and types and rebuild the page when `viewer/` changes, and a CI job fails if the committed build does not match the source. The browser tests (`tests/test_browser.py`) drive the built page in Chromium and fail on any network request.
@@ -666,7 +666,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/), che
 | `konstruct/config.py`, `build.py`, `usage.py` | Configuration, discovery, the build and its cache, and usage from query history |
 | `konstruct/query.py`, `explain.py`, `conflicts.py`, `diff.py`, `verify.py` | Questions over the graph: impact and the rest, formulas, conflicting definitions, change review, lineage against data |
 | `konstruct/report.py`, `html.py`, `export.py` | REPORT.md, writing graph.html, and the export formats |
-| `konstruct/viewer/index.html` | The built graph viewer (generated by `pnpm build`; do not edit) |
+| `konstruct/viewer.html` | The built graph viewer (generated by `pnpm build`; do not edit) |
 | `viewer/` | The graph viewer's source: Svelte 5 and TypeScript, built with Vite |
 | `konstruct/project.py` | The Python API |
 | `konstruct/cli.py`, `console.py`, `status.py`, `mcp_server.py`, `skill.py` | Interfaces |
@@ -676,7 +676,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/), che
 
 ## Contributing and Security
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report a problem or propose a change, and [SECURITY.md](SECURITY.md) for how to report a vulnerability and what konstruct executes, reads and writes (it never imports DAG code, renders dbt Jinja in a sandbox and collects no telemetry).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report a problem or propose a change, and [SECURITY.md](SECURITY.md) for how to report a vulnerability and what Konstruct executes, reads and writes (it never imports DAG code, renders dbt Jinja in a sandbox and collects no telemetry).
 
 ## Licence
 

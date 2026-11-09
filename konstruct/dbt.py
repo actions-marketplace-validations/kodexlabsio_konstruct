@@ -26,18 +26,18 @@ log = logging.getLogger(__name__)
 
 SKIP_DIRS = frozenset(
     {
-        ".git",
-        ".venv",
-        "venv",
-        "node_modules",
-        "dbt_packages",
-        "dbt_modules",
-        "target",
-        "logs",
-        "konstruct-out",
+        '.git',
+        '.venv',
+        'venv',
+        'node_modules',
+        'dbt_packages',
+        'dbt_modules',
+        'target',
+        'logs',
+        'konstruct-out',
     }
 )
-RELATION_TYPES: dict[str, NodeKind] = {"model": "model", "seed": "seed", "snapshot": "snapshot"}
+RELATION_TYPES: dict[str, NodeKind] = {'model': 'model', 'seed': 'seed', 'snapshot': 'snapshot'}
 
 
 @dataclass
@@ -50,16 +50,16 @@ class DbtProject:
 
     @property
     def manifest_path(self) -> Path:
-        return self.target_path / "manifest.json"
+        return self.target_path / 'manifest.json'
 
     @property
     def catalog_path(self) -> Path:
-        return self.target_path / "catalog.json"
+        return self.target_path / 'catalog.json'
 
 
 @dataclass
 class ModelSql:
-    """SQL konstruct will analyse for one dbt node, and how good that SQL is."""
+    """SQL Konstruct will analyse for one dbt node, and how good that SQL is."""
 
     node_id: str
     relation: str
@@ -82,14 +82,14 @@ class DbtLoad:
 
 def walk_dirs(root: Path) -> Iterator[Path]:
     for current, dirs, _ in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith("."))
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith('.'))
         yield Path(current)
 
 
 def find_projects(root: Path) -> list[DbtProject]:
     projects = []
     for directory in walk_dirs(root):
-        if (directory / "dbt_project.yml").is_file():
+        if (directory / 'dbt_project.yml').is_file():
             project = read_project(directory)
             if project:
                 projects.append(project)
@@ -98,37 +98,37 @@ def find_projects(root: Path) -> list[DbtProject]:
 
 def read_project(root: Path) -> DbtProject | None:
     try:
-        config = yaml.safe_load((root / "dbt_project.yml").read_text(encoding="utf-8")) or {}
+        config = yaml.safe_load((root / 'dbt_project.yml').read_text(encoding='utf-8')) or {}
     except (OSError, yaml.YAMLError) as error:
-        log.warning("cannot read %s: %s", root / "dbt_project.yml", error)
+        log.warning('cannot read %s: %s', root / 'dbt_project.yml', error)
         return None
     if not isinstance(config, dict):
         return None
     paths: list[Path] = []
     for key, default in (
-        ("model-paths", ["models"]),
-        ("seed-paths", ["seeds"]),
-        ("snapshot-paths", ["snapshots"]),
-        ("macro-paths", ["macros"]),
-        ("test-paths", ["tests"]),
+        ('model-paths', ['models']),
+        ('seed-paths', ['seeds']),
+        ('snapshot-paths', ['snapshots']),
+        ('macro-paths', ['macros']),
+        ('test-paths', ['tests']),
     ):
         paths.extend(root / p for p in config.get(key, default) if isinstance(p, str))
     return DbtProject(
         root=root,
-        name=str(config.get("name", root.name)),
-        target_path=root / str(config.get("target-path", "target")),
-        profile=config.get("profile"),
+        name=str(config.get('name', root.name)),
+        target_path=root / str(config.get('target-path', 'target')),
+        profile=config.get('profile'),
         source_paths=paths,
     )
 
 
 def _newest_source_mtime(project: DbtProject) -> float:
-    newest = (project.root / "dbt_project.yml").stat().st_mtime
+    newest = (project.root / 'dbt_project.yml').stat().st_mtime
     for base in project.source_paths:
         if not base.is_dir():
             continue
-        for path in base.rglob("*"):
-            if path.suffix in (".sql", ".yml", ".yaml", ".csv", ".py", ".md") and path.is_file():
+        for path in base.rglob('*'):
+            if path.suffix in ('.sql', '.yml', '.yaml', '.csv', '.py', '.md') and path.is_file():
                 newest = max(newest, path.stat().st_mtime)
     return newest
 
@@ -145,30 +145,30 @@ def ensure_artefacts(project: DbtProject, *, run_dbt: bool, graph: Graph) -> str
     Returns what happened, for the build summary.
     """
     if not artefacts_stale(project):
-        return "artefacts up to date"
+        return 'artefacts up to date'
     missing = not project.manifest_path.is_file()
-    state = "missing" if missing else "older than the project files"
+    state = 'missing' if missing else 'older than the project files'
     if not run_dbt:
         if missing:
-            graph.warn(f"dbt: {project.name}: target/manifest.json is missing and running dbt is disabled")
-            return "no manifest; running dbt is disabled"
-        graph.warn(f"dbt: {project.name}: target/manifest.json is {state}; using it anyway")
-        return "manifest is stale; running dbt is disabled"
-    dbt = shutil.which("dbt")
+            graph.warn(f'dbt: {project.name}: target/manifest.json is missing and running dbt is disabled')
+            return 'no manifest; running dbt is disabled'
+        graph.warn(f'dbt: {project.name}: target/manifest.json is {state}; using it anyway')
+        return 'manifest is stale; running dbt is disabled'
+    dbt = shutil.which('dbt')
     if dbt is None:
         graph.warn(
-            f"dbt: {project.name}: target/manifest.json is {state} and dbt is not on PATH; "
-            "run `dbt docs generate` in the project"
+            f'dbt: {project.name}: target/manifest.json is {state} and dbt is not on PATH; '
+            'run `dbt docs generate` in the project'
         )
-        return f"manifest is {state} and dbt is not on PATH"
+        return f'manifest is {state} and dbt is not on PATH'
     env = dict(os.environ)
-    if (project.root / "profiles.yml").is_file() and "DBT_PROFILES_DIR" not in env:
-        env["DBT_PROFILES_DIR"] = str(project.root)
-    for command in (["docs", "generate"], ["parse"]):
-        log.info("running dbt %s in %s", " ".join(command), project.root)
-        # konstruct only parses and compiles, so a require-dbt-version pin need not block it.
+    if (project.root / 'profiles.yml').is_file() and 'DBT_PROFILES_DIR' not in env:
+        env['DBT_PROFILES_DIR'] = str(project.root)
+    for command in (['docs', 'generate'], ['parse']):
+        log.info('running dbt %s in %s', ' '.join(command), project.root)
+        # Konstruct only parses and compiles, so a require-dbt-version pin need not block it.
         result = subprocess.run(
-            [dbt, *command, "--quiet", "--no-version-check"],
+            [dbt, *command, '--quiet', '--no-version-check'],
             cwd=project.root,
             env=env,
             capture_output=True,
@@ -176,41 +176,41 @@ def ensure_artefacts(project: DbtProject, *, run_dbt: bool, graph: Graph) -> str
             check=False,
         )
         if result.returncode == 0:
-            if command == ["parse"]:
+            if command == ['parse']:
                 graph.warn(
-                    f"dbt: {project.name}: `dbt docs generate` failed, so models are read from "
-                    "uncompiled SQL and warehouse column types come from other inputs"
+                    f'dbt: {project.name}: `dbt docs generate` failed, so models are read from '
+                    'uncompiled SQL and warehouse column types come from other inputs'
                 )
-            return f"ran dbt {' '.join(command)}"
+            return f'ran dbt {" ".join(command)}'
         graph.warn(
-            f"dbt: {project.name}: `dbt {' '.join(command)}` failed: {dbt_error(result.stdout + result.stderr)}"
+            f'dbt: {project.name}: `dbt {" ".join(command)}` failed: {dbt_error(result.stdout + result.stderr)}'
         )
-    return "dbt failed"
+    return 'dbt failed'
 
 
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_TIMESTAMP = re.compile(r"^\d\d:\d\d:\d\d\s+")
+_ANSI = re.compile(r'\x1b\[[0-9;]*m')
+_TIMESTAMP = re.compile(r'^\d\d:\d\d:\d\d\s+')
 
 
 def dbt_error(output: str, limit: int = 400) -> str:
     """The useful part of dbt's error output, on one line."""
-    lines = [_TIMESTAMP.sub("", _ANSI.sub("", line)).strip() for line in output.splitlines()]
+    lines = [_TIMESTAMP.sub('', _ANSI.sub('', line)).strip() for line in output.splitlines()]
     lines = [line for line in lines if line]
     for index, line in enumerate(lines):
-        if "Encountered an error" in line:
+        if 'Encountered an error' in line:
             lines = lines[index + 1 :]
             break
     else:
-        errors = [line for line in lines if "error" in line.lower()]
+        errors = [line for line in lines if 'error' in line.lower()]
         lines = errors or lines[-3:]
-    text = " ".join(line for line in lines if not line.startswith("Error encountered in "))
-    text = text or (lines[-1] if lines else "no output")
-    return text if len(text) <= limit else text[: limit - 3] + "..."
+    text = ' '.join(line for line in lines if not line.startswith('Error encountered in '))
+    text = text or (lines[-1] if lines else 'no output')
+    return text if len(text) <= limit else text[: limit - 3] + '...'
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
     return data if isinstance(data, dict) else None
@@ -222,18 +222,18 @@ def parse_relation_name(name: str | None, dialect: str | None) -> str | None:
     try:
         table = exp.to_table(name, dialect=dialect)
     except (SqlglotError, ValueError):
-        return relation_key(*name.replace('"', "").replace("`", "").split("."))
+        return relation_key(*name.replace('"', '').replace('`', '').split('.'))
     return relation_key(table.catalog, table.db, table.name)
 
 
 def _relation_for(node: dict[str, Any], dialect: str | None) -> str | None:
-    parsed = parse_relation_name(node.get("relation_name"), dialect)
+    parsed = parse_relation_name(node.get('relation_name'), dialect)
     if parsed:
         return parsed
-    name = node.get("alias") or node.get("identifier") or node.get("name")
+    name = node.get('alias') or node.get('identifier') or node.get('name')
     if not name:
         return None
-    return relation_key(node.get("database"), node.get("schema"), name)
+    return relation_key(node.get('database'), node.get('schema'), name)
 
 
 def _description(value: Any) -> str | None:
@@ -247,26 +247,26 @@ def _catalog_columns(
 ) -> list[tuple[str, str | None, str | None]]:
     if not catalog:
         return []
-    entry = catalog.get("nodes", {}).get(unique_id) or catalog.get("sources", {}).get(unique_id)
+    entry = catalog.get('nodes', {}).get(unique_id) or catalog.get('sources', {}).get(unique_id)
     if not entry:
         return []
-    columns = sorted(entry.get("columns", {}).values(), key=lambda c: c.get("index") or 0)
-    return [(c["name"], c.get("type"), _description(c.get("comment"))) for c in columns if c.get("name")]
+    columns = sorted(entry.get('columns', {}).values(), key=lambda c: c.get('index') or 0)
+    return [(c['name'], c.get('type'), _description(c.get('comment'))) for c in columns if c.get('name')]
 
 
 def _add_columns(graph: Graph, parent: Node, item: dict[str, Any], catalog: dict[str, Any] | None) -> None:
     documented = {
-        name.lower(): col for name, col in (item.get("columns") or {}).items() if isinstance(col, dict)
+        name.lower(): col for name, col in (item.get('columns') or {}).items() if isinstance(col, dict)
     }
     seen: set[str] = set()
-    for name, dtype, comment in _catalog_columns(catalog, item["unique_id"]):
+    for name, dtype, comment in _catalog_columns(catalog, item['unique_id']):
         doc = documented.get(name.lower(), {})
         graph.add_column(
             parent,
             name,
-            data_type=dtype or doc.get("data_type"),
-            description=_description(doc.get("description")) or comment,
-            origin="dbt",
+            data_type=dtype or doc.get('data_type'),
+            description=_description(doc.get('description')) or comment,
+            origin='dbt',
         )
         seen.add(name.lower())
     for name, doc in documented.items():
@@ -274,11 +274,11 @@ def _add_columns(graph: Graph, parent: Node, item: dict[str, Any], catalog: dict
             continue
         graph.add_column(
             parent,
-            doc.get("name", name),
-            data_type=doc.get("data_type"),
-            description=_description(doc.get("description")),
-            origin="dbt",
-            attrs={"documented_only": True} if catalog else {},
+            doc.get('name', name),
+            data_type=doc.get('data_type'),
+            description=_description(doc.get('description')),
+            origin='dbt',
+            attrs={'documented_only': True} if catalog else {},
         )
 
 
@@ -292,14 +292,14 @@ def render_refs(raw: str, manifest: dict[str, Any]) -> str:
     """Best-effort rendering of uncompiled dbt SQL: resolve ref() and source(), drop other Jinja."""
     by_name: dict[str, str] = {}
     by_package: dict[tuple[str, str], str] = {}
-    for node in manifest.get("nodes", {}).values():
-        if node.get("resource_type") in RELATION_TYPES and node.get("relation_name"):
-            by_name.setdefault(node["name"], node["relation_name"])
-            by_package[(node["package_name"], node["name"])] = node["relation_name"]
+    for node in manifest.get('nodes', {}).values():
+        if node.get('resource_type') in RELATION_TYPES and node.get('relation_name'):
+            by_name.setdefault(node['name'], node['relation_name'])
+            by_package[(node['package_name'], node['name'])] = node['relation_name']
     sources: dict[tuple[str, str], str] = {
-        (s["source_name"], s["name"]): s["relation_name"]
-        for s in manifest.get("sources", {}).values()
-        if s.get("relation_name")
+        (s['source_name'], s['name']): s['relation_name']
+        for s in manifest.get('sources', {}).values()
+        if s.get('relation_name')
     }
 
     def ref(match: re.Match[str]) -> str:
@@ -309,7 +309,7 @@ def render_refs(raw: str, manifest: dict[str, Any]) -> str:
         return by_name.get(first, first)
 
     def source(match: re.Match[str]) -> str:
-        return sources.get((match.group(1), match.group(2)), f"{match.group(1)}.{match.group(2)}")
+        return sources.get((match.group(1), match.group(2)), f'{match.group(1)}.{match.group(2)}')
 
     return strip_templating(_SOURCE.sub(source, _REF.sub(ref, raw)))
 
@@ -318,110 +318,110 @@ def load(project: DbtProject, graph: Graph, *, dialect: str | None) -> DbtLoad |
     """Add a dbt project's nodes, columns, tests and exposures to ``graph``."""
     manifest = _read_json(project.manifest_path)
     if manifest is None:
-        graph.warn(f"dbt: {project.name}: no readable manifest at {project.manifest_path}")
+        graph.warn(f'dbt: {project.name}: no readable manifest at {project.manifest_path}')
         return None
     catalog = _read_json(project.catalog_path)
-    metadata = manifest.get("metadata", {})
-    dialect = dialect or dialect_for(metadata.get("adapter_type"))
+    metadata = manifest.get('metadata', {})
+    dialect = dialect or dialect_for(metadata.get('adapter_type'))
     root = project.root
 
     def rel_path(item: dict[str, Any]) -> str | None:
-        path = item.get("original_file_path")
+        path = item.get('original_file_path')
         if not path:
             return None
-        return os.path.relpath(root / str(path), str(graph.meta.get("root", root)))
+        return os.path.relpath(root / str(path), str(graph.meta.get('root', root)))
 
     models: list[ModelSql] = []
     schemas: dict[tuple[str | None, str | None], int] = {}
     renderer: Renderer | None = None
-    for item in manifest.get("nodes", {}).values():
-        kind = RELATION_TYPES.get(item.get("resource_type", ""))
+    for item in manifest.get('nodes', {}).values():
+        kind = RELATION_TYPES.get(item.get('resource_type', ''))
         if kind is None:
             continue
         relation = _relation_for(item, dialect)
-        config = item.get("config") or {}
+        config = item.get('config') or {}
         node = graph.add_node(
             Node(
-                id=item["unique_id"],
+                id=item['unique_id'],
                 kind=kind,
-                name=item.get("alias") or item["name"],
+                name=item.get('alias') or item['name'],
                 relation=relation,
-                description=_description(item.get("description")),
+                description=_description(item.get('description')),
                 path=rel_path(item),
-                origins=["dbt"],
+                origins=['dbt'],
                 attrs={
-                    "package": item.get("package_name"),
-                    "fqn": item.get("fqn", []),
-                    "materialized": config.get("materialized"),
-                    "tags": item.get("tags", []),
-                    "dbt_name": item["name"],
-                    "checksum": (item.get("checksum") or {}).get("checksum"),
+                    'package': item.get('package_name'),
+                    'fqn': item.get('fqn', []),
+                    'materialized': config.get('materialized'),
+                    'tags': item.get('tags', []),
+                    'dbt_name': item['name'],
+                    'checksum': (item.get('checksum') or {}).get('checksum'),
                 },
             )
         )
         _add_columns(graph, node, item, catalog)
-        upstream = [n for n in item.get("depends_on", {}).get("nodes", []) if not n.startswith("macro.")]
+        upstream = [n for n in item.get('depends_on', {}).get('nodes', []) if not n.startswith('macro.')]
         for parent in upstream:
-            graph.add_edge(parent, node.id, "feeds", origin="dbt")
-        key = (item.get("database"), item.get("schema"))
+            graph.add_edge(parent, node.id, 'feeds', origin='dbt')
+        key = (item.get('database'), item.get('schema'))
         schemas[key] = schemas.get(key, 0) + 1
-        if kind == "seed" or not relation:
+        if kind == 'seed' or not relation:
             continue
-        compiled = item.get("compiled_code")
-        raw = item.get("raw_code")
+        compiled = item.get('compiled_code')
+        raw = item.get('raw_code')
         if compiled:
             models.append(ModelSql(node.id, relation, compiled, True, upstream))
-        elif raw and item.get("language", "sql") == "sql":
+        elif raw and item.get('language', 'sql') == 'sql':
             if renderer is None:
-                macro_paths = [p for p in project.source_paths if "macro" in p.name]
+                macro_paths = [p for p in project.source_paths if 'macro' in p.name]
                 renderer = Renderer(project.root, manifest, macro_paths=macro_paths or None)
             sql = render_model(raw, renderer, lambda text: render_refs(text, manifest))
             models.append(ModelSql(node.id, relation, sql, False, upstream))
 
-    for item in manifest.get("sources", {}).values():
+    for item in manifest.get('sources', {}).values():
         node = graph.add_node(
             Node(
-                id=item["unique_id"],
-                kind="source",
-                name=item.get("identifier") or item["name"],
+                id=item['unique_id'],
+                kind='source',
+                name=item.get('identifier') or item['name'],
                 relation=_relation_for(item, dialect),
-                description=_description(item.get("description"))
-                or _description(item.get("source_description")),
+                description=_description(item.get('description'))
+                or _description(item.get('source_description')),
                 path=rel_path(item),
-                origins=["dbt"],
-                attrs={"source_name": item.get("source_name"), "package": item.get("package_name")},
+                origins=['dbt'],
+                attrs={'source_name': item.get('source_name'), 'package': item.get('package_name')},
             )
         )
         _add_columns(graph, node, item, catalog)
 
-    for item in manifest.get("exposures", {}).values():
-        owner = item.get("owner") or {}
+    for item in manifest.get('exposures', {}).values():
+        owner = item.get('owner') or {}
         node = graph.add_node(
             Node(
-                id=item["unique_id"],
-                kind="exposure",
-                name=item["name"],
-                description=_description(item.get("description")),
+                id=item['unique_id'],
+                kind='exposure',
+                name=item['name'],
+                description=_description(item.get('description')),
                 path=rel_path(item),
-                origins=["dbt"],
+                origins=['dbt'],
                 attrs={
                     k: v
                     for k, v in {
-                        "type": item.get("type"),
-                        "label": item.get("label"),
-                        "maturity": item.get("maturity"),
-                        "owner": owner.get("name"),
-                        "url": item.get("url"),
+                        'type': item.get('type'),
+                        'label': item.get('label'),
+                        'maturity': item.get('maturity'),
+                        'owner': owner.get('name'),
+                        'url': item.get('url'),
                     }.items()
                     if v
                 },
             )
         )
-        for parent in item.get("depends_on", {}).get("nodes", []):
-            graph.add_edge(parent, node.id, "feeds", origin="dbt")
+        for parent in item.get('depends_on', {}).get('nodes', []):
+            graph.add_edge(parent, node.id, 'feeds', origin='dbt')
 
-    for item in manifest.get("nodes", {}).values():
-        if item.get("resource_type") == "test":
+    for item in manifest.get('nodes', {}).values():
+        if item.get('resource_type') == 'test':
             _add_test(graph, item, rel_path(item))
 
     default_catalog, default_schema = max(schemas, key=lambda k: schemas[k]) if schemas else (None, None)
@@ -431,60 +431,60 @@ def load(project: DbtProject, graph: Graph, *, dialect: str | None) -> DbtLoad |
         models=models,
         default_catalog=default_catalog,
         default_schema=default_schema,
-        manifest_checksum=metadata.get("invocation_id"),
+        manifest_checksum=metadata.get('invocation_id'),
         has_catalog=catalog is not None,
         counts={
-            kind: sum(1 for item in group.values() if item.get("resource_type") == kind)
+            kind: sum(1 for item in group.values() if item.get('resource_type') == kind)
             for kind, group in (
-                ("model", manifest.get("nodes", {})),
-                ("seed", manifest.get("nodes", {})),
-                ("snapshot", manifest.get("nodes", {})),
-                ("test", manifest.get("nodes", {})),
-                ("source", manifest.get("sources", {})),
-                ("exposure", manifest.get("exposures", {})),
+                ('model', manifest.get('nodes', {})),
+                ('seed', manifest.get('nodes', {})),
+                ('snapshot', manifest.get('nodes', {})),
+                ('test', manifest.get('nodes', {})),
+                ('source', manifest.get('sources', {})),
+                ('exposure', manifest.get('exposures', {})),
             )
         },
     )
 
 
 def _add_test(graph: Graph, item: dict[str, Any], path: str | None) -> None:
-    meta = item.get("test_metadata") or {}
-    config = item.get("config") or {}
+    meta = item.get('test_metadata') or {}
+    config = item.get('config') or {}
     node = graph.add_node(
         Node(
-            id=item["unique_id"],
-            kind="test",
-            name=item["name"],
-            description=_description(item.get("description")),
+            id=item['unique_id'],
+            kind='test',
+            name=item['name'],
+            description=_description(item.get('description')),
             path=path,
-            origins=["dbt"],
+            origins=['dbt'],
             attrs={
                 k: v
                 for k, v in {
-                    "test": meta.get("name") or "singular",
-                    "severity": config.get("severity"),
-                    "column": item.get("column_name"),
+                    'test': meta.get('name') or 'singular',
+                    'severity': config.get('severity'),
+                    'column': item.get('column_name'),
                 }.items()
                 if v
             },
         )
     )
-    targets = item.get("depends_on", {}).get("nodes", [])
-    attached = item.get("attached_node") or (targets[0] if len(targets) == 1 else None)
-    column = item.get("column_name")
+    targets = item.get('depends_on', {}).get('nodes', [])
+    attached = item.get('attached_node') or (targets[0] if len(targets) == 1 else None)
+    column = item.get('column_name')
     if attached and column and graph.column(attached, column):
-        graph.add_edge(node.id, column_id(attached, column), "tests")
+        graph.add_edge(node.id, column_id(attached, column), 'tests')
     elif attached:
-        graph.add_edge(node.id, attached, "tests")
-    kwargs = meta.get("kwargs") or {}
+        graph.add_edge(node.id, attached, 'tests')
+    kwargs = meta.get('kwargs') or {}
     for target in targets:
         if target == attached:
             continue
-        field_name = kwargs.get("field")
-        if meta.get("name") == "relationships" and field_name and graph.column(target, field_name):
-            graph.add_edge(node.id, column_id(target, field_name), "tests", role="relationship target")
+        field_name = kwargs.get('field')
+        if meta.get('name') == 'relationships' and field_name and graph.column(target, field_name):
+            graph.add_edge(node.id, column_id(target, field_name), 'tests', role='relationship target')
         else:
-            graph.add_edge(node.id, target, "tests")
+            graph.add_edge(node.id, target, 'tests')
 
 
 # dbt node selection, as used by `dbt run --select` in orchestration code
@@ -498,7 +498,7 @@ def select_nodes(graph: Graph, selectors: list[str], excludes: list[str]) -> lis
     intersections. Unknown methods select nothing and are reported by the caller.
     """
     nodes = [
-        n for n in graph.nodes.values() if "dbt" in n.origins and n.kind in ("model", "seed", "snapshot")
+        n for n in graph.nodes.values() if 'dbt' in n.origins and n.kind in ('model', 'seed', 'snapshot')
     ]
     if not selectors:
         chosen = {n.id for n in nodes}
@@ -512,7 +512,7 @@ def select_nodes(graph: Graph, selectors: list[str], excludes: list[str]) -> lis
 
 
 def _select_one(selector: str, nodes: list[Node], graph: Graph) -> set[str]:
-    parts = selector.split(",")
+    parts = selector.split(',')
     result: set[str] | None = None
     for part in parts:
         found = _select_atom(part, nodes, graph)
@@ -520,7 +520,7 @@ def _select_one(selector: str, nodes: list[Node], graph: Graph) -> set[str]:
     return result or set()
 
 
-_GRAPH_OP = re.compile(r"^(@)?(\d*\+)?(.*?)(\+\d*)?$")
+_GRAPH_OP = re.compile(r'^(@)?(\d*\+)?(.*?)(\+\d*)?$')
 
 
 def _select_atom(atom: str, nodes: list[Node], graph: Graph) -> set[str]:
@@ -528,8 +528,8 @@ def _select_atom(atom: str, nodes: list[Node], graph: Graph) -> set[str]:
     if not match:
         return set()
     at, up, body, down = match.groups()
-    method, _, value = body.rpartition(":")
-    method = method or "default"
+    method, _, value = body.rpartition(':')
+    method = method or 'default'
     seeds = {n.id for n in nodes if _matches(method, value, n)}
     result = set(seeds)
     if up or at:
@@ -558,7 +558,7 @@ def _relatives(graph: Graph, start: set[str], depth: int | None, *, upstream: bo
         level += 1
         following: set[str] = set()
         for node_id in frontier:
-            edges = graph.in_edges(node_id, "feeds") if upstream else graph.out_edges(node_id, "feeds")
+            edges = graph.in_edges(node_id, 'feeds') if upstream else graph.out_edges(node_id, 'feeds')
             for edge in edges:
                 other = edge.source if upstream else edge.target
                 if other not in found and other not in start:
@@ -569,37 +569,37 @@ def _relatives(graph: Graph, start: set[str], depth: int | None, *, upstream: bo
 
 
 def _matches(method: str, value: str, node: Node) -> bool:
-    fqn: list[str] = list(node.attrs.get("fqn") or [])
-    name = str(node.attrs.get("dbt_name") or node.name)
-    if method == "default":
-        if "/" in value or value.endswith((".sql", ".py", ".csv")):
-            method = "path"
+    fqn: list[str] = list(node.attrs.get('fqn') or [])
+    name = str(node.attrs.get('dbt_name') or node.name)
+    if method == 'default':
+        if '/' in value or value.endswith(('.sql', '.py', '.csv')):
+            method = 'path'
         else:
             return _fqn_match(value, fqn, name)
-    if method == "fqn":
+    if method == 'fqn':
         return _fqn_match(value, fqn, name)
-    if method == "tag":
-        return any(fnmatch(tag, value) for tag in node.attrs.get("tags", []))
-    if method == "path":
-        path = (node.path or "").replace(os.sep, "/")
-        value = value.rstrip("/")
+    if method == 'tag':
+        return any(fnmatch(tag, value) for tag in node.attrs.get('tags', []))
+    if method == 'path':
+        path = (node.path or '').replace(os.sep, '/')
+        value = value.rstrip('/')
         return any(
-            fnmatch(path[i:], value) or path[i:].startswith(value + "/") or fnmatch(path[i:], value + "*")
-            for i in [0, *[k + 1 for k, ch in enumerate(path) if ch == "/"]]
+            fnmatch(path[i:], value) or path[i:].startswith(value + '/') or fnmatch(path[i:], value + '*')
+            for i in [0, *[k + 1 for k, ch in enumerate(path) if ch == '/']]
         )
-    if method == "resource_type":
+    if method == 'resource_type':
         return node.kind == value
-    if method == "package":
-        return node.attrs.get("package") == value
-    if method == "config.materialized":
-        return node.attrs.get("materialized") == value
+    if method == 'package':
+        return node.attrs.get('package') == value
+    if method == 'config.materialized':
+        return node.attrs.get('materialized') == value
     return False
 
 
 def _fqn_match(value: str, fqn: list[str], name: str) -> bool:
     if fnmatch(name, value):
         return True
-    parts = value.split(".")
+    parts = value.split('.')
     for start in (0, 1):
         window = fqn[start : start + len(parts)]
         if len(window) == len(parts) and all(fnmatch(f, p) for f, p in zip(window, parts, strict=True)):

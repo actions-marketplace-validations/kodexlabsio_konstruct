@@ -17,18 +17,18 @@ from konstruct.airflow import parse_file
 
 pytestmark = pytest.mark.airflow_parity
 
-FIXTURES = Path(__file__).parent / "fixtures" / "airflow"
-EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "jaffle_shop" / "dags" / "jaffle_shop_daily.py"
-FILES = [*sorted(FIXTURES.glob("*.py")), EXAMPLE]
+FIXTURES = Path(__file__).parent / 'fixtures' / 'airflow'
+EXAMPLE = Path(__file__).resolve().parents[1] / 'examples' / 'jaffle_shop' / 'dags' / 'jaffle_shop_daily.py'
+FILES = [*sorted(FIXTURES.glob('*.py')), EXAMPLE]
 
 
 def airflow_view(path: Path, home: Path) -> dict[str, tuple[set[str], set[tuple[str, str]]]]:
-    os.environ.setdefault("AIRFLOW_HOME", str(home))
-    os.environ.setdefault("AIRFLOW__CORE__LOAD_EXAMPLES", "False")
+    os.environ.setdefault('AIRFLOW_HOME', str(home))
+    os.environ.setdefault('AIRFLOW__CORE__LOAD_EXAMPLES', 'False')
     try:
         from airflow.dag_processing.dagbag import DagBag
     except ImportError:
-        pytest.skip("Apache Airflow 3 is not installed")
+        pytest.skip('Apache Airflow 3 is not installed')
     bag = DagBag(dag_folder=str(path))
     assert bag.import_errors == {}, bag.import_errors
     view = {}
@@ -41,7 +41,7 @@ def airflow_view(path: Path, home: Path) -> dict[str, tuple[set[str], set[tuple[
     return view
 
 
-@pytest.mark.parametrize("path", FILES, ids=[p.stem for p in FILES])
+@pytest.mark.parametrize('path', FILES, ids=[p.stem for p in FILES])
 def test_static_parse_matches_airflow(path: Path, tmp_path: Path) -> None:
     expected = airflow_view(path, tmp_path)
     parsed = {dag.dag_id: (set(dag.tasks), set(dag.dependencies)) for dag in parse_file(path)}

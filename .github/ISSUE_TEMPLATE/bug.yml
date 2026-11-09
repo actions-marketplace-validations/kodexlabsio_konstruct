@@ -18,7 +18,7 @@ body:
   - type: textarea
     id: actual
     attributes:
-      label: What konstruct said
+      label: What Konstruct said
       description: The command you ran and its output (trace, explain, diff, or the warning in REPORT.md).
       render: text
     validations:
@@ -32,7 +32,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: konstruct version
+      label: Konstruct version
       description: Output of `konstruct --version`.
     validations:
       required: true

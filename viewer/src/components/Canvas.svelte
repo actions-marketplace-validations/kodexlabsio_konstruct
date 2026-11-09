@@ -1,11 +1,11 @@
 <script lang="ts">
-    import { onMount, untrack } from "svelte";
-    import { ICONS } from "../lib/icons";
-    import { bounds, curve, HEAD, PAD, ROW, W } from "../lib/layout";
-    import { attr, KIND_NAMES } from "../lib/model";
-    import { fitText, FONT_MONO, FONT_NAME, FONT_ROW, textWidth } from "../lib/text";
-    import type { Point } from "../lib/types";
-    import { ANIMATE_LIMIT, type Viewer } from "../lib/viewer.svelte";
+    import { onMount, untrack } from 'svelte';
+    import { ICONS } from '../lib/icons';
+    import { bounds, curve, HEAD, PAD, ROW, W } from '../lib/layout';
+    import { attr, KIND_NAMES } from '../lib/model';
+    import { fitText, FONT_MONO, FONT_NAME, FONT_ROW, textWidth } from '../lib/text';
+    import type { Point } from '../lib/types';
+    import { ANIMATE_LIMIT, type Viewer } from '../lib/viewer.svelte';
 
     let { viewer, onswitchtheme }: { viewer: Viewer; onswitchtheme: () => void } = $props();
     // The viewer object is created once and never replaced, so reading it here is intended.
@@ -20,7 +20,7 @@
     // Positions on screen: the layout's target, eased towards it when it changes.
     let displayed = $state.raw(new Map<string, Point>());
     let frame = 0;
-    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
     $effect(() => {
         const target = viewer.target;
@@ -52,7 +52,7 @@
     // Cards and rows
 
     const cards = $derived(
-        Array.from(viewer.target.keys()).map((id) => {
+        Array.from(viewer.target.keys()).map(id => {
             const n = model.node(id)!;
             const all = model.columnsOf(id);
             const { rows, more } = viewer.rowsOf(id);
@@ -69,14 +69,14 @@
     });
 
     function typeLabel(dataType: string | undefined): string {
-        return dataType ? fitText(dataType.toLowerCase(), FONT_MONO, 92) : "";
+        return dataType ? fitText(dataType.toLowerCase(), FONT_MONO, 92) : '';
     }
 
     // Edges
 
     interface DrawnEdge {
         key: string;
-        kind: "feeds" | "runs" | "column" | "reference";
+        kind: 'feeds' | 'runs' | 'column' | 'reference';
         from: string;
         to: string;
         fromCol: string | null;
@@ -101,19 +101,19 @@
         }
         for (const [id, rows] of rowOffsets) {
             for (const colId of rows.keys()) {
-                for (const e of model.outs(colId, "derived_from")) {
+                for (const e of model.outs(colId, 'derived_from')) {
                     const up = model.viewOf(e.target);
                     if (!up || !rowOffsets.get(up)?.has(e.target)) continue;
-                    const transform = attr<string>(e, "transform") ?? "derived";
-                    const verified = attr<string>(e, "verified");
+                    const transform = attr<string>(e, 'transform') ?? 'derived';
+                    const verified = attr<string>(e, 'verified');
                     drawn.push({
                         key: `column|${e.target}|${colId}`,
-                        kind: "column",
+                        kind: 'column',
                         from: up,
                         to: id,
                         fromCol: e.target,
                         toCol: colId,
-                        title: `${model.label(e.target)} → ${model.label(colId)} (${transform}${verified ? `, ${verified}` : ""})`,
+                        title: `${model.label(e.target)} → ${model.label(colId)} (${transform}${verified ? `, ${verified}` : ''})`,
                     });
                 }
             }
@@ -123,7 +123,7 @@
             if (!from || !rowOffsets.has(from) || !rowOffsets.has(relation) || from === relation) continue;
             drawn.push({
                 key: `reference|${colId}|${relation}`,
-                kind: "reference",
+                kind: 'reference',
                 from,
                 to: relation,
                 fromCol: colId,
@@ -134,10 +134,10 @@
         return drawn;
     });
 
-    function anchor(id: string, col: string | null, side: "out" | "in"): { x: number; y: number } {
+    function anchor(id: string, col: string | null, side: 'out' | 'in'): { x: number; y: number } {
         const c = at(id);
         const offset = col ? rowOffsets.get(id)?.get(col) : undefined;
-        return { x: side === "out" ? c.x + W : c.x, y: c.y + (offset ?? HEAD / 2) };
+        return { x: side === 'out' ? c.x + W : c.x, y: c.y + (offset ?? HEAD / 2) };
     }
 
     // What is lit
@@ -148,9 +148,9 @@
     function edgeState(e: DrawnEdge): { on: boolean; dim: boolean } {
         const focus = viewer.focus;
         let on: boolean;
-        if (e.kind === "column")
+        if (e.kind === 'column')
             on = !!focus.columns && focus.columns.has(e.fromCol!) && focus.columns.has(e.toCol!);
-        else if (e.kind === "reference") on = true;
+        else if (e.kind === 'reference') on = true;
         else
             on =
                 !!focus.relations &&
@@ -158,7 +158,7 @@
                 focus.relations.has(e.from) &&
                 focus.relations.has(e.to);
         const keep =
-            e.kind !== "column" && !focus.relations && !!matched && matched.has(e.from) && matched.has(e.to);
+            e.kind !== 'column' && !focus.relations && !!matched && matched.has(e.from) && matched.has(e.to);
         return { on: !!lit && on, dim: !!lit && !on && !keep };
     }
 
@@ -214,14 +214,14 @@
             untrack(() => {
                 const target = viewer.target;
                 const lit = viewer.focus.relations;
-                if (request.kind === "focus" && lit) {
+                if (request.kind === 'focus' && lit) {
                     const subset = new Map<string, Point>();
                     for (const id of lit) {
                         const c = target.get(id);
                         if (c) subset.set(id, c);
                     }
                     fitBounds(subset, 1.1);
-                } else if (request.kind === "centre" && request.id) centreOn(request.id);
+                } else if (request.kind === 'centre' && request.id) centreOn(request.id);
                 else fitBounds(target, 1.25);
             }),
         );
@@ -275,32 +275,32 @@
             return;
         }
         const target = event.target as Element;
-        const more = target.closest("[data-more]");
+        const more = target.closest('[data-more]');
         if (more) {
-            viewer.expanded.add(more.getAttribute("data-more")!);
+            viewer.expanded.add(more.getAttribute('data-more')!);
             return;
         }
-        const toggle = target.closest("[data-toggle]");
+        const toggle = target.closest('[data-toggle]');
         if (toggle) {
-            viewer.toggleColumns(toggle.getAttribute("data-toggle")!);
+            viewer.toggleColumns(toggle.getAttribute('data-toggle')!);
             return;
         }
-        const row = target.closest("[data-col]");
+        const row = target.closest('[data-col]');
         if (row) {
-            const col = row.getAttribute("data-col")!;
+            const col = row.getAttribute('data-col')!;
             const parent = model.node(col)?.parent;
             if (parent) viewer.select(parent, col === viewer.column ? null : col);
             return;
         }
-        const card = target.closest(".node");
-        if (card) viewer.select(card.getAttribute("data-id")!);
+        const card = target.closest('.node');
+        if (card) viewer.select(card.getAttribute('data-id')!);
         else viewer.clear();
     }
 
     function ondblclick(event: MouseEvent): void {
         const target = event.target as Element;
-        const card = target.closest(".node");
-        if (card && !target.closest("[data-col]")) viewer.toggleColumns(card.getAttribute("data-id")!);
+        const card = target.closest('.node');
+        if (card && !target.closest('[data-col]')) viewer.toggleColumns(card.getAttribute('data-id')!);
     }
 
     function zoomButton(factor: number): void {
@@ -319,7 +319,7 @@
         const lit = viewer.focus.relations;
         void viewer.theme;
         if (!minimap) return;
-        const context = minimap.getContext("2d");
+        const context = minimap.getContext('2d');
         if (!context) return;
         const styles = getComputedStyle(document.documentElement);
         const b = bounds(positions);
@@ -331,8 +331,8 @@
         const ox = pad + (minimap.width - 2 * pad - b.w * k) / 2 - b.x * k;
         const oy = pad + (minimap.height - 2 * pad - b.h * k) / 2 - b.y * k;
         miniTransform = { k, ox, oy };
-        const muted = styles.getPropertyValue("--edge").trim();
-        const accent = styles.getPropertyValue("--accent").trim();
+        const muted = styles.getPropertyValue('--edge').trim();
+        const accent = styles.getPropertyValue('--accent').trim();
         for (const [id, c] of positions) {
             context.fillStyle = lit?.has(id) ? accent : muted;
             context.fillRect(ox + c.x * k, oy + c.y * k, Math.max(2, W * k), Math.max(2, c.h * k));
@@ -363,7 +363,7 @@
     // Wave lines (DESIGN.md section 8): fine vertical lines, calmer towards the left.
 
     let wave = $state<{ d: string; opacity: string }[]>([]);
-    let waveBox = $state("0 0 1200 800");
+    let waveBox = $state('0 0 1200 800');
 
     function drawTexture(): void {
         const box = texture?.getBoundingClientRect();
@@ -379,13 +379,13 @@
             const amp = 18 + rand() * 40;
             const freq = 0.0025 + rand() * 0.004;
             const phase = rand() * Math.PI * 2;
-            let d = "";
+            let d = '';
             for (let y = 0; y <= height; y += 16) {
                 const x =
                     base +
                     Math.sin(y * freq + phase) * amp +
                     Math.sin(y * freq * 2.7 + phase * 1.3) * amp * 0.35;
-                d += `${y ? " L" : "M"}${x.toFixed(1)},${y}`;
+                d += `${y ? ' L' : 'M'}${x.toFixed(1)},${y}`;
             }
             paths.push({ d, opacity: (0.35 + (0.65 * i) / lines).toFixed(2) });
         }
@@ -401,10 +401,10 @@
 
     const empty = $derived(
         viewer.target.size
-            ? ""
+            ? ''
             : model.viewNodes.length
-              ? "Nothing to show with these filters."
-              : "No tables or models in this graph.",
+              ? 'Nothing to show with these filters.'
+              : 'No tables or models in this graph.',
     );
 </script>
 
@@ -455,11 +455,11 @@
                         class="edge {e.kind}"
                         class:hl={state.on}
                         class:dim={state.dim}
-                        d={curve(anchor(e.from, e.fromCol, "out"), anchor(e.to, e.toCol, "in"))}
-                        marker-end={e.kind === "feeds" || e.kind === "runs"
+                        d={curve(anchor(e.from, e.fromCol, 'out'), anchor(e.to, e.toCol, 'in'))}
+                        marker-end={e.kind === 'feeds' || e.kind === 'runs'
                             ? state.on
-                                ? "url(#arrow-hl)"
-                                : "url(#arrow)"
+                                ? 'url(#arrow-hl)'
+                                : 'url(#arrow)'
                             : undefined}
                         >{#if e.title}<title>{e.title}</title>{/if}</path
                     >
@@ -484,7 +484,7 @@
                         >
                         <rect class="card" width={W} height={p.h} rx="12" />
                         <g class="icon" transform="translate(14,{HEAD / 2 - 10}) scale(0.8333)">
-                            <path d={ICONS[card.n.kind] ?? ""} />
+                            <path d={ICONS[card.n.kind] ?? ''} />
                         </g>
                         <text class="name" x="44" y={HEAD / 2}
                             >{fitText(card.n.name, FONT_NAME, W - 46 - (card.all.length ? 66 : 14))}</text
@@ -492,7 +492,7 @@
                         {#if card.all.length}
                             <g class="toggle" data-toggle={card.id}>
                                 <rect x={W - 64} y="8" width="56" height={HEAD - 16} rx="10" />
-                                <title>{open ? "Hide columns" : `Show ${card.all.length} columns`}</title>
+                                <title>{open ? 'Hide columns' : `Show ${card.all.length} columns`}</title>
                                 <text class="count" x={W - 32} y={HEAD / 2}>{card.all.length}</text>
                                 <path
                                     class="chev"
@@ -533,7 +533,7 @@
                                 >
                                     <rect x="4" y="1" width={W - 8} height={ROW - 2} rx="8" />
                                     <text class="col" x="28" y={ROW / 2}
-                                        >Show {card.more} more column{card.more === 1 ? "" : "s"}</text
+                                        >Show {card.more} more column{card.more === 1 ? '' : 's'}</text
                                     >
                                 </g>
                             {/if}
@@ -546,7 +546,7 @@
     <div id="empty">{empty}</div>
     <div id="toolbar">
         <div class="group" role="group" aria-label="Direction">
-            {#each [["upstream", "Upstream", "Show what the selection comes from"], ["both", "Both", "Show both directions"], ["downstream", "Downstream", "Show what depends on the selection"]] as const as [value, text, title] (value)}
+            {#each [['upstream', 'Upstream', 'Show what the selection comes from'], ['both', 'Both', 'Show both directions'], ['downstream', 'Downstream', 'Show what depends on the selection']] as const as [value, text, title] (value)}
                 <button
                     type="button"
                     data-direction={value}
@@ -607,7 +607,7 @@
                 type="button"
                 id="fit"
                 title="Fit the graph to the window (F)"
-                onclick={() => viewer.request("fit")}>Fit</button
+                onclick={() => viewer.request('fit')}>Fit</button
             >
             <button
                 type="button"
@@ -634,12 +634,12 @@
         aria-label="Overview; click to move there"
         hidden={miniHidden}
         bind:this={minimap}
-        onpointerdown={(event) => {
+        onpointerdown={event => {
             miniDrag = true;
             minimap?.setPointerCapture(event.pointerId);
             miniPan(event);
         }}
-        onpointermove={(event) => {
+        onpointermove={event => {
             if (miniDrag) miniPan(event);
         }}
         onpointerup={() => (miniDrag = false)}

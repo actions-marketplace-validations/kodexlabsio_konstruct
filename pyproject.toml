@@ -4,7 +4,7 @@ version = "0.11.0"
 description = "Turn a data stack (dbt, SQL, Airflow, warehouse and Iceberg metadata) into a queryable graph with column-level lineage for coding agents."
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "licenses/*"]
 authors = [{ name = "Kodex Labs Ltd." }]
 requires-python = ">=3.11"
 keywords = ["lineage", "column-level lineage", "dbt", "airflow", "iceberg", "mcp", "claude-code", "data-catalog"]
@@ -80,8 +80,12 @@ src = [".", "tests"]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "PTH", "C4"]
 ignore = ["E501", "SIM905"]
 
+# Matches the Prettier settings of the Kodex Labs projects (and viewer/): single quotes, lines of
+# 110, four-space indents and trailing commas. Docstrings keep double quotes, as PEP 257 asks.
 [tool.ruff.format]
-quote-style = "double"
+quote-style = "single"
+indent-style = "space"
+skip-magic-trailing-comma = false
 
 [tool.mypy]
 python_version = "3.11"

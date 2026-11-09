@@ -1,6 +1,6 @@
 // Search over tables, columns and business terms, ranked by where the words match.
 
-import { attr, type GraphModel } from "./model";
+import { attr, type GraphModel } from './model';
 
 export const MAX_RESULTS = 60;
 
@@ -23,22 +23,22 @@ export interface SearchResult {
 export function buildIndex(model: GraphModel): Entry[] {
     const entries: Entry[] = [];
     for (const n of model.nodes) {
-        if (model.inView.has(n.id) || (n.kind === "column" && model.viewOf(n.id))) {
+        if (model.inView.has(n.id) || (n.kind === 'column' && model.viewOf(n.id))) {
             entries.push({
                 id: n.id,
                 text: model.label(n.id).toLowerCase(),
-                extra: `${n.relation ?? ""} ${n.description ?? ""}`.toLowerCase(),
+                extra: `${n.relation ?? ''} ${n.description ?? ''}`.toLowerCase(),
                 term: false,
                 names: [],
             });
-        } else if (n.kind === "term") {
-            const synonyms = attr<string[]>(n, "synonyms") ?? [];
+        } else if (n.kind === 'term') {
+            const synonyms = attr<string[]>(n, 'synonyms') ?? [];
             entries.push({
                 id: n.id,
-                text: `${n.name} ${synonyms.join(" ")}`.toLowerCase(),
-                extra: (n.description ?? "").toLowerCase(),
+                text: `${n.name} ${synonyms.join(' ')}`.toLowerCase(),
+                extra: (n.description ?? '').toLowerCase(),
                 term: true,
-                names: [n.name, ...synonyms].map((x) => x.toLowerCase()),
+                names: [n.name, ...synonyms].map(x => x.toLowerCase()),
             });
         }
     }
@@ -54,7 +54,7 @@ export function search(model: GraphModel, index: Entry[], query: string): Search
         let score = 0;
         for (const w of words) {
             const at = entry.text.indexOf(w);
-            if (at >= 0) score += at === 0 || ". _".includes(entry.text[at - 1] ?? "") ? 3 : 2;
+            if (at >= 0) score += at === 0 || '. _'.includes(entry.text[at - 1] ?? '') ? 3 : 2;
             else if (entry.extra.includes(w)) score += 1;
             else {
                 score = 0;
@@ -78,5 +78,5 @@ export function search(model: GraphModel, index: Entry[], query: string): Search
             if (v) relations.add(v);
         }
     }
-    return { ids: scored.slice(0, MAX_RESULTS).map((s) => s[1].id), total: scored.length, relations };
+    return { ids: scored.slice(0, MAX_RESULTS).map(s => s[1].id), total: scored.length, relations };
 }

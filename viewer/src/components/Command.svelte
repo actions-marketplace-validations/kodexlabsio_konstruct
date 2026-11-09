@@ -1,7 +1,7 @@
 <script lang="ts">
     let { text }: { text: string } = $props();
     let code: HTMLElement | undefined = $state();
-    let label = $state("Copy");
+    let label = $state('Copy');
 
     function selectText(): void {
         if (!code) return;
@@ -14,8 +14,8 @@
 
     function copy(): void {
         const done = (): void => {
-            label = "Copied";
-            setTimeout(() => (label = "Copy"), 1400);
+            label = 'Copied';
+            setTimeout(() => (label = 'Copy'), 1400);
         };
         // file:// pages are not a secure context, so the clipboard API may be missing: select instead.
         if (navigator.clipboard && window.isSecureContext)

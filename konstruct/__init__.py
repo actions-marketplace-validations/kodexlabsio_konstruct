@@ -9,7 +9,7 @@ The main entry point is `Project`::
     print(project.impact("orders.amount"))
 """
 
-__version__ = "0.11.0"
+__version__ = '0.11.0'
 
 from konstruct.explain import Explanation
 from konstruct.graph import Edge, Graph, Node
@@ -29,21 +29,21 @@ from konstruct.query import (
 )
 
 __all__ = [
-    "Definitions",
-    "Description",
-    "Edge",
-    "EdgeItem",
-    "Explanation",
-    "Graph",
-    "Item",
-    "Listing",
-    "Node",
-    "PathResult",
-    "Project",
-    "QueryError",
-    "QueryResult",
-    "SearchResult",
-    "TermDefinition",
-    "Walk",
-    "__version__",
+    'Definitions',
+    'Description',
+    'Edge',
+    'EdgeItem',
+    'Explanation',
+    'Graph',
+    'Item',
+    'Listing',
+    'Node',
+    'PathResult',
+    'Project',
+    'QueryError',
+    'QueryResult',
+    'SearchResult',
+    'TermDefinition',
+    'Walk',
+    '__version__',
 ]

@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 from konstruct.graph import relation_key
 
-SYSTEM_SCHEMAS = frozenset({"information_schema", "pg_catalog", "pg_toast"})
+SYSTEM_SCHEMAS = frozenset({'information_schema', 'pg_catalog', 'pg_toast'})
 
 
 @dataclass
@@ -59,9 +59,9 @@ def _schemas_filter(schemas: list[str] | None) -> set[str] | None:
 class DuckDBConnector:
     path: Path
     schemas: list[str] | None = None
-    label: str = "duckdb"
-    dialect: str | None = "duckdb"
-    default_schema: str | None = "main"
+    label: str = 'duckdb'
+    dialect: str | None = 'duckdb'
+    default_schema: str | None = 'main'
 
     def fetch(self) -> list[RelationMeta]:
         import duckdb
@@ -69,7 +69,7 @@ class DuckDBConnector:
         wanted = _schemas_filter(self.schemas)
         con = duckdb.connect(str(self.path), read_only=True)
         try:
-            database = con.execute("select current_database()").fetchone()
+            database = con.execute('select current_database()').fetchone()
             current = database[0] if database else self.path.stem
             tables = con.execute(
                 """
@@ -86,8 +86,8 @@ class DuckDBConnector:
             views = {
                 (row[0], row[1], row[2]): (row[3], row[4])
                 for row in con.execute(
-                    "select database_name, schema_name, view_name, sql, comment from duckdb_views() "
-                    "where not internal and database_name = ?",
+                    'select database_name, schema_name, view_name, sql, comment from duckdb_views() '
+                    'where not internal and database_name = ?',
                     [current],
                 ).fetchall()
             }
@@ -115,7 +115,7 @@ class DuckDBConnector:
             relations.append(
                 RelationMeta(
                     parts=(catalog, schema, table),
-                    kind="view" if table_type == "VIEW" else "table",
+                    kind='view' if table_type == 'VIEW' else 'table',
                     comment=comment or (view[1] if view else None),
                     columns=columns.get((catalog, schema, table), []),
                     view_sql=view[0] if view else None,
@@ -124,11 +124,11 @@ class DuckDBConnector:
         return relations
 
 
-def struct_fields(name: str, dtype: str | None, dialect: str = "duckdb") -> list[ColumnMeta]:
+def struct_fields(name: str, dtype: str | None, dialect: str = 'duckdb') -> list[ColumnMeta]:
     """Fields of a STRUCT column, of the structs in a LIST, or of a MAP's struct values, as dotted
     columns (``address.city``, ``items.sku``), recursively. Elements and values are not named in
     the path, matching how SQL reads them (``items[1].sku``, ``unnest(items).sku``)."""
-    if not dtype or not any(word in dtype.upper() for word in ("STRUCT", "RECORD", "ROW(")):
+    if not dtype or not any(word in dtype.upper() for word in ('STRUCT', 'RECORD', 'ROW(')):
         return []
     from sqlglot import exp
     from sqlglot.errors import SqlglotError
@@ -155,29 +155,29 @@ def _fields_of(name: str, built: Any, dialect: str) -> Iterator[ColumnMeta]:
     for field_def in built.expressions:
         if not isinstance(field_def, exp.ColumnDef) or not isinstance(field_def.kind, exp.DataType):
             continue
-        child = f"{name}.{field_def.name}"
-        yield ColumnMeta(child, field_def.kind.sql(dialect=dialect), None, {"nested": True})
+        child = f'{name}.{field_def.name}'
+        yield ColumnMeta(child, field_def.kind.sql(dialect=dialect), None, {'nested': True})
         yield from _fields_of(child, field_def.kind, dialect)
 
 
 def _duckdb_struct_fields(name: str, dtype: str | None) -> list[ColumnMeta]:
-    return struct_fields(name, dtype, "duckdb")
+    return struct_fields(name, dtype, 'duckdb')
 
 
 @dataclass
 class PostgresConnector:
     dsn: str
     schemas: list[str] | None = None
-    label: str = "postgres"
-    dialect: str | None = "postgres"
-    default_schema: str | None = "public"
+    label: str = 'postgres'
+    dialect: str | None = 'postgres'
+    default_schema: str | None = 'public'
 
     def fetch(self) -> list[RelationMeta]:
         import psycopg
 
         wanted = _schemas_filter(self.schemas)
         with psycopg.connect(self.dsn, autocommit=True) as con, con.cursor() as cur:
-            cur.execute("set default_transaction_read_only = on")
+            cur.execute('set default_transaction_read_only = on')
             cur.execute(
                 """
                 select current_database(), n.nspname, c.relname,
@@ -222,7 +222,7 @@ class PostgresConnector:
                     kind=kind,
                     comment=comment,
                     columns=columns.get(oid, []),
-                    view_sql=f"create view {_quote_pg(schema)}.{_quote_pg(table)} as {view_sql}"
+                    view_sql=f'create view {_quote_pg(schema)}.{_quote_pg(table)} as {view_sql}'
                     if view_sql
                     else None,
                 )
@@ -245,43 +245,43 @@ class IcebergConnector:
     name: str
     properties: dict[str, str]
     namespaces: list[str] | None = None
-    label: str = "iceberg"
+    label: str = 'iceberg'
     dialect: str | None = None
     default_schema: str | None = None
 
     def fetch(self) -> list[RelationMeta]:
         from pyiceberg.catalog import load_catalog
 
-        # konstruct reads metadata only. PyIceberg still builds a FileIO for every table it loads,
+        # Konstruct reads metadata only. PyIceberg still builds a FileIO for every table it loads,
         # and its default needs pyarrow for some locations; the fsspec FileIO opens nothing
         # until a file is read, so it works for any location without extra packages.
-        properties = {"py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO", **self.properties}
+        properties = {'py-io-impl': 'pyiceberg.io.fsspec.FsspecFileIO', **self.properties}
         catalog = load_catalog(self.name, **properties)
         relations = []
         for namespace in self._namespaces(catalog):
             for identifier in catalog.list_tables(namespace):
                 table = catalog.load_table(identifier)
                 schema = table.schema()
-                identifier_ids = set(getattr(schema, "identifier_field_ids", []) or [])
-                columns = list(_flatten_fields(schema.fields, prefix="", identifier_ids=identifier_ids))
+                identifier_ids = set(getattr(schema, 'identifier_field_ids', []) or [])
+                columns = list(_flatten_fields(schema.fields, prefix='', identifier_ids=identifier_ids))
                 table_properties = dict(table.properties or {})
-                attrs: dict[str, Any] = {"format_version": table.format_version}
+                attrs: dict[str, Any] = {'format_version': table.format_version}
                 spec = table.spec()
                 if spec.fields:
-                    attrs["partitioned_by"] = [
-                        f"{field.transform}({schema.find_column_name(field.source_id)})"
+                    attrs['partitioned_by'] = [
+                        f'{field.transform}({schema.find_column_name(field.source_id)})'
                         for field in spec.fields
                     ]
                 if identifier_ids:
-                    attrs["identifier_fields"] = [schema.find_column_name(i) for i in sorted(identifier_ids)]
+                    attrs['identifier_fields'] = [schema.find_column_name(i) for i in sorted(identifier_ids)]
                 snapshot = table.current_snapshot()
                 if snapshot is not None:
-                    attrs["snapshot_id"] = snapshot.snapshot_id
+                    attrs['snapshot_id'] = snapshot.snapshot_id
                 relations.append(
                     RelationMeta(
                         parts=(self.name, *identifier),
-                        kind="table",
-                        comment=table_properties.get("comment"),
+                        kind='table',
+                        comment=table_properties.get('comment'),
                         columns=columns,
                         attrs=attrs,
                     )
@@ -291,7 +291,7 @@ class IcebergConnector:
     def _namespaces(self, catalog: Any) -> Iterator[tuple[str, ...]]:
         if self.namespaces:
             for configured in self.namespaces:
-                yield tuple(configured.split("."))
+                yield tuple(configured.split('.'))
             return
         pending: list[tuple[str, ...]] = list(catalog.list_namespaces())
         seen: set[tuple[str, ...]] = set()
@@ -313,22 +313,22 @@ def _flatten_fields(fields: Any, prefix: str, identifier_ids: set[int]) -> Itera
     from pyiceberg.types import ListType, MapType, StructType
 
     for item in fields:
-        name = f"{prefix}{item.name}"
-        attrs: dict[str, Any] = {"field_id": item.field_id}
+        name = f'{prefix}{item.name}'
+        attrs: dict[str, Any] = {'field_id': item.field_id}
         if item.required:
-            attrs["required"] = True
+            attrs['required'] = True
         if item.field_id in identifier_ids:
-            attrs["identifier"] = True
+            attrs['identifier'] = True
         if prefix:
-            attrs["nested"] = True
+            attrs['nested'] = True
         yield ColumnMeta(name, str(item.field_type), item.doc, attrs)
         field_type = item.field_type
         if isinstance(field_type, StructType):
-            yield from _flatten_fields(field_type.fields, f"{name}.", identifier_ids)
+            yield from _flatten_fields(field_type.fields, f'{name}.', identifier_ids)
         elif isinstance(field_type, ListType) and isinstance(field_type.element_type, StructType):
-            yield from _flatten_fields(field_type.element_type.fields, f"{name}.", identifier_ids)
+            yield from _flatten_fields(field_type.element_type.fields, f'{name}.', identifier_ids)
         elif isinstance(field_type, MapType) and isinstance(field_type.value_type, StructType):
-            yield from _flatten_fields(field_type.value_type.fields, f"{name}.", identifier_ids)
+            yield from _flatten_fields(field_type.value_type.fields, f'{name}.', identifier_ids)
 
 
 class MissingDriver(Exception):
@@ -349,7 +349,7 @@ def _information_schema(
     catalog: str,
     schemas: set[str] | None,
     dialect: str,
-    column_type: str = "data_type",
+    column_type: str = 'data_type',
 ) -> list[RelationMeta]:
     """Tables, views, columns and comments from one catalogue's information_schema."""
 
@@ -357,14 +357,14 @@ def _information_schema(
         cursor.execute(sql)
         return list(cursor.fetchall())
 
-    prefix = f"{catalog}.information_schema" if catalog else "information_schema"
+    prefix = f'{catalog}.information_schema' if catalog else 'information_schema'
     tables = rows(
-        f"select table_catalog, table_schema, table_name, table_type, comment from {prefix}.tables "
+        f'select table_catalog, table_schema, table_name, table_type, comment from {prefix}.tables '
         "where lower(table_schema) <> 'information_schema' order by 1, 2, 3"
     )
     columns: dict[tuple[str, str, str], list[ColumnMeta]] = {}
     for table_catalog, schema, table, name, dtype, comment, _ in rows(
-        f"select table_catalog, table_schema, table_name, column_name, {column_type}, comment, ordinal_position "
+        f'select table_catalog, table_schema, table_name, column_name, {column_type}, comment, ordinal_position '
         f"from {prefix}.columns where lower(table_schema) <> 'information_schema' order by 1, 2, 3, 7"
     ):
         key = (str(table_catalog), str(schema), str(table))
@@ -374,13 +374,13 @@ def _information_schema(
     views = {
         (str(c), str(s), str(t)): definition
         for c, s, t, definition in rows(
-            f"select table_catalog, table_schema, table_name, view_definition from {prefix}.views "
+            f'select table_catalog, table_schema, table_name, view_definition from {prefix}.views '
             "where lower(table_schema) <> 'information_schema'"
         )
     }
     listed = {(str(c), str(s), str(t)) for c, s, t, _, _ in tables}
     # Some catalogues list views only in information_schema.views.
-    tables += [(c, s, t, "VIEW", None) for (c, s, t) in views if (c, s, t) not in listed]
+    tables += [(c, s, t, 'VIEW', None) for (c, s, t) in views if (c, s, t) not in listed]
     relations = []
     for table_catalog, schema, table, table_type, comment in tables:
         key = (str(table_catalog), str(schema), str(table))
@@ -390,7 +390,7 @@ def _information_schema(
         relations.append(
             RelationMeta(
                 parts=key,
-                kind="view" if "VIEW" in str(table_type).upper() else "table",
+                kind='view' if 'VIEW' in str(table_type).upper() else 'table',
                 comment=comment or None,
                 columns=columns.get(key, []),
                 view_sql=_view_statement(key, view),
@@ -403,10 +403,10 @@ def _view_statement(parts: tuple[str, ...], definition: Any) -> str | None:
     """A CREATE VIEW statement: Snowflake stores the whole statement, others only the query."""
     if not definition:
         return None
-    text = str(definition).strip().rstrip(";")
-    if text.lower().startswith("create"):
+    text = str(definition).strip().rstrip(';')
+    if text.lower().startswith('create'):
         return text
-    return f"create view {'.'.join(parts)} as {text}"
+    return f'create view {".".join(parts)} as {text}'
 
 
 @dataclass
@@ -417,21 +417,21 @@ class SnowflakeConnector:
     options: dict[str, Any]
     databases: list[str] | None = None
     schemas: list[str] | None = None
-    label: str = "snowflake"
-    dialect: str | None = "snowflake"
+    label: str = 'snowflake'
+    dialect: str | None = 'snowflake'
     default_schema: str | None = None
 
     def fetch(self) -> list[RelationMeta]:
-        connector = _driver("snowflake.connector", "snowflake")
+        connector = _driver('snowflake.connector', 'snowflake')
         connection = connector.connect(**self.options)
         try:
             cursor = connection.cursor()
-            databases = self.databases or [str(self.options.get("database") or "")]
+            databases = self.databases or [str(self.options.get('database') or '')]
             relations = []
             for database in databases:
-                relations += _information_schema(cursor, database, _schemas_filter(self.schemas), "snowflake")
+                relations += _information_schema(cursor, database, _schemas_filter(self.schemas), 'snowflake')
             if relations:
-                self.default_schema = str(self.options.get("schema") or "public")
+                self.default_schema = str(self.options.get('schema') or 'public')
             return relations
         finally:
             connection.close()
@@ -445,23 +445,23 @@ class DatabricksConnector:
     options: dict[str, Any]
     catalogs: list[str] | None = None
     schemas: list[str] | None = None
-    label: str = "databricks"
-    dialect: str | None = "databricks"
+    label: str = 'databricks'
+    dialect: str | None = 'databricks'
     default_schema: str | None = None
 
     def fetch(self) -> list[RelationMeta]:
-        sql = _driver("databricks.sql", "databricks")
+        sql = _driver('databricks.sql', 'databricks')
         connection = sql.connect(**self.options)
         try:
             cursor = connection.cursor()
-            catalogs = self.catalogs or [str(self.options.get("catalog") or "main")]
+            catalogs = self.catalogs or [str(self.options.get('catalog') or 'main')]
             relations = []
             for catalog in catalogs:
                 relations += _information_schema(
-                    cursor, catalog, _schemas_filter(self.schemas), "databricks", column_type="full_data_type"
+                    cursor, catalog, _schemas_filter(self.schemas), 'databricks', column_type='full_data_type'
                 )
             if relations:
-                self.default_schema = str(self.options.get("schema") or "default")
+                self.default_schema = str(self.options.get('schema') or 'default')
             return relations
         finally:
             connection.close()
@@ -476,12 +476,12 @@ class BigQueryConnector:
     datasets: list[str] | None = None
     location: str | None = None
     endpoint: str | None = None
-    label: str = "bigquery"
-    dialect: str | None = "bigquery"
+    label: str = 'bigquery'
+    dialect: str | None = 'bigquery'
     default_schema: str | None = None
 
     def client(self) -> Any:
-        bigquery = _driver("google.cloud.bigquery", "bigquery")
+        bigquery = _driver('google.cloud.bigquery', 'bigquery')
         if self.endpoint:
             from google.api_core.client_options import ClientOptions
             from google.auth.credentials import AnonymousCredentials
@@ -502,15 +502,15 @@ class BigQueryConnector:
                 continue
             for item in client.list_tables(dataset.reference):
                 table = client.get_table(item.reference)
-                kind = "view" if table.table_type in ("VIEW", "MATERIALIZED_VIEW") else "table"
+                kind = 'view' if table.table_type in ('VIEW', 'MATERIALIZED_VIEW') else 'table'
                 parts = (table.project, table.dataset_id, table.table_id)
                 relations.append(
                     RelationMeta(
                         parts=parts,
                         kind=kind,
                         comment=table.description or None,
-                        columns=list(_bigquery_fields(table.schema, "")),
-                        view_sql=f"create view `{'.'.join(parts)}` as {table.view_query}"
+                        columns=list(_bigquery_fields(table.schema, '')),
+                        view_sql=f'create view `{".".join(parts)}` as {table.view_query}'
                         if table.view_query
                         else None,
                     )
@@ -520,11 +520,11 @@ class BigQueryConnector:
 
 def _bigquery_fields(fields: Any, prefix: str) -> Iterator[ColumnMeta]:
     for field_def in fields:
-        name = f"{prefix}{field_def.name}"
-        dtype = field_def.field_type + ("[]" if field_def.mode == "REPEATED" else "")
-        attrs: dict[str, Any] = {"nested": True} if prefix else {}
-        if field_def.mode == "REQUIRED":
-            attrs["required"] = True
+        name = f'{prefix}{field_def.name}'
+        dtype = field_def.field_type + ('[]' if field_def.mode == 'REPEATED' else '')
+        attrs: dict[str, Any] = {'nested': True} if prefix else {}
+        if field_def.mode == 'REQUIRED':
+            attrs['required'] = True
         yield ColumnMeta(name, dtype, field_def.description or None, attrs)
-        if field_def.field_type in ("RECORD", "STRUCT") and field_def.fields:
-            yield from _bigquery_fields(field_def.fields, f"{name}.")
+        if field_def.field_type in ('RECORD', 'STRUCT') and field_def.fields:
+            yield from _bigquery_fields(field_def.fields, f'{name}.')

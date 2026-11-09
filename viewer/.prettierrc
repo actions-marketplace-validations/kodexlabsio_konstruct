@@ -1,0 +1,34 @@
+{
+    "singleQuote": true,
+    "trailingComma": "all",
+    "printWidth": 110,
+    "tabWidth": 4,
+    "arrowParens": "avoid",
+    "overrides": [
+        {
+            "files": "**/*.json",
+            "options": {
+                "tabWidth": 2
+            }
+        },
+        {
+            "files": "**/*.yaml",
+            "options": {
+                "tabWidth": 2
+            }
+        },
+        {
+            "files": "**/*.yml",
+            "options": {
+                "tabWidth": 2
+            }
+        },
+        {
+            "files": "*.svelte",
+            "options": {
+                "parser": "svelte"
+            }
+        }
+    ],
+    "plugins": ["prettier-plugin-svelte", "prettier-plugin-organize-imports"]
+}

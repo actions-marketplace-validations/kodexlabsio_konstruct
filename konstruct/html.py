@@ -1,9 +1,9 @@
 """Write graph.html: one self-contained, offline, interactive viewer of the graph.
 
 The viewer is a Svelte and TypeScript app in ``viewer/`` at the root of the repository. Its build
-(``pnpm build``) writes ``konstruct/viewer/index.html``: one file with the script, the styles and
-the Manrope and JetBrains Mono fonts (SIL Open Font License; the licences are in
-``konstruct/viewer/fonts``) inlined. konstruct fills its two placeholders with
+(``pnpm build``) writes ``konstruct/viewer.html``: one file with the script, the styles and the
+Manrope and JetBrains Mono fonts (SIL Open Font License; the licences are in ``licenses/``)
+inlined. Konstruct fills its two placeholders with
 ``Graph.to_dict()`` and each column's formula and each relation's conditions from
 :mod:`konstruct.explain`. The page loads nothing from the network.
 """
@@ -18,13 +18,13 @@ from typing import Any
 
 from konstruct.graph import Graph
 
-_DATA_PLACEHOLDER = "__KONSTRUCT_DATA__"
-_EXPLAIN_PLACEHOLDER = "__KONSTRUCT_EXPLAIN__"
+_DATA_PLACEHOLDER = '__KONSTRUCT_DATA__'
+_EXPLAIN_PLACEHOLDER = '__KONSTRUCT_EXPLAIN__'
 
 # Inside <script type="application/json"> the HTML parser only looks for "</script"; escaping
 # "<", ">" and "&" rules that out entirely, and U+2028/U+2029 are escaped for older JS parsers.
 _JSON_ESCAPES = str.maketrans(
-    {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026", "\u2028": "\\u2028", "\u2029": "\\u2029"}
+    {'<': '\\u003c', '>': '\\u003e', '&': '\\u0026', '\u2028': '\\u2028', '\u2029': '\\u2029'}
 )
 
 VIEWER_FORMULA_LIMIT = 800
@@ -33,14 +33,14 @@ VIEWER_FORMULA_LIMIT = 800
 @cache
 def template() -> str:
     """The built viewer page, with the data placeholders still open."""
-    page = resources.files("konstruct").joinpath("viewer", "index.html").read_text(encoding="utf-8")
+    page = resources.files('konstruct').joinpath('viewer.html').read_text(encoding='utf-8')
     if _DATA_PLACEHOLDER not in page or _EXPLAIN_PLACEHOLDER not in page:
-        raise RuntimeError("konstruct/viewer/index.html is not a viewer build; run `pnpm build` in viewer/")
+        raise RuntimeError('konstruct/viewer.html is not a viewer build; run `pnpm build` in viewer/')
     return page
 
 
 def _embed_json(data: Any) -> str:
-    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).translate(_JSON_ESCAPES)
+    return json.dumps(data, ensure_ascii=False, separators=(',', ':')).translate(_JSON_ESCAPES)
 
 
 def explanations(graph: Graph, cache: Any = None) -> dict[str, Any]:
@@ -64,5 +64,5 @@ def write_html(graph: Graph, path: Path, cache: Any = None) -> Path:
         .replace(_DATA_PLACEHOLDER, _embed_json(graph.to_dict()), 1)
     )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(page, encoding="utf-8")
+    path.write_text(page, encoding='utf-8')
     return path

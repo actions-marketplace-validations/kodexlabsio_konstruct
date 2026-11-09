@@ -29,13 +29,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-ASSET_DECORATORS = frozenset({"asset", "multi_asset", "graph_asset", "observable_source_asset"})
-SQL_METHODS = frozenset({"execute", "sql", "query", "run_query", "executescript"})
+ASSET_DECORATORS = frozenset({'asset', 'multi_asset', 'graph_asset', 'observable_source_asset'})
+SQL_METHODS = frozenset({'execute', 'sql', 'query', 'run_query', 'executescript'})
 SENSOR_DECORATORS = frozenset(
-    {"sensor", "asset_sensor", "multi_asset_sensor", "run_status_sensor", "run_failure_sensor"}
+    {'sensor', 'asset_sensor', 'multi_asset_sensor', 'run_status_sensor', 'run_failure_sensor'}
 )
 # Methods on an op definition that return the same op under the same or a new name.
-OP_WRAPPERS = frozenset({"alias", "tag", "with_hooks", "with_retry_policy", "configured"})
+OP_WRAPPERS = frozenset({'alias', 'tag', 'with_hooks', 'with_retry_policy', 'configured'})
 
 
 @dataclass
@@ -115,34 +115,34 @@ class DagsterFile:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DagsterFile:
         jobs = []
-        for job in data.get("jobs", []):
+        for job in data.get('jobs', []):
             fields = dict(job)
-            fields["ops"] = [OpCall(**call) for call in fields.get("ops", [])]
+            fields['ops'] = [OpCall(**call) for call in fields.get('ops', [])]
             jobs.append(JobInfo(**fields))
         return cls(
-            path=data["path"],
-            assets=[AssetInfo(**a) for a in data.get("assets", [])],
+            path=data['path'],
+            assets=[AssetInfo(**a) for a in data.get('assets', [])],
             jobs=jobs,
-            warnings=list(data.get("warnings", [])),
-            ops=[OpInfo(**o) for o in data.get("ops", [])],
-            sensors=[SensorInfo(**s) for s in data.get("sensors", [])],
+            warnings=list(data.get('warnings', [])),
+            ops=[OpInfo(**o) for o in data.get('ops', [])],
+            sensors=[SensorInfo(**s) for s in data.get('sensors', [])],
         )
 
 
 def looks_like_dagster_file(text: str) -> bool:
-    return "dagster" in text and any(
+    return 'dagster' in text and any(
         marker in text
         for marker in (
-            "@asset",
-            "@multi_asset",
-            "@dbt_assets",
-            "define_asset_job",
-            "Definitions(",
-            "@op",
-            "@job",
-            "@graph",
-            "sensor",
-            "@schedule",
+            '@asset',
+            '@multi_asset',
+            '@dbt_assets',
+            'define_asset_job',
+            'Definitions(',
+            '@op',
+            '@job',
+            '@graph',
+            'sensor',
+            '@schedule',
         )
     )
 
@@ -180,9 +180,9 @@ class _Parser:
             return node.value
         if isinstance(node, ast.Name):
             if node.id in self.functions:
-                return {"__asset__": self.functions[node.id].key}
+                return {'__asset__': self.functions[node.id].key}
             if node.id in self.job_functions:
-                return {"__job__": self.graphs[node.id][1]}
+                return {'__job__': self.graphs[node.id][1]}
             return self.constants.get(node.id)
         if isinstance(node, ast.JoinedStr):
             parts = []
@@ -194,7 +194,7 @@ class _Parser:
                     if inner is None:
                         return None
                     parts.append(str(inner))
-            return "".join(parts)
+            return ''.join(parts)
         if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
             return [self.value(e) for e in node.elts]
         if isinstance(node, ast.Dict):
@@ -205,38 +205,38 @@ class _Parser:
             }
         if isinstance(node, ast.Call):
             name = _name(node)
-            if name == "AssetKey" and node.args:
-                return {"__asset__": _key(self.value(node.args[0]))}
-            if name == "AssetIn":
-                key = self.value(node.args[0]) if node.args else self.kwarg(node, "key")
-                prefix = self.kwarg(node, "key_prefix")
-                return {"__asset_in__": _key(key, prefix) if key is not None else None}
-            if name == "AssetDep" and node.args:
+            if name == 'AssetKey' and node.args:
+                return {'__asset__': _key(self.value(node.args[0]))}
+            if name == 'AssetIn':
+                key = self.value(node.args[0]) if node.args else self.kwarg(node, 'key')
+                prefix = self.kwarg(node, 'key_prefix')
+                return {'__asset_in__': _key(key, prefix) if key is not None else None}
+            if name == 'AssetDep' and node.args:
                 inner = self.value(node.args[0])
-                return inner if isinstance(inner, dict) else {"__asset__": _key(inner)}
-            if name == "AssetOut":
+                return inner if isinstance(inner, dict) else {'__asset__': _key(inner)}
+            if name == 'AssetOut':
                 return {
-                    "__asset_out__": self.kwarg(node, "key"),
-                    "prefix": self.kwarg(node, "key_prefix"),
-                    "group": self.kwarg(node, "group_name"),
-                    "description": self.kwarg(node, "description"),
+                    '__asset_out__': self.kwarg(node, 'key'),
+                    'prefix': self.kwarg(node, 'key_prefix'),
+                    'group': self.kwarg(node, 'group_name'),
+                    'description': self.kwarg(node, 'description'),
                 }
             if (
                 isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "AssetSelection"
+                and node.func.value.id == 'AssetSelection'
             ):
                 return self._selection(node)
             if isinstance(node.func, ast.Attribute) and node.func.attr in (
-                "downstream",
-                "upstream",
-                "required_multi_asset_neighbors",
+                'downstream',
+                'upstream',
+                'required_multi_asset_neighbors',
             ):
                 return self.value(node.func.value)
         if (
             isinstance(node, ast.Attribute)
             and isinstance(node.value, ast.Name)
-            and node.value.id in ("DagsterRunStatus", "RunStatus")
+            and node.value.id in ('DagsterRunStatus', 'RunStatus')
         ):
             return node.attr
         if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.BitOr, ast.Add)):
@@ -251,26 +251,26 @@ class _Parser:
         assert isinstance(call.func, ast.Attribute)
         method = call.func.attr
         values = [self.value(a) for a in call.args]
-        if method == "all":
-            return ["*"]
-        if method == "groups":
-            return [f"group:{v}" for v in values if isinstance(v, str)]
-        if method in ("keys", "assets"):
+        if method == 'all':
+            return ['*']
+        if method == 'groups':
+            return [f'group:{v}' for v in values if isinstance(v, str)]
+        if method in ('keys', 'assets'):
             found = []
             for item in values:
-                if isinstance(item, dict) and item.get("__asset__"):
-                    found.append(str(item["__asset__"]))
+                if isinstance(item, dict) and item.get('__asset__'):
+                    found.append(str(item['__asset__']))
                 elif isinstance(item, (str, list)):
                     found.append(_key(item))
             return found
-        if method == "key_prefixes":
-            return [f"prefix:{_key(v)}" for v in values if v is not None]
+        if method == 'key_prefixes':
+            return [f'prefix:{_key(v)}' for v in values if v is not None]
         return []
 
     def kinds(self, call: ast.Call | None) -> list[str]:
         """``kinds={...}`` and the older ``compute_kind=...`` of an asset or op decorator."""
         found: list[str] = []
-        for kind_arg in ("kinds", "compute_kind"):
+        for kind_arg in ('kinds', 'compute_kind'):
             value = self.kwarg(call, kind_arg) if call is not None else None
             found += [value] if isinstance(value, str) else [k for k in value or [] if isinstance(k, str)]
         return found
@@ -319,26 +319,26 @@ class _Parser:
 
     def visit_function(self, func: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         for decorator in func.decorator_list:
-            name = _name(decorator) or ""
+            name = _name(decorator) or ''
             call = decorator if isinstance(decorator, ast.Call) else None
-            if name == "dbt_assets":
-                select = self.kwarg(call, "select") if call else None
-                exclude = self.kwarg(call, "exclude") if call else None
+            if name == 'dbt_assets':
+                select = self.kwarg(call, 'select') if call else None
+                exclude = self.kwarg(call, 'exclude') if call else None
                 asset = AssetInfo(
                     key=func.name,
                     function=func.name,
                     line=func.lineno,
                     description=ast.get_docstring(func),
-                    kinds=["dbt"],
+                    kinds=['dbt'],
                     dbt_select=str(select).split() if isinstance(select, str) else [],
                     dbt_exclude=str(exclude).split() if isinstance(exclude, str) else [],
                 )
                 self.functions[func.name] = asset
                 self.result.assets.append(asset)
                 return
-            if name == "op":
-                op_name = self.kwarg(call, "name") if call else None
-                description = (self.kwarg(call, "description") if call else None) or ast.get_docstring(func)
+            if name == 'op':
+                op_name = self.kwarg(call, 'name') if call else None
+                description = (self.kwarg(call, 'description') if call else None) or ast.get_docstring(func)
                 op = OpInfo(
                     name=op_name if isinstance(op_name, str) else func.name,
                     function=func.name,
@@ -351,36 +351,36 @@ class _Parser:
                 self.ops[func.name] = op
                 self.result.ops.append(op)
                 return
-            if name in ("graph", "job"):
-                graph_name = self.kwarg(call, "name") if call else None
-                description = (self.kwarg(call, "description") if call else None) or ast.get_docstring(func)
+            if name in ('graph', 'job'):
+                graph_name = self.kwarg(call, 'name') if call else None
+                description = (self.kwarg(call, 'description') if call else None) or ast.get_docstring(func)
                 self.graphs[func.name] = (
                     func,
                     graph_name if isinstance(graph_name, str) else func.name,
                     description.strip() if isinstance(description, str) else None,
                 )
-                if name == "job":
+                if name == 'job':
                     self.job_functions[func.name] = func.lineno
                 return
             if name not in ASSET_DECORATORS:
                 continue
-            if name == "multi_asset" and call is not None:
-                outs = self.kwarg(call, "outs") or {}
+            if name == 'multi_asset' and call is not None:
+                outs = self.kwarg(call, 'outs') or {}
                 if isinstance(outs, dict):
-                    prefix = self.kwarg(call, "key_prefix")
-                    group = self.kwarg(call, "group_name")
+                    prefix = self.kwarg(call, 'key_prefix')
+                    group = self.kwarg(call, 'group_name')
                     first: AssetInfo | None = None
                     for out_name, out in outs.items():
                         spec = out if isinstance(out, dict) else {}
-                        out_key = spec.get("__asset_out__") or _key(out_name, spec.get("prefix") or prefix)
+                        out_key = spec.get('__asset_out__') or _key(out_name, spec.get('prefix') or prefix)
                         asset = AssetInfo(
                             key=_key(out_key)
-                            if not isinstance(out_key, str) or "/" not in out_key
+                            if not isinstance(out_key, str) or '/' not in out_key
                             else out_key,
                             function=func.name,
                             line=func.lineno,
-                            group=spec.get("group") or group,
-                            description=spec.get("description") or ast.get_docstring(func),
+                            group=spec.get('group') or group,
+                            description=spec.get('description') or ast.get_docstring(func),
                         )
                         self.result.assets.append(asset)
                         first = first or asset
@@ -393,17 +393,17 @@ class _Parser:
             description = ast.get_docstring(func)
             kinds: list[str] = []
             if call is not None:
-                explicit = self.kwarg(call, "key")
-                named = self.kwarg(call, "name")
-                prefix = self.kwarg(call, "key_prefix")
-                if isinstance(explicit, dict) and explicit.get("__asset__"):
-                    key = explicit["__asset__"]
+                explicit = self.kwarg(call, 'key')
+                named = self.kwarg(call, 'name')
+                prefix = self.kwarg(call, 'key_prefix')
+                if isinstance(explicit, dict) and explicit.get('__asset__'):
+                    key = explicit['__asset__']
                 elif explicit is not None:
                     key = _key(explicit)
                 else:
                     key = _key(named or func.name, prefix)
-                group = self.kwarg(call, "group_name")
-                description = self.kwarg(call, "description") or description
+                group = self.kwarg(call, 'group_name')
+                description = self.kwarg(call, 'description') or description
                 kinds = self.kinds(call)
             asset = AssetInfo(
                 key=_key(key),
@@ -425,26 +425,26 @@ class _Parser:
         ins: dict[str, Any] = {}
         for decorator in func.decorator_list:
             if isinstance(decorator, ast.Call):
-                ins = self.kwarg(decorator, "ins") or {}
-                for item in self.kwarg(decorator, "deps") or []:
-                    if isinstance(item, dict) and item.get("__asset__"):
-                        deps.append(str(item["__asset__"]))
+                ins = self.kwarg(decorator, 'ins') or {}
+                for item in self.kwarg(decorator, 'deps') or []:
+                    if isinstance(item, dict) and item.get('__asset__'):
+                        deps.append(str(item['__asset__']))
                     elif isinstance(item, (str, list)):
                         deps.append(_key(item))
         params = [
             a.arg
             for a in func.args.args + func.args.kwonlyargs
-            if a.arg not in ("context", "self", "config") and not _is_resource(a.annotation)
+            if a.arg not in ('context', 'self', 'config') and not _is_resource(a.annotation)
         ]
         for param in params:
             spec = ins.get(param) if isinstance(ins, dict) else None
-            if isinstance(spec, dict) and spec.get("__asset_in__"):
-                deps.append(str(spec["__asset_in__"]))
-            elif param not in ("dbt", "duckdb", "database", "warehouse") and not param.endswith(
-                ("_resource", "_client")
+            if isinstance(spec, dict) and spec.get('__asset_in__'):
+                deps.append(str(spec['__asset_in__']))
+            elif param not in ('dbt', 'duckdb', 'database', 'warehouse') and not param.endswith(
+                ('_resource', '_client')
             ):
                 # As Dagster does: a parameter names the upstream asset under this asset's own key prefix.
-                prefix = asset.key.rsplit("/", 1)[0] if "/" in asset.key else None
+                prefix = asset.key.rsplit('/', 1)[0] if '/' in asset.key else None
                 deps.append(_key(param, prefix))
         for item in assets or [asset]:
             item.deps = sorted(set(deps) - {item.key})
@@ -460,8 +460,8 @@ class _Parser:
             ):
                 text = self.value(node.args[0])
                 if isinstance(text, str) and text.strip():
-                    statements.append(text.strip().rstrip(";"))
-        return ";\n".join(statements) or None
+                    statements.append(text.strip().rstrip(';'))
+        return ';\n'.join(statements) or None
 
     def _dbt_in(self, func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
         """dbt commands an op runs: ``dbt.cli(["run", ...])`` or ``subprocess.run(["dbt", ...])``."""
@@ -475,15 +475,15 @@ class _Parser:
             if not isinstance(words, list) or not words or not all(isinstance(w, str) for w in words):
                 continue
             method = node.func.attr if isinstance(node.func, ast.Attribute) else _name(node.func)
-            if method == "cli":
-                commands.append(" ".join(["dbt", *words]))
-            elif words[0] == "dbt" and method in ("run", "call", "check_call", "check_output", "Popen"):
-                commands.append(" ".join(words))
+            if method == 'cli':
+                commands.append(' '.join(['dbt', *words]))
+            elif words[0] == 'dbt' and method in ('run', 'call', 'check_call', 'check_output', 'Popen'):
+                commands.append(' '.join(words))
         return commands
 
     def op_job(self, function: str, name: str, line: int, description: str | None) -> None:
         calls: list[OpCall] = []
-        self.expand(function, "", {}, calls)
+        self.expand(function, '', {}, calls)
         self.result.jobs.append(JobInfo(name=name, line=line, description=description, ops=calls))
 
     def expand(
@@ -492,7 +492,7 @@ class _Parser:
         """Expand a graph or job body into op invocations; returns the handles of its outputs."""
         func, name, _ = self.graphs[function]
         if function in self.expanding:
-            self.result.warnings.append(f"line {func.lineno}: graph {name} invokes itself; skipped")
+            self.result.warnings.append(f'line {func.lineno}: graph {name} invokes itself; skipped')
             return []
         self.expanding.add(function)
         env: dict[str, list[str]] = {}
@@ -505,7 +505,7 @@ class _Parser:
             # Dagster names a repeated invocation without an alias op_2, op_3, ...
             count = used.get(handle, 0) + 1
             used[handle] = count
-            return handle if count == 1 else f"{handle}_{count}"
+            return handle if count == 1 else f'{handle}_{count}'
 
         def callee(node: ast.expr) -> tuple[str, str | None] | None:
             """The op or graph a call target names, and the alias given to it."""
@@ -518,11 +518,11 @@ class _Parser:
                     and isinstance(node.func, ast.Attribute)
                     and node.func.attr in OP_WRAPPERS
                 ):
-                    if node.func.attr == "alias" and node.args and alias is None:
+                    if node.func.attr == 'alias' and node.args and alias is None:
                         found = self.value(node.args[0])
                         alias = found if isinstance(found, str) else None
-                    elif node.func.attr == "configured" and alias is None:
-                        found = self.kwarg(node, "name")
+                    elif node.func.attr == 'configured' and alias is None:
+                        found = self.kwarg(node, 'name')
                         alias = found if isinstance(found, str) else None
                     node = node.func.value
                     continue
@@ -541,7 +541,7 @@ class _Parser:
             mapped = {params[i]: hs for i, hs in enumerate(arguments) if i < len(params)}
             mapped.update({k: v for k, v in keywords.items() if k})
             handle = unique(alias or inner_name)
-            return self.expand(target, f"{prefix}{handle}.", mapped, calls)
+            return self.expand(target, f'{prefix}{handle}.', mapped, calls)
 
         def evaluate(node: ast.expr) -> list[str]:
             if isinstance(node, ast.Name):
@@ -550,9 +550,9 @@ class _Parser:
                 found = callee(node.func)
                 if found:
                     return invoke(found[0], found[1], node, [])
-                if isinstance(node.func, ast.Attribute) and node.func.attr in ("map", "collect"):
+                if isinstance(node.func, ast.Attribute) and node.func.attr in ('map', 'collect'):
                     source = evaluate(node.func.value)
-                    if node.func.attr == "collect" or not node.args:
+                    if node.func.attr == 'collect' or not node.args:
                         return source
                     mapper = node.args[0]
                     if isinstance(mapper, ast.Lambda):
@@ -592,20 +592,20 @@ class _Parser:
                     outputs.extend(evaluate(statement.value))
                 elif isinstance(statement, (ast.For, ast.AsyncFor, ast.While)):
                     self.result.warnings.append(
-                        f"line {statement.lineno}: loop in graph {name}; its ops are counted once"
+                        f'line {statement.lineno}: loop in graph {name}; its ops are counted once'
                     )
                     run(statement.body)
                 elif isinstance(statement, (ast.If, ast.With, ast.AsyncWith, ast.Try)):
                     run(statement.body)
-                    run(getattr(statement, "orelse", []))
+                    run(getattr(statement, 'orelse', []))
 
         run(func.body)
         self.expanding.discard(function)
         return sorted(set(outputs))
 
     def job_names(self, value: Any) -> list[str]:
-        if isinstance(value, dict) and value.get("__job__"):
-            return [str(value["__job__"])]
+        if isinstance(value, dict) and value.get('__job__'):
+            return [str(value['__job__'])]
         if isinstance(value, str):
             return [value]
         if isinstance(value, list):
@@ -613,10 +613,10 @@ class _Parser:
         return []
 
     def asset_keys(self, value: Any) -> list[str]:
-        if isinstance(value, dict) and value.get("__asset__"):
-            return [str(value["__asset__"])]
+        if isinstance(value, dict) and value.get('__asset__'):
+            return [str(value['__asset__'])]
         if isinstance(value, list):
-            if value and all(isinstance(v, str) for v in value) and not any("/" in v for v in value):
+            if value and all(isinstance(v, str) for v in value) and not any('/' in v for v in value):
                 return [_key(value)]
             return [key for item in value for key in self.asset_keys(item)]
         if isinstance(value, str):
@@ -626,15 +626,15 @@ class _Parser:
     def visit_scheduler(self, func: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         """``@schedule`` and sensor decorators, read once every job is known."""
         for decorator in func.decorator_list:
-            name = _name(decorator) or ""
+            name = _name(decorator) or ''
             call = decorator if isinstance(decorator, ast.Call) else None
-            if name == "schedule" and call is not None:
-                cron = self.kwarg(call, "cron_schedule")
+            if name == 'schedule' and call is not None:
+                cron = self.kwarg(call, 'cron_schedule')
                 if cron is None and call.args:
                     cron = self.value(call.args[0])
-                targets = [self.kwarg(call, k) for k in ("job", "job_name", "target")]
+                targets = [self.kwarg(call, k) for k in ('job', 'job_name', 'target')]
                 for job_name in self.job_names([t for t in targets if t is not None]):
-                    self.schedules.append((job_name, cron if isinstance(cron, str) else "custom"))
+                    self.schedules.append((job_name, cron if isinstance(cron, str) else 'custom'))
             elif name in SENSOR_DECORATORS:
                 self.sensor(func.name, func.lineno, name, call, ast.get_docstring(func))
 
@@ -644,46 +644,46 @@ class _Parser:
         def get(*names: str) -> list[Any]:
             return [v for v in (self.kwarg(call, n) for n in names) if v is not None] if call else []
 
-        sensor_name = get("name")
-        status = get("run_status")
+        sensor_name = get('name')
+        status = get('run_status')
         info = SensorInfo(
             name=sensor_name[0] if sensor_name and isinstance(sensor_name[0], str) else default,
             kind=kind,
             line=line,
-            jobs=self.job_names(get("job", "jobs", "job_name", "request_job", "request_jobs", "target")),
-            assets=self.asset_keys(get("asset_key", "monitored_assets")),
-            monitored_jobs=self.job_names(get("monitored_jobs")),
-            status="FAILURE"
-            if kind == "run_failure_sensor"
+            jobs=self.job_names(get('job', 'jobs', 'job_name', 'request_job', 'request_jobs', 'target')),
+            assets=self.asset_keys(get('asset_key', 'monitored_assets')),
+            monitored_jobs=self.job_names(get('monitored_jobs')),
+            status='FAILURE'
+            if kind == 'run_failure_sensor'
             else (status[0] if status and isinstance(status[0], str) else None),
-            description=(get("description") or [description])[0],
+            description=(get('description') or [description])[0],
         )
         if info.jobs or info.assets or info.monitored_jobs:
             self.result.sensors.append(info)
 
     def visit_call(self, call: ast.Call, target: ast.expr | None) -> None:
-        name = _name(call) or ""
+        name = _name(call) or ''
         if (
-            name == "to_job"
+            name == 'to_job'
             and isinstance(call.func, ast.Attribute)
             and isinstance(call.func.value, ast.Name)
             and call.func.value.id in self.graphs
             and call.func.value.id not in self.job_functions
         ):
             graph = call.func.value.id
-            job_name = self.kwarg(call, "name")
+            job_name = self.kwarg(call, 'name')
             job_name = job_name if isinstance(job_name, str) else self.graphs[graph][1]
             self.op_job(
-                graph, job_name, call.lineno, self.kwarg(call, "description") or self.graphs[graph][2]
+                graph, job_name, call.lineno, self.kwarg(call, 'description') or self.graphs[graph][2]
             )
             if isinstance(target, ast.Name):
-                self.constants[target.id] = {"__job__": job_name}
+                self.constants[target.id] = {'__job__': job_name}
             return
-        if name == "Definitions":
+        if name == 'Definitions':
             # Graphs listed as jobs become jobs of the same name.
             known = {job.name for job in self.result.jobs}
             for keyword in call.keywords:
-                if keyword.arg == "jobs" and isinstance(keyword.value, (ast.List, ast.Tuple)):
+                if keyword.arg == 'jobs' and isinstance(keyword.value, (ast.List, ast.Tuple)):
                     for item in keyword.value.elts:
                         if (
                             isinstance(item, ast.Name)
@@ -693,22 +693,22 @@ class _Parser:
                             func, graph_name, description = self.graphs[item.id]
                             self.op_job(item.id, graph_name, func.lineno, description)
             return
-        if name == "SensorDefinition":
-            sensor_name = self.kwarg(call, "name")
+        if name == 'SensorDefinition':
+            sensor_name = self.kwarg(call, 'name')
             self.sensor(
-                sensor_name if isinstance(sensor_name, str) else f"sensor_line_{call.lineno}",
+                sensor_name if isinstance(sensor_name, str) else f'sensor_line_{call.lineno}',
                 call.lineno,
-                "sensor",
+                'sensor',
                 call,
                 None,
             )
             return
-        if name == "define_asset_job":
-            job_name = self.value(call.args[0]) if call.args else self.kwarg(call, "name")
+        if name == 'define_asset_job':
+            job_name = self.value(call.args[0]) if call.args else self.kwarg(call, 'name')
             if not isinstance(job_name, str):
-                self.result.warnings.append(f"line {call.lineno}: asset job name is not a constant; skipped")
+                self.result.warnings.append(f'line {call.lineno}: asset job name is not a constant; skipped')
                 return
-            selection = self.kwarg(call, "selection")
+            selection = self.kwarg(call, 'selection')
             if selection is None and len(call.args) > 1:
                 selection = self.value(call.args[1])
             self.result.jobs.append(
@@ -716,21 +716,21 @@ class _Parser:
                     name=job_name,
                     line=call.lineno,
                     selection=_selection_list(selection),
-                    description=self.kwarg(call, "description"),
+                    description=self.kwarg(call, 'description'),
                 )
             )
             if isinstance(target, ast.Name):
-                self.constants[target.id] = {"__job__": job_name}
-        elif name in ("ScheduleDefinition", "build_schedule_from_partitioned_job"):
+                self.constants[target.id] = {'__job__': job_name}
+        elif name in ('ScheduleDefinition', 'build_schedule_from_partitioned_job'):
             job = (
-                self.kwarg(call, "job")
-                or self.kwarg(call, "target")
+                self.kwarg(call, 'job')
+                or self.kwarg(call, 'target')
                 or (self.value(call.args[0]) if call.args else None)
             )
-            cron = self.kwarg(call, "cron_schedule")
-            job_name = job.get("__job__") if isinstance(job, dict) else self.kwarg(call, "job_name")
+            cron = self.kwarg(call, 'cron_schedule')
+            job_name = job.get('__job__') if isinstance(job, dict) else self.kwarg(call, 'job_name')
             if isinstance(job_name, str):
-                self.schedules.append((job_name, cron if isinstance(cron, str) else "partitioned"))
+                self.schedules.append((job_name, cron if isinstance(cron, str) else 'partitioned'))
 
 
 def _is_resource(annotation: ast.expr | None) -> bool:
@@ -740,46 +740,46 @@ def _is_resource(annotation: ast.expr | None) -> bool:
         name = _name(annotation.value)
     if not name:
         return False
-    return name.endswith(("Resource", "Context", "Config")) or name == "ResourceParam"
+    return name.endswith(('Resource', 'Context', 'Config')) or name == 'ResourceParam'
 
 
 def _selection_list(selection: Any) -> list[str]:
     if selection is None:
-        return ["*"]
+        return ['*']
     if isinstance(selection, str):
-        return [_key(part) if part not in ("*",) and ":" not in part else part for part in selection.split()]
+        return [_key(part) if part not in ('*',) and ':' not in part else part for part in selection.split()]
     if isinstance(selection, list):
         found = []
         for item in selection:
-            if isinstance(item, dict) and item.get("__asset__"):
-                found.append(str(item["__asset__"]))
+            if isinstance(item, dict) and item.get('__asset__'):
+                found.append(str(item['__asset__']))
             elif isinstance(item, str):
-                found.append(item if item.startswith(("group:", "prefix:")) or item == "*" else _key(item))
+                found.append(item if item.startswith(('group:', 'prefix:')) or item == '*' else _key(item))
             elif isinstance(item, list):
                 found.extend(_selection_list(item))
         return found
-    if isinstance(selection, dict) and selection.get("__asset__"):
-        return [str(selection["__asset__"])]
+    if isinstance(selection, dict) and selection.get('__asset__'):
+        return [str(selection['__asset__'])]
     return []
 
 
 def _key(value: Any, prefix: Any = None) -> str:
     """An asset key as slash-separated text: ``["analytics", "orders"]`` is ``analytics/orders``."""
-    if isinstance(value, dict) and value.get("__asset__"):
-        base = str(value["__asset__"])
+    if isinstance(value, dict) and value.get('__asset__'):
+        base = str(value['__asset__'])
     elif isinstance(value, (list, tuple)):
-        base = "/".join(str(v) for v in value if v is not None)
+        base = '/'.join(str(v) for v in value if v is not None)
     else:
         base = str(value)
     if prefix:
         parts = [prefix] if isinstance(prefix, str) else [str(p) for p in prefix]
-        base = "/".join([*parts, base])
+        base = '/'.join([*parts, base])
     return base
 
 
 def parse_file(path: Path) -> DagsterFile:
     """Parse one Dagster file. Raises SyntaxError if it is not valid Python."""
-    return _Parser(path, path.read_text(encoding="utf-8")).parse()
+    return _Parser(path, path.read_text(encoding='utf-8')).parse()
 
 
 def parse_source(path: Path, source: str) -> DagsterFile:

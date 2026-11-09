@@ -1,7 +1,7 @@
 """Render dbt model SQL without dbt: Jinja with ref, source, var, config, the project's macros and
 its packages' macros, and adapter.dispatch.
 
-konstruct uses dbt's compiled SQL when it has it. This renderer is for SQL dbt has not compiled: the
+Konstruct uses dbt's compiled SQL when it has it. This renderer is for SQL dbt has not compiled: the
 other side of a `konstruct diff`, or a project whose artefacts are missing. It runs in a sandbox, never
 touches a database, and stands in for anything that would (run_query, statement, load_result) with
 an empty result.
@@ -18,22 +18,22 @@ from jinja2 import Undefined
 from jinja2.exceptions import TemplateError
 from jinja2.sandbox import SandboxedEnvironment
 
-_SET = re.compile(r"^\s*\{%-?\s*(set|do)\b")
+_SET = re.compile(r'^\s*\{%-?\s*(set|do)\b')
 
 
 _DATEPARTS = frozenset(
     {
-        "year",
-        "quarter",
-        "month",
-        "week",
-        "day",
-        "hour",
-        "minute",
-        "second",
-        "millisecond",
-        "microsecond",
-        "dayofweek",
+        'year',
+        'quarter',
+        'month',
+        'week',
+        'day',
+        'hour',
+        'minute',
+        'second',
+        'millisecond',
+        'microsecond',
+        'dayofweek',
     }
 )
 
@@ -41,7 +41,7 @@ _DATEPARTS = frozenset(
 def _sql_argument(value: Any) -> str:
     """dbt passes SQL snippets as strings ('ordered_at'); date parts are passed bare ('day')."""
     if isinstance(value, (list, tuple)):
-        return ", ".join(_sql_argument(v) for v in value)
+        return ', '.join(_sql_argument(v) for v in value)
     text = str(value)
     return f"'{text}'" if text.lower() in _DATEPARTS else text
 
@@ -53,10 +53,10 @@ class _Lenient(Undefined):
 
     def __call__(self, *args: Any, **kwargs: Any) -> str:  # type: ignore[override]
         values = [*args, *kwargs.values()]
-        return f"konstruct_macro({', '.join(_sql_argument(v) for v in values)})" if values else ""
+        return f'konstruct_macro({", ".join(_sql_argument(v) for v in values)})' if values else ''
 
     def __getattr__(self, name: str) -> Any:
-        if name.startswith("__"):
+        if name.startswith('__'):
             raise AttributeError(name)
         return self
 
@@ -67,7 +67,7 @@ class _Lenient(Undefined):
         return iter(())
 
     def __str__(self) -> str:
-        return ""
+        return ''
 
     def __bool__(self) -> bool:
         return False
@@ -94,46 +94,46 @@ class _DbtBuiltins:
         return f"date_trunc('{datepart}', {date})"
 
     def dateadd(self, datepart: str, interval: Any, from_date_or_timestamp: str) -> str:
-        return f"date_add({from_date_or_timestamp}, interval ({interval}) {datepart})"
+        return f'date_add({from_date_or_timestamp}, interval ({interval}) {datepart})'
 
     def datediff(self, first_date: str, second_date: str, datepart: str) -> str:
         return f"date_diff('{datepart}', {first_date}, {second_date})"
 
     def last_day(self, date: str, datepart: str) -> str:
-        return f"last_day({date})"
+        return f'last_day({date})'
 
     def cast(self, field: str, type: str) -> str:
-        return f"cast({field} as {type})"
+        return f'cast({field} as {type})'
 
     def safe_cast(self, field: str, type: str) -> str:
-        return f"try_cast({field} as {type})"
+        return f'try_cast({field} as {type})'
 
     def concat(self, fields: list[str]) -> str:
-        return " || ".join(str(f) for f in fields)
+        return ' || '.join(str(f) for f in fields)
 
     def hash(self, field: str) -> str:
-        return f"md5(cast({field} as varchar))"
+        return f'md5(cast({field} as varchar))'
 
     def split_part(self, string_text: str, delimiter_text: str, part_number: Any) -> str:
-        return f"split_part({string_text}, {delimiter_text}, {part_number})"
+        return f'split_part({string_text}, {delimiter_text}, {part_number})'
 
     def replace(self, field: str, old_chars: str, new_chars: str) -> str:
-        return f"replace({field}, {old_chars}, {new_chars})"
+        return f'replace({field}, {old_chars}, {new_chars})'
 
     def length(self, expression: str) -> str:
-        return f"length({expression})"
+        return f'length({expression})'
 
     def right(self, string_text: str, length_expression: str) -> str:
-        return f"right({string_text}, {length_expression})"
+        return f'right({string_text}, {length_expression})'
 
     def position(self, substring_text: str, string_text: str) -> str:
-        return f"position({substring_text} in {string_text})"
+        return f'position({substring_text} in {string_text})'
 
     def any_value(self, expression: str) -> str:
-        return f"any_value({expression})"
+        return f'any_value({expression})'
 
     def bool_or(self, expression: str) -> str:
-        return f"bool_or({expression})"
+        return f'bool_or({expression})'
 
     def listagg(
         self,
@@ -142,7 +142,7 @@ class _DbtBuiltins:
         order_by_clause: str | None = None,
         limit_num: Any = None,
     ) -> str:
-        return f"string_agg({measure}, {delimiter_text})"
+        return f'string_agg({measure}, {delimiter_text})'
 
     def string_literal(self, value: str) -> str:
         return "'" + str(value).replace("'", "''") + "'"
@@ -152,34 +152,34 @@ class _DbtBuiltins:
 
     def date_spine(self, datepart: str, start_date: str, end_date: str) -> str:
         return (
-            f"select cast(spine as date) as date_{datepart} "
-            f"from generate_series(cast({start_date} as timestamp), cast({end_date} as timestamp), "
-            f"interval 1 {datepart}) as t(spine)"
+            f'select cast(spine as date) as date_{datepart} '
+            f'from generate_series(cast({start_date} as timestamp), cast({end_date} as timestamp), '
+            f'interval 1 {datepart}) as t(spine)'
         )
 
     def current_timestamp(self) -> str:
-        return "current_timestamp"
+        return 'current_timestamp'
 
     def type_string(self) -> str:
-        return "varchar"
+        return 'varchar'
 
     def type_int(self) -> str:
-        return "integer"
+        return 'integer'
 
     def type_bigint(self) -> str:
-        return "bigint"
+        return 'bigint'
 
     def type_numeric(self) -> str:
-        return "numeric"
+        return 'numeric'
 
     def type_float(self) -> str:
-        return "float"
+        return 'float'
 
     def type_boolean(self) -> str:
-        return "boolean"
+        return 'boolean'
 
     def type_timestamp(self) -> str:
-        return "timestamp"
+        return 'timestamp'
 
 
 class _Adapter:
@@ -191,7 +191,7 @@ class _Adapter:
         return self.type_
 
     def dispatch(self, name: str, macro_namespace: str | None = None) -> Any:
-        for candidate in (f"{self.type_}__{name}", f"default__{name}", name):
+        for candidate in (f'{self.type_}__{name}', f'default__{name}', name):
             found = self._lookup(candidate)
             if found is not None:
                 return found
@@ -205,8 +205,8 @@ def _macro_text(paths: list[Path]) -> str:
     texts: list[str] = []
     for base in paths:
         if base.is_dir():
-            texts.extend(p.read_text(encoding="utf-8", errors="replace") for p in sorted(base.rglob("*.sql")))
-    return "\n".join(texts)
+            texts.extend(p.read_text(encoding='utf-8', errors='replace') for p in sorted(base.rglob('*.sql')))
+    return '\n'.join(texts)
 
 
 class Renderer:
@@ -221,33 +221,33 @@ class Renderer:
         macro_paths: list[Path] | None = None,
     ) -> None:
         self.manifest = manifest
-        self.adapter_type = adapter_type or manifest.get("metadata", {}).get("adapter_type") or "default"
-        self.env = SandboxedEnvironment(undefined=_Lenient, extensions=["jinja2.ext.do"])
+        self.adapter_type = adapter_type or manifest.get('metadata', {}).get('adapter_type') or 'default'
+        self.env = SandboxedEnvironment(undefined=_Lenient, extensions=['jinja2.ext.do'])
         self.relations: dict[str, str] = {}
         self.by_package: dict[tuple[str, str], str] = {}
-        for node in manifest.get("nodes", {}).values():
-            if node.get("resource_type") in ("model", "seed", "snapshot") and node.get("relation_name"):
-                self.relations.setdefault(node["name"], node["relation_name"])
-                self.by_package[(node.get("package_name", ""), node["name"])] = node["relation_name"]
+        for node in manifest.get('nodes', {}).values():
+            if node.get('resource_type') in ('model', 'seed', 'snapshot') and node.get('relation_name'):
+                self.relations.setdefault(node['name'], node['relation_name'])
+                self.by_package[(node.get('package_name', ''), node['name'])] = node['relation_name']
         self.sources = {
-            (s["source_name"], s["name"]): s["relation_name"]
-            for s in manifest.get("sources", {}).values()
-            if s.get("relation_name")
+            (s['source_name'], s['name']): s['relation_name']
+            for s in manifest.get('sources', {}).values()
+            if s.get('relation_name')
         }
         self.variables: dict[str, Any] = {}
-        project_name = manifest.get("metadata", {}).get("project_name")
+        project_name = manifest.get('metadata', {}).get('project_name')
         self.macros: dict[str, Any] = {}
         self.packages: dict[str, _Namespace] = {}
         context = self._context()
-        packages_dir = project_root / "dbt_packages"
+        packages_dir = project_root / 'dbt_packages'
         if packages_dir.is_dir():
             for package in sorted(p for p in packages_dir.iterdir() if p.is_dir()):
-                macros = self._load(_macro_text([package / "macros"]), context)
+                macros = self._load(_macro_text([package / 'macros']), context)
                 self.packages[package.name] = _Namespace(macros)
                 for name, macro in macros.items():
                     self.macros.setdefault(name, macro)
         own = self._load(
-            _macro_text(macro_paths if macro_paths is not None else [project_root / "macros"]), context
+            _macro_text(macro_paths if macro_paths is not None else [project_root / 'macros']), context
         )
         self.macros.update(own)
         if project_name:
@@ -260,11 +260,11 @@ class Renderer:
         names = [a for a in args if isinstance(a, str)]
         if len(names) >= 2:
             return self.by_package.get((names[0], names[1]), names[1])
-        name = names[0] if names else ""
+        name = names[0] if names else ''
         return self.relations.get(name, name)
 
     def _source(self, source_name: str, table: str) -> str:
-        return str(self.sources.get((source_name, table), f"{source_name}.{table}"))
+        return str(self.sources.get((source_name, table), f'{source_name}.{table}'))
 
     def _var(self, name: str, default: Any = None) -> Any:
         return self.variables.get(name, default)
@@ -272,24 +272,24 @@ class Renderer:
     def _context(self) -> dict[str, Any]:
         empty = _Lenient()
         return {
-            "ref": self._ref,
-            "source": self._source,
-            "var": self._var,
-            "config": lambda *a, **k: "",
-            "is_incremental": lambda: False,
-            "env_var": lambda name, default="": default,
-            "adapter": _Adapter(self.adapter_type, self._lookup),
-            "target": {"type": self.adapter_type, "name": "dev", "schema": "", "database": ""},
-            "execute": False,
-            "run_query": lambda *a, **k: empty,
-            "load_result": lambda *a, **k: empty,
-            "return": lambda value: value,
-            "log": lambda *a, **k: "",
-            "exceptions": empty,
-            "this": empty,
-            "modules": empty,
-            "dbt_utils": _Namespace({}),
-            "dbt": _DbtBuiltins(),
+            'ref': self._ref,
+            'source': self._source,
+            'var': self._var,
+            'config': lambda *a, **k: '',
+            'is_incremental': lambda: False,
+            'env_var': lambda name, default='': default,
+            'adapter': _Adapter(self.adapter_type, self._lookup),
+            'target': {'type': self.adapter_type, 'name': 'dev', 'schema': '', 'database': ''},
+            'execute': False,
+            'run_query': lambda *a, **k: empty,
+            'load_result': lambda *a, **k: empty,
+            'return': lambda value: value,
+            'log': lambda *a, **k: '',
+            'exceptions': empty,
+            'this': empty,
+            'modules': empty,
+            'dbt_utils': _Namespace({}),
+            'dbt': _DbtBuiltins(),
         }
 
     def _load(self, text: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -299,7 +299,7 @@ class Renderer:
             module = self.env.from_string(text).make_module(context)
         except TemplateError:
             return {}
-        return {name: getattr(module, name) for name in dir(module) if not name.startswith("_")}
+        return {name: getattr(module, name) for name in dir(module) if not name.startswith('_')}
 
     def render(self, sql: str) -> str:
         context = self._context()

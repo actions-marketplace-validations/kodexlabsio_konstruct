@@ -13,7 +13,7 @@ body:
     id: proposal
     attributes:
       label: Proposal
-      description: What you would like konstruct to do. An example command and its output helps.
+      description: What you would like Konstruct to do. An example command and its output helps.
   - type: textarea
     id: context
     attributes:

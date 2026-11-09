@@ -16,16 +16,16 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-DAG_CLASSES = frozenset({"DAG"})
-GROUP_CLASSES = frozenset({"TaskGroup"})
-COSMOS_CLASSES = frozenset({"DbtTaskGroup", "DbtDag"})
-SQL_KWARGS = ("sql", "query", "sql_query")
-WRITE_KWARGS = ("target_table", "destination_table", "destination_project_dataset_table")
-READ_KWARGS = ("table", "source_table", "source_project_dataset_table")
-UNRESOLVED = "{{ unresolved }}"
+DAG_CLASSES = frozenset({'DAG'})
+GROUP_CLASSES = frozenset({'TaskGroup'})
+COSMOS_CLASSES = frozenset({'DbtTaskGroup', 'DbtDag'})
+SQL_KWARGS = ('sql', 'query', 'sql_query')
+WRITE_KWARGS = ('target_table', 'destination_table', 'destination_project_dataset_table')
+READ_KWARGS = ('table', 'source_table', 'source_project_dataset_table')
+UNRESOLVED = '{{ unresolved }}'
 # Marks a whole TaskGroup in a dependency until its first and last tasks are known.
-GROUP = "\x00group:"
-DBT_COMMANDS = frozenset({"run", "build", "test", "seed", "snapshot", "compile"})
+GROUP = '\x00group:'
+DBT_COMMANDS = frozenset({'run', 'build', 'test', 'seed', 'snapshot', 'compile'})
 
 
 @dataclass
@@ -71,20 +71,20 @@ class DagInfo:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DagInfo:
         tasks = {
-            key: TaskInfo(**{**value, "dbt": [DbtInvocation(**d) for d in value.get("dbt", [])]})
-            for key, value in data.get("tasks", {}).items()
+            key: TaskInfo(**{**value, 'dbt': [DbtInvocation(**d) for d in value.get('dbt', [])]})
+            for key, value in data.get('tasks', {}).items()
         }
         return cls(
             **{
                 **data,
-                "tasks": tasks,
-                "dependencies": [(a, b) for a, b in data.get("dependencies", [])],
+                'tasks': tasks,
+                'dependencies': [(a, b) for a, b in data.get('dependencies', [])],
             }
         )
 
 
 def looks_like_dag_file(text: str) -> bool:
-    return "airflow" in text and ("DAG" in text or "@dag" in text)
+    return 'airflow' in text and ('DAG' in text or '@dag' in text)
 
 
 def _call_name(node: ast.expr) -> str | None:
@@ -102,7 +102,7 @@ def _dotted(node: ast.expr) -> str | None:
         return node.id
     if isinstance(node, ast.Attribute):
         base = _dotted(node.value)
-        return f"{base}.{node.attr}" if base else node.attr
+        return f'{base}.{node.attr}' if base else node.attr
     return None
 
 
@@ -137,8 +137,8 @@ class _Parser:
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.Name):
-            if node.id == "__doc__":
-                return self.constants.get("__doc__")
+            if node.id == '__doc__':
+                return self.constants.get('__doc__')
             return self.constants.get(node.id)
         if isinstance(node, ast.JoinedStr):
             parts = []
@@ -148,7 +148,7 @@ class _Parser:
                 elif isinstance(part, ast.FormattedValue):
                     inner = self.value(part.value)
                     parts.append(str(inner) if inner is not None else UNRESOLVED)
-            return "".join(parts)
+            return ''.join(parts)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
             left, right = self.value(node.left), self.value(node.right)
             if isinstance(left, str) and isinstance(right, str):
@@ -164,10 +164,10 @@ class _Parser:
             }
         if isinstance(node, ast.Call):
             name = self.call_name(node)
-            if name in ("Asset", "Dataset"):
-                uri = self.value(node.args[0]) if node.args else self.kwarg(node, "uri")
-                return {"__asset__": uri or self.kwarg(node, "name")}
-            if name == "dedent" and node.args:
+            if name in ('Asset', 'Dataset'):
+                uri = self.value(node.args[0]) if node.args else self.kwarg(node, 'uri')
+                return {'__asset__': uri or self.kwarg(node, 'name')}
+            if name == 'dedent' and node.args:
                 return self.value(node.args[0])
         return None
 
@@ -197,10 +197,10 @@ class _Parser:
             if isinstance(statement, (ast.Import, ast.ImportFrom)):
                 for alias in statement.names:
                     if alias.asname:
-                        self.aliases[alias.asname] = alias.name.rsplit(".", 1)[-1]
+                        self.aliases[alias.asname] = alias.name.rsplit('.', 1)[-1]
         doc = ast.get_docstring(tree)
         if doc:
-            self.constants["__doc__"] = doc
+            self.constants['__doc__'] = doc
         for statement in tree.body:
             if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
                 target = statement.targets[0]
@@ -215,8 +215,8 @@ class _Parser:
                     self.dags[0].tasks.setdefault(task.task_id, task)
             else:
                 self.warnings.append(
-                    f"{len(self.unowned)} task(s) could not be matched to a DAG: "
-                    + ", ".join(t.task_id for t in self.unowned)
+                    f'{len(self.unowned)} task(s) could not be matched to a DAG: '
+                    + ', '.join(t.task_id for t in self.unowned)
                 )
         for hint, upstream, downstream in self._expand_groups():
             owner = hint or next(
@@ -245,9 +245,9 @@ class _Parser:
                     if isinstance(item.optional_vars, ast.Name):
                         self.dag_vars[item.optional_vars.id] = inner_dag
                 elif isinstance(expr, ast.Call) and name in GROUP_CLASSES:
-                    group_id = self.value(expr.args[0]) if expr.args else self.kwarg(expr, "group_id")
+                    group_id = self.value(expr.args[0]) if expr.args else self.kwarg(expr, 'group_id')
                     if isinstance(group_id, str):
-                        inner_group = f"{group}.{group_id}" if group else group_id
+                        inner_group = f'{group}.{group_id}' if group else group_id
                         self.group_members.setdefault(inner_group, [])
                         if isinstance(item.optional_vars, ast.Name):
                             self.task_vars[item.optional_vars.id] = [GROUP + inner_group]
@@ -287,29 +287,29 @@ class _Parser:
             for child in ast.iter_child_nodes(statement):
                 if isinstance(child, ast.stmt):
                     self.visit_statement(child, dag, group)
-            for handler in getattr(statement, "handlers", []):
+            for handler in getattr(statement, 'handlers', []):
                 self.visit_body(handler.body, dag, group)
-            for extra in ("orelse", "finalbody"):
+            for extra in ('orelse', 'finalbody'):
                 self.visit_body(getattr(statement, extra, []) or [], dag, group)
 
     def visit_function(
         self, func: ast.FunctionDef | ast.AsyncFunctionDef, dag: DagInfo | None, group: str | None
     ) -> None:
         for decorator in func.decorator_list:
-            name = _dotted(decorator.func if isinstance(decorator, ast.Call) else decorator) or ""
-            if name in ("dag", "airflow.decorators.dag", "airflow.sdk.dag"):
-                call = decorator if isinstance(decorator, ast.Call) else ast.Call(ast.Name("dag"), [], [])
+            name = _dotted(decorator.func if isinstance(decorator, ast.Call) else decorator) or ''
+            if name in ('dag', 'airflow.decorators.dag', 'airflow.sdk.dag'):
+                call = decorator if isinstance(decorator, ast.Call) else ast.Call(ast.Name('dag'), [], [])
                 created = self.make_dag(call, func.lineno, default_id=func.name)
                 self.dag_vars[func.name] = created
                 self.visit_body(func.body, created, None)
                 return
-            if name == "task" or name.startswith("task."):
+            if name == 'task' or name.startswith('task.'):
                 self.taskflow[func.name] = func
                 return
-            if name in ("task_group", "taskgroup") or name.endswith(".task_group"):
-                group_id = self.kwarg(decorator, "group_id") if isinstance(decorator, ast.Call) else None
+            if name in ('task_group', 'taskgroup') or name.endswith('.task_group'):
+                group_id = self.kwarg(decorator, 'group_id') if isinstance(decorator, ast.Call) else None
                 func_group = str(group_id or func.name)
-                func_group = f"{group}.{func_group}" if group else func_group
+                func_group = f'{group}.{func_group}' if group else func_group
                 self.taskflow[func.name] = func
                 self.group_functions[func.name] = func_group
                 self.group_members.setdefault(func_group, [])
@@ -317,17 +317,17 @@ class _Parser:
                 return
 
     def make_dag(self, call: ast.Call, line: int, default_id: str | None = None) -> DagInfo:
-        dag_id: Any = self.name_kwarg(call, "dag_id")
+        dag_id: Any = self.name_kwarg(call, 'dag_id')
         if dag_id is None and call.args:
             dag_id = self.value(call.args[0])
         if not isinstance(dag_id, str) or UNRESOLVED in dag_id:
-            dag_id = default_id or f"{self.path.stem}_line_{line}"
+            dag_id = default_id or f'{self.path.stem}_line_{line}'
             if default_id is None:
-                self.warnings.append(f"line {line}: DAG id is not a constant; using {dag_id}")
-        schedule = self.kwarg(call, "schedule") or self.kwarg(call, "schedule_interval")
-        description = self.kwarg(call, "description") or self.kwarg(call, "doc_md")
-        tags = self.kwarg(call, "tags")
-        paths = self.kwarg(call, "template_searchpath")
+                self.warnings.append(f'line {line}: DAG id is not a constant; using {dag_id}')
+        schedule = self.kwarg(call, 'schedule') or self.kwarg(call, 'schedule_interval')
+        description = self.kwarg(call, 'description') or self.kwarg(call, 'doc_md')
+        tags = self.kwarg(call, 'tags')
+        paths = self.kwarg(call, 'template_searchpath')
         for item in [paths] if isinstance(paths, str) else paths or []:
             if isinstance(item, str):
                 base = Path(item)
@@ -366,21 +366,21 @@ class _Parser:
 
     def visit_call(self, call: ast.Call, dag: DagInfo | None, group: str | None) -> list[str] | None:
         func = call.func
-        name = self.call_name(call) or ""
-        if isinstance(func, ast.Attribute) and func.attr in ("set_downstream", "set_upstream") and call.args:
+        name = self.call_name(call) or ''
+        if isinstance(func, ast.Attribute) and func.attr in ('set_downstream', 'set_upstream') and call.args:
             this = self.visit_expression(func.value, dag, group) or []
             other = self.visit_expression(call.args[0], dag, group) or []
-            if func.attr == "set_downstream":
+            if func.attr == 'set_downstream':
                 self.depend(dag, this, other)
             else:
                 self.depend(dag, other, this)
             return this
-        if name == "chain":
+        if name == 'chain':
             groups = [self.visit_expression(arg, dag, group) or [] for arg in call.args]
             for upstream, downstream in itertools.pairwise(groups):
                 self.depend(dag, upstream, downstream)
             return groups[-1] if groups else []
-        if name == "cross_downstream" and len(call.args) == 2:
+        if name == 'cross_downstream' and len(call.args) == 2:
             upstream = self.visit_expression(call.args[0], dag, group) or []
             downstream = self.visit_expression(call.args[1], dag, group) or []
             self.depend(dag, upstream, downstream)
@@ -389,11 +389,11 @@ class _Parser:
         target, task_id = self._taskflow_target(func)
         if target is not None:
             return self.taskflow_task(self.taskflow[target], dag, group, task_id)
-        if isinstance(func, ast.Attribute) and func.attr in ("expand", "expand_kwargs", "partial"):
+        if isinstance(func, ast.Attribute) and func.attr in ('expand', 'expand_kwargs', 'partial'):
             if isinstance(func.value, ast.Call):
                 return self.visit_call(func.value, dag, group)
             return None
-        if name in COSMOS_CLASSES or name.endswith(("Operator", "Sensor")) or name.startswith("Dbt"):
+        if name in COSMOS_CLASSES or name.endswith(('Operator', 'Sensor')) or name.startswith('Dbt'):
             return self.operator_task(call, name, dag, group)
         return None
 
@@ -429,7 +429,7 @@ class _Parser:
         self, task: TaskInfo, dag_kwarg: ast.expr | None, dag: DagInfo | None, group: str | None
     ) -> list[str]:
         if group:
-            task.task_id = f"{group}.{task.task_id}"
+            task.task_id = f'{group}.{task.task_id}'
         owner = dag
         if isinstance(dag_kwarg, ast.Name) and dag_kwarg.id in self.dag_vars:
             owner = self.dag_vars[dag_kwarg.id]
@@ -438,50 +438,50 @@ class _Parser:
         else:
             owner.tasks.setdefault(task.task_id, task)
         if group:
-            parts = group.split(".")
+            parts = group.split('.')
             for depth in range(1, len(parts) + 1):
-                self.group_members.setdefault(".".join(parts[:depth]), []).append(task.task_id)
+                self.group_members.setdefault('.'.join(parts[:depth]), []).append(task.task_id)
         return [task.task_id]
 
     def operator_task(
         self, call: ast.Call, name: str, dag: DagInfo | None, group: str | None
     ) -> list[str] | None:
-        task_id = self.name_kwarg(call, "task_id", "group_id", "dag_id")
+        task_id = self.name_kwarg(call, 'task_id', 'group_id', 'dag_id')
         if task_id is None:
-            self.warnings.append(f"line {call.lineno}: {name} has no constant task_id; skipped")
+            self.warnings.append(f'line {call.lineno}: {name} has no constant task_id; skipped')
             return None
         task = TaskInfo(task_id=task_id, operator=name, line=call.lineno)
-        doc = self.kwarg(call, "doc_md") or self.kwarg(call, "doc")
+        doc = self.kwarg(call, 'doc_md') or self.kwarg(call, 'doc')
         task.doc = doc.strip() if isinstance(doc, str) else None
-        command = self.kwarg(call, "bash_command")
+        command = self.kwarg(call, 'bash_command')
         if isinstance(command, str):
             task.bash_command = command
             task.dbt.extend(parse_dbt_commands(command))
         if name in COSMOS_CLASSES:
-            task.dbt.append(_cosmos_invocation(self.kwarg_node(call, "render_config"), self))
-        elif name.startswith("Dbt"):
+            task.dbt.append(_cosmos_invocation(self.kwarg_node(call, 'render_config'), self))
+        elif name.startswith('Dbt'):
             command_name = _dbt_command_from_class(name)
             if command_name:
-                selectors = _as_list(self.kwarg(call, "select")) + _as_list(self.kwarg(call, "models"))
+                selectors = _as_list(self.kwarg(call, 'select')) + _as_list(self.kwarg(call, 'models'))
                 task.dbt.append(
                     DbtInvocation(
                         command=command_name,
                         selectors=selectors,
-                        excludes=_as_list(self.kwarg(call, "exclude")),
-                        project_dir=_str_or_none(self.kwarg(call, "project_dir")),
+                        excludes=_as_list(self.kwarg(call, 'exclude')),
+                        project_dir=_str_or_none(self.kwarg(call, 'project_dir')),
                     )
                 )
         for key in SQL_KWARGS:
             self.read_sql(task, self.kwarg(call, key))
-        configuration = self.kwarg(call, "configuration")
+        configuration = self.kwarg(call, 'configuration')
         if isinstance(configuration, dict):
-            query = configuration.get("query")
+            query = configuration.get('query')
             if isinstance(query, dict):
-                self.read_sql(task, query.get("query"))
-                destination = query.get("destinationTable")
+                self.read_sql(task, query.get('query'))
+                destination = query.get('destinationTable')
                 if isinstance(destination, dict):
-                    parts = [destination.get(k) for k in ("projectId", "datasetId", "tableId")]
-                    task.writes.append(".".join(p for p in parts if isinstance(p, str)))
+                    parts = [destination.get(k) for k in ('projectId', 'datasetId', 'tableId')]
+                    task.writes.append('.'.join(p for p in parts if isinstance(p, str)))
         for key in WRITE_KWARGS:
             value = self.kwarg(call, key)
             if isinstance(value, str):
@@ -490,9 +490,9 @@ class _Parser:
             value = self.kwarg(call, key)
             if isinstance(value, str):
                 task.reads.append(value)
-        task.inlets = _assets(self.kwarg(call, "inlets"))
-        task.outlets = _assets(self.kwarg(call, "outlets"))
-        return self.add_task(task, self.kwarg_node(call, "dag"), dag, group)
+        task.inlets = _assets(self.kwarg(call, 'inlets'))
+        task.outlets = _assets(self.kwarg(call, 'outlets'))
+        return self.add_task(task, self.kwarg_node(call, 'dag'), dag, group)
 
     def _taskflow_target(self, func: ast.expr) -> tuple[str | None, str | None]:
         """The TaskFlow function a call ends up invoking, and any task_id given by override()."""
@@ -501,18 +501,18 @@ class _Parser:
             if isinstance(func, ast.Name):
                 return (func.id if func.id in self.taskflow else None), task_id
             if isinstance(func, ast.Call) and isinstance(func.func, ast.Attribute):
-                if func.func.attr == "override":
-                    override = self.kwarg(func, "task_id")
+                if func.func.attr == 'override':
+                    override = self.kwarg(func, 'task_id')
                     task_id = task_id or (override if isinstance(override, str) else None)
-                elif func.func.attr != "partial":
+                elif func.func.attr != 'partial':
                     return None, None
                 func = func.func.value
                 continue
             if isinstance(func, ast.Attribute) and func.attr in (
-                "expand",
-                "expand_kwargs",
-                "override",
-                "partial",
+                'expand',
+                'expand_kwargs',
+                'override',
+                'partial',
             ):
                 func = func.value
                 continue
@@ -526,39 +526,39 @@ class _Parser:
         override_id: str | None = None,
     ) -> list[str]:
         decorator_call: ast.Call | None = None
-        kind = "python"
+        kind = 'python'
         for decorator in func.decorator_list:
             target = decorator.func if isinstance(decorator, ast.Call) else decorator
-            dotted = _dotted(target) or ""
-            if dotted == "task" or dotted.startswith("task."):
-                kind = dotted.split(".", 1)[1] if "." in dotted else "python"
+            dotted = _dotted(target) or ''
+            if dotted == 'task' or dotted.startswith('task.'):
+                kind = dotted.split('.', 1)[1] if '.' in dotted else 'python'
                 decorator_call = decorator if isinstance(decorator, ast.Call) else None
         if func.name in self.group_functions:
             # A @task_group function: its tasks were registered when the function was visited.
             return [GROUP + self.group_functions[func.name]]
         task_id = func.name
         if decorator_call is not None:
-            declared = self.kwarg(decorator_call, "task_id")
+            declared = self.kwarg(decorator_call, 'task_id')
             task_id = declared if isinstance(declared, str) else task_id
         task_id = override_id or task_id
         task = TaskInfo(
-            task_id=task_id, operator=f"@task.{kind}" if kind != "python" else "@task", line=func.lineno
+            task_id=task_id, operator=f'@task.{kind}' if kind != 'python' else '@task', line=func.lineno
         )
         task.doc = ast.get_docstring(func)
-        if kind == "bash":
+        if kind == 'bash':
             returned = [self.value(n.value) for n in ast.walk(func) if isinstance(n, ast.Return) and n.value]
             commands = [r for r in returned if isinstance(r, str)]
             if commands:
                 task.bash_command = commands[0]
                 for command in commands:
                     task.dbt.extend(parse_dbt_commands(command))
-        if kind == "sql":
+        if kind == 'sql':
             returned = [self.value(n.value) for n in ast.walk(func) if isinstance(n, ast.Return) and n.value]
             for value in returned:
                 self.read_sql(task, value)
         if decorator_call is not None:
-            task.inlets = _assets(self.kwarg(decorator_call, "inlets"))
-            task.outlets = _assets(self.kwarg(decorator_call, "outlets"))
+            task.inlets = _assets(self.kwarg(decorator_call, 'inlets'))
+            task.outlets = _assets(self.kwarg(decorator_call, 'outlets'))
         return self.add_task(task, None, dag, group)
 
     def read_sql(self, task: TaskInfo, value: Any) -> None:
@@ -569,17 +569,17 @@ class _Parser:
         if not isinstance(value, str) or not value.strip():
             return
         text = value.strip()
-        if text.endswith(".sql") and "\n" not in text:
+        if text.endswith('.sql') and '\n' not in text:
             for base in self.template_paths:
                 candidate = (base / text).resolve()
                 if candidate.is_file():
-                    sql = candidate.read_text(encoding="utf-8")
-                    task.sql = f"{task.sql};\n{sql}" if task.sql else sql
+                    sql = candidate.read_text(encoding='utf-8')
+                    task.sql = f'{task.sql};\n{sql}' if task.sql else sql
                     task.sql_path = str(candidate)
                     return
-            self.warnings.append(f"task {task.task_id}: SQL file {text} not found")
+            self.warnings.append(f'task {task.task_id}: SQL file {text} not found')
             return
-        task.sql = f"{task.sql};\n{text}" if task.sql else text
+        task.sql = f'{task.sql};\n{text}' if task.sql else text
 
 
 def _str_or_none(value: Any) -> str | None:
@@ -598,15 +598,15 @@ def _assets(value: Any) -> list[str]:
     items = value if isinstance(value, list) else [value]
     found = []
     for item in items:
-        if isinstance(item, dict) and isinstance(item.get("__asset__"), str):
-            found.append(item["__asset__"])
+        if isinstance(item, dict) and isinstance(item.get('__asset__'), str):
+            found.append(item['__asset__'])
         elif isinstance(item, str):
             found.append(item)
     return found
 
 
 def _dbt_command_from_class(name: str) -> str | None:
-    words: list[str] = re.findall(r"[A-Z][a-z]+", name)
+    words: list[str] = re.findall(r'[A-Z][a-z]+', name)
     for word in words[1:]:
         if word.lower() in DBT_COMMANDS:
             return word.lower()
@@ -614,16 +614,16 @@ def _dbt_command_from_class(name: str) -> str | None:
 
 
 def _cosmos_invocation(render_config: ast.expr | None, parser: _Parser) -> DbtInvocation:
-    invocation = DbtInvocation(command="build")
+    invocation = DbtInvocation(command='build')
     if isinstance(render_config, ast.Call):
-        invocation.selectors = _as_list(parser.kwarg(render_config, "select"))
-        invocation.excludes = _as_list(parser.kwarg(render_config, "exclude"))
+        invocation.selectors = _as_list(parser.kwarg(render_config, 'select'))
+        invocation.excludes = _as_list(parser.kwarg(render_config, 'exclude'))
     return invocation
 
 
-_SHELL_SPLIT = re.compile(r"&&|\|\||;|\n|\|")
-_SELECT_FLAGS = {"--select", "-s", "--models", "-m"}
-_EXCLUDE_FLAGS = {"--exclude"}
+_SHELL_SPLIT = re.compile(r'&&|\|\||;|\n|\|')
+_SELECT_FLAGS = {'--select', '-s', '--models', '-m'}
+_EXCLUDE_FLAGS = {'--exclude'}
 
 
 def parse_dbt_commands(command: str) -> list[DbtInvocation]:
@@ -635,10 +635,10 @@ def parse_dbt_commands(command: str) -> list[DbtInvocation]:
         except ValueError:
             words = segment.split()
         for index, word in enumerate(words):
-            if Path(word).name != "dbt" or index + 1 >= len(words):
+            if Path(word).name != 'dbt' or index + 1 >= len(words):
                 continue
             rest = words[index + 1 :]
-            subcommand = next((w for w in rest if not w.startswith("-")), None)
+            subcommand = next((w for w in rest if not w.startswith('-')), None)
             if subcommand not in DBT_COMMANDS:
                 break
             invocation = DbtInvocation(command=subcommand)
@@ -646,25 +646,25 @@ def parse_dbt_commands(command: str) -> list[DbtInvocation]:
             position = 0
             while position < len(rest):
                 word = rest[position]
-                flag, _, inline = word.partition("=")
+                flag, _, inline = word.partition('=')
                 if flag in _SELECT_FLAGS:
                     current = invocation.selectors
                 elif flag in _EXCLUDE_FLAGS:
                     current = invocation.excludes
-                elif flag == "--project-dir" and position + 1 < len(rest):
+                elif flag == '--project-dir' and position + 1 < len(rest):
                     invocation.project_dir = inline or rest[position + 1]
                     current = None
                     position += 1 if not inline else 0
-                elif flag in ("--selector", "--state", "--defer") or flag.startswith("state:"):
+                elif flag in ('--selector', '--state', '--defer') or flag.startswith('state:'):
                     invocation.unsupported.append(word)
                     current = None
-                elif word.startswith("-"):
+                elif word.startswith('-'):
                     current = None
                 elif current is not None:
                     if (
-                        word.startswith("state:")
-                        or word.startswith("source_status:")
-                        or word.startswith("result:")
+                        word.startswith('state:')
+                        or word.startswith('source_status:')
+                        or word.startswith('result:')
                     ):
                         invocation.unsupported.append(word)
                     else:
@@ -684,5 +684,5 @@ def parse_source(path: Path, source: str) -> list[DagInfo]:
 
 def parse_file(path: Path) -> list[DagInfo]:
     """Parse one DAG file. Raises SyntaxError if the file is not valid Python."""
-    source = path.read_text(encoding="utf-8")
+    source = path.read_text(encoding='utf-8')
     return _Parser(path, source).parse()

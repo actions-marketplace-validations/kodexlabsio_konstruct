@@ -1,35 +1,35 @@
 // An indexed, read-only view of the graph: lookups, labels and the walks the viewer needs.
 
-import type { Attrs, EdgeKind, GraphData, GraphEdge, GraphNode, NodeKind } from "./types";
+import type { Attrs, EdgeKind, GraphData, GraphEdge, GraphNode, NodeKind } from './types';
 
 export const VIEW_KINDS: readonly NodeKind[] = [
-    "source",
-    "seed",
-    "snapshot",
-    "table",
-    "model",
-    "task",
-    "exposure",
+    'source',
+    'seed',
+    'snapshot',
+    'table',
+    'model',
+    'task',
+    'exposure',
 ];
 
 export const KIND_NAMES: Record<string, string> = {
-    source: "Source",
-    seed: "Seed",
-    snapshot: "Snapshot",
-    table: "Table",
-    model: "Model",
-    task: "Task",
-    exposure: "Exposure",
-    column: "Column",
-    test: "Test",
-    dag: "DAG",
-    term: "Business term",
+    source: 'Source',
+    seed: 'Seed',
+    snapshot: 'Snapshot',
+    table: 'Table',
+    model: 'Model',
+    task: 'Task',
+    exposure: 'Exposure',
+    column: 'Column',
+    test: 'Test',
+    dag: 'DAG',
+    term: 'Business term',
 };
 
 export interface LayoutEdge {
     source: string;
     target: string;
-    kind: "feeds" | "runs";
+    kind: 'feeds' | 'runs';
 }
 
 export interface LineageItem {
@@ -50,7 +50,7 @@ export function attr<T = unknown>(item: { attrs?: Attrs } | undefined, key: stri
 }
 
 export function byName(a: GraphNode, b: GraphNode): number {
-    return (a.name || "").localeCompare(b.name || "") || a.id.localeCompare(b.id);
+    return (a.name || '').localeCompare(b.name || '') || a.id.localeCompare(b.id);
 }
 
 export class GraphModel {
@@ -74,24 +74,24 @@ export class GraphModel {
             push(this.outE, e.source, e);
             push(this.inE, e.target, e);
         }
-        this.viewNodes = this.nodes.filter((n) => VIEW_KINDS.includes(n.kind));
-        this.inView = new Set(this.viewNodes.map((n) => n.id));
+        this.viewNodes = this.nodes.filter(n => VIEW_KINDS.includes(n.kind));
+        this.inView = new Set(this.viewNodes.map(n => n.id));
         // Relation-level edges: feeds between relations (a column stands in for its relation) and runs.
         const seen = new Set<string>();
         for (const e of this.edges) {
-            if (e.kind !== "feeds" && e.kind !== "runs") continue;
+            if (e.kind !== 'feeds' && e.kind !== 'runs') continue;
             const s =
-                e.kind === "feeds" ? this.viewOf(e.source) : this.inView.has(e.source) ? e.source : null;
+                e.kind === 'feeds' ? this.viewOf(e.source) : this.inView.has(e.source) ? e.source : null;
             const t =
-                e.kind === "feeds" ? this.viewOf(e.target) : this.inView.has(e.target) ? e.target : null;
+                e.kind === 'feeds' ? this.viewOf(e.target) : this.inView.has(e.target) ? e.target : null;
             if (!s || !t || s === t) continue;
             const key = `${e.kind}\u0000${s}\u0000${t}`;
             if (seen.has(key)) continue;
             seen.add(key);
             this.layoutEdges.push({ source: s, target: t, kind: e.kind });
         }
-        this.upAdj = new Map(this.viewNodes.map((n) => [n.id, [] as string[]]));
-        this.downAdj = new Map(this.viewNodes.map((n) => [n.id, [] as string[]]));
+        this.upAdj = new Map(this.viewNodes.map(n => [n.id, [] as string[]]));
+        this.downAdj = new Map(this.viewNodes.map(n => [n.id, [] as string[]]));
         for (const e of this.layoutEdges) {
             this.downAdj.get(e.source)?.push(e.target);
             this.upAdj.get(e.target)?.push(e.source);
@@ -103,19 +103,19 @@ export class GraphModel {
     }
 
     outs(id: string, kind: EdgeKind): GraphEdge[] {
-        return (this.outE.get(id) ?? []).filter((e) => e.kind === kind);
+        return (this.outE.get(id) ?? []).filter(e => e.kind === kind);
     }
 
     ins(id: string, kind: EdgeKind): GraphEdge[] {
-        return (this.inE.get(id) ?? []).filter((e) => e.kind === kind);
+        return (this.inE.get(id) ?? []).filter(e => e.kind === kind);
     }
 
     columnsOf(id: string): GraphNode[] {
         let found = this.columnCache.get(id);
         if (!found) {
-            found = this.outs(id, "contains")
-                .map((e) => this.byId.get(e.target))
-                .filter((n): n is GraphNode => n !== undefined && n.kind === "column");
+            found = this.outs(id, 'contains')
+                .map(e => this.byId.get(e.target))
+                .filter((n): n is GraphNode => n !== undefined && n.kind === 'column');
             this.columnCache.set(id, found);
         }
         return found;
@@ -125,29 +125,29 @@ export class GraphModel {
     viewOf(id: string): string | null {
         if (this.inView.has(id)) return id;
         const n = this.byId.get(id);
-        return n && n.kind === "column" && n.parent && this.inView.has(n.parent) ? n.parent : null;
+        return n && n.kind === 'column' && n.parent && this.inView.has(n.parent) ? n.parent : null;
     }
 
     label(id: string): string {
         const n = this.byId.get(id);
         if (!n) return id;
-        if (n.kind === "column" && n.parent) return `${this.label(n.parent)}.${n.name}`;
-        const sourceName = attr<string>(n, "source_name");
-        if (n.kind === "source" && sourceName) return `${sourceName}.${n.name}`;
-        const dag = attr<string>(n, "dag");
-        if (n.kind === "task" && dag) return `${dag}.${n.name}`;
+        if (n.kind === 'column' && n.parent) return `${this.label(n.parent)}.${n.name}`;
+        const sourceName = attr<string>(n, 'source_name');
+        if (n.kind === 'source' && sourceName) return `${sourceName}.${n.name}`;
+        const dag = attr<string>(n, 'dag');
+        if (n.kind === 'task' && dag) return `${dag}.${n.name}`;
         return n.name;
     }
 
     boundTo(termId: string): string[] {
-        return this.outs(termId, "defines")
-            .map((e) => e.target)
-            .filter((id) => this.byId.has(id));
+        return this.outs(termId, 'defines')
+            .map(e => e.target)
+            .filter(id => this.byId.has(id));
     }
 
     termsOf(id: string): GraphNode[] {
-        return this.ins(id, "defines")
-            .map((e) => this.byId.get(e.source))
+        return this.ins(id, 'defines')
+            .map(e => this.byId.get(e.source))
             .filter((n): n is GraphNode => n !== undefined);
     }
 
@@ -172,7 +172,7 @@ export class GraphModel {
         const found: LineageItem[] = [];
         for (let i = 0; i < queue.length; i++) {
             const id = queue[i]!;
-            const next = upstream ? this.outs(id, "derived_from") : this.ins(id, "derived_from");
+            const next = upstream ? this.outs(id, 'derived_from') : this.ins(id, 'derived_from');
             for (const e of next) {
                 const other = upstream ? e.target : e.source;
                 if (depth.has(other)) continue;
@@ -182,8 +182,8 @@ export class GraphModel {
                 found.push({
                     id: other,
                     depth: d,
-                    transform: attr<string>(e, "transform"),
-                    verified: attr<string>(e, "verified"),
+                    transform: attr<string>(e, 'transform'),
+                    verified: attr<string>(e, 'verified'),
                 });
             }
         }
@@ -192,7 +192,7 @@ export class GraphModel {
 }
 
 export function display(value: unknown): string {
-    if (value === null || value === undefined) return "";
-    if (Array.isArray(value)) return value.map(display).join(", ");
-    return typeof value === "object" ? JSON.stringify(value) : String(value);
+    if (value === null || value === undefined) return '';
+    if (Array.isArray(value)) return value.map(display).join(', ');
+    return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }

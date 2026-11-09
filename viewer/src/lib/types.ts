@@ -1,20 +1,20 @@
 // The shapes konstruct embeds in the page: Graph.to_dict() and the explain summaries.
 
 export type NodeKind =
-    | "source"
-    | "table"
-    | "column"
-    | "model"
-    | "seed"
-    | "snapshot"
-    | "dag"
-    | "task"
-    | "test"
-    | "exposure"
-    | "term";
+    | 'source'
+    | 'table'
+    | 'column'
+    | 'model'
+    | 'seed'
+    | 'snapshot'
+    | 'dag'
+    | 'task'
+    | 'test'
+    | 'exposure'
+    | 'term';
 
 export type EdgeKind =
-    "contains" | "feeds" | "derived_from" | "runs" | "precedes" | "tests" | "defines" | "relates_to";
+    'contains' | 'feeds' | 'derived_from' | 'runs' | 'precedes' | 'tests' | 'defines' | 'relates_to';
 
 export type Attrs = Record<string, unknown>;
 
@@ -79,7 +79,7 @@ export interface Usage {
     score?: number;
 }
 
-export type Direction = "upstream" | "both" | "downstream";
+export type Direction = 'upstream' | 'both' | 'downstream';
 
 export interface Point {
     x: number;

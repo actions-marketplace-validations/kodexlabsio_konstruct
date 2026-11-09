@@ -33,24 +33,24 @@ from sqlglot.errors import SqlglotError
 from konstruct.graph import Graph, Node
 from konstruct.sql import strip_templating, table_key
 
-STRATEGIES = ("shift", "null", "shuffle")
-_TEXT = ("VARCHAR", "TEXT", "STRING", "CHAR", "BPCHAR", "CHARACTER VARYING", "CHARACTER")
+STRATEGIES = ('shift', 'null', 'shuffle')
+_TEXT = ('VARCHAR', 'TEXT', 'STRING', 'CHAR', 'BPCHAR', 'CHARACTER VARYING', 'CHARACTER')
 _NUMERIC = (
-    "TINYINT",
-    "SMALLINT",
-    "INTEGER",
-    "BIGINT",
-    "HUGEINT",
-    "UTINYINT",
-    "USMALLINT",
-    "UINTEGER",
-    "UBIGINT",
-    "UHUGEINT",
-    "FLOAT",
-    "REAL",
-    "DOUBLE",
-    "DECIMAL",
-    "NUMERIC",
+    'TINYINT',
+    'SMALLINT',
+    'INTEGER',
+    'BIGINT',
+    'HUGEINT',
+    'UTINYINT',
+    'USMALLINT',
+    'UINTEGER',
+    'UBIGINT',
+    'UHUGEINT',
+    'FLOAT',
+    'REAL',
+    'DOUBLE',
+    'DECIMAL',
+    'NUMERIC',
 )
 
 
@@ -69,8 +69,8 @@ class ModelResult:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        for key in ("confirmed", "not_exercised", "through_references", "unexplained"):
-            data[key] = [{"output": o, "input": i} for o, i in data[key]]
+        for key in ('confirmed', 'not_exercised', 'through_references', 'unexplained'):
+            data[key] = [{'output': o, 'input': i} for o, i in data[key]]
         return data
 
 
@@ -90,113 +90,113 @@ class Verification:
     def totals(self) -> dict[str, int]:
         checked = self.checked
         return {
-            "models": len(checked),
-            "skipped": len(self.models) - len(checked),
-            "claimed": sum(m.claimed for m in checked),
-            "confirmed": sum(len(m.confirmed) for m in checked),
-            "not_exercised": sum(len(m.not_exercised) for m in checked),
-            "through_references": sum(len(m.through_references) for m in checked),
-            "unexplained": sum(len(m.unexplained) for m in checked),
+            'models': len(checked),
+            'skipped': len(self.models) - len(checked),
+            'claimed': sum(m.claimed for m in checked),
+            'confirmed': sum(len(m.confirmed) for m in checked),
+            'not_exercised': sum(len(m.not_exercised) for m in checked),
+            'through_references': sum(len(m.through_references) for m in checked),
+            'unexplained': sum(len(m.unexplained) for m in checked),
         }
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "warehouse": self.warehouse,
-            "seed": self.seed,
-            "max_rows": self.max_rows,
-            "strategies": list(self.strategies),
-            "seconds": round(self.seconds, 2),
-            "totals": self.totals(),
-            "models": [m.to_dict() for m in self.models],
+            'warehouse': self.warehouse,
+            'seed': self.seed,
+            'max_rows': self.max_rows,
+            'strategies': list(self.strategies),
+            'seconds': round(self.seconds, 2),
+            'totals': self.totals(),
+            'models': [m.to_dict() for m in self.models],
         }
 
     def summary(self) -> str:
         t = self.totals()
-        if not t["models"]:
-            return "No model could be verified."
-        share = 100 * t["confirmed"] / t["claimed"] if t["claimed"] else 100.0
+        if not t['models']:
+            return 'No model could be verified.'
+        share = 100 * t['confirmed'] / t['claimed'] if t['claimed'] else 100.0
         lines = [
-            f"{t['confirmed']} of {t['claimed']} claimed column edges confirmed by perturbation ({share:.0f}%) "
-            f"across {t['models']} model{'s' if t['models'] != 1 else ''}.",
-            f"{t['through_references']} influence{'s' if t['through_references'] != 1 else ''} through joins, "
-            f"filters or grouping, all predicted as references; {t['unexplained']} unexplained.",
+            f'{t["confirmed"]} of {t["claimed"]} claimed column edges confirmed by perturbation ({share:.0f}%) '
+            f'across {t["models"]} model{"s" if t["models"] != 1 else ""}.',
+            f'{t["through_references"]} influence{"s" if t["through_references"] != 1 else ""} through joins, '
+            f'filters or grouping, all predicted as references; {t["unexplained"]} unexplained.',
         ]
-        if t["not_exercised"]:
+        if t['not_exercised']:
             lines.append(
-                f"{t['not_exercised']} claimed edge{'s' if t['not_exercised'] != 1 else ''} not exercised by the data "
-                "(no perturbation changed the output; see VERIFY.md)."
+                f'{t["not_exercised"]} claimed edge{"s" if t["not_exercised"] != 1 else ""} not exercised by the data '
+                '(no perturbation changed the output; see VERIFY.md).'
             )
-        return "\n".join(lines)
+        return '\n'.join(lines)
 
     def __str__(self) -> str:
         header = (
-            f"Verified against {self.warehouse} (seed {self.seed}, strategies {', '.join(self.strategies)}, "
-            f"up to {self.max_rows} rows per input)"
+            f'Verified against {self.warehouse} (seed {self.seed}, strategies {", ".join(self.strategies)}, '
+            f'up to {self.max_rows} rows per input)'
         )
         width = max([len(m.label) for m in self.models] + [5])
         rows = [
-            f"  {'model'.ljust(width)}  claimed  confirmed  not exercised  via joins/filters  unexplained",
+            f'  {"model".ljust(width)}  claimed  confirmed  not exercised  via joins/filters  unexplained',
         ]
         for m in self.models:
             if m.skipped:
-                rows.append(f"  {m.label.ljust(width)}  skipped: {m.skipped}")
+                rows.append(f'  {m.label.ljust(width)}  skipped: {m.skipped}')
                 continue
             rows.append(
-                f"  {m.label.ljust(width)}  {m.claimed:>7}  {len(m.confirmed):>9}  {len(m.not_exercised):>13}  "
-                f"{len(m.through_references):>17}  {len(m.unexplained):>11}"
+                f'  {m.label.ljust(width)}  {m.claimed:>7}  {len(m.confirmed):>9}  {len(m.not_exercised):>13}  '
+                f'{len(m.through_references):>17}  {len(m.unexplained):>11}'
             )
         details = []
         for m in self.checked:
-            for kind, items in (("unexplained", m.unexplained), ("not exercised", m.not_exercised)):
+            for kind, items in (('unexplained', m.unexplained), ('not exercised', m.not_exercised)):
                 for output, source in items:
-                    details.append(f"  {m.label}.{output} <- {source}  ({kind})")
-        text = [header, "", *rows, "", self.summary()]
+                    details.append(f'  {m.label}.{output} <- {source}  ({kind})')
+        text = [header, '', *rows, '', self.summary()]
         if details:
-            text += ["", *details[:40]]
+            text += ['', *details[:40]]
             if len(details) > 40:
-                text.append(f"  and {len(details) - 40} more in VERIFY.md")
-        return "\n".join(text)
+                text.append(f'  and {len(details) - 40} more in VERIFY.md')
+        return '\n'.join(text)
 
     def markdown(self) -> str:
         t = self.totals()
         lines = [
-            "# konstruct lineage verification",
-            "",
-            f"Warehouse `{self.warehouse}`, seed {self.seed}, strategies {', '.join(self.strategies)}, "
-            f"up to {self.max_rows} rows per input, {self.seconds:.1f}s.",
-            "",
+            '# Konstruct lineage verification',
+            '',
+            f'Warehouse `{self.warehouse}`, seed {self.seed}, strategies {", ".join(self.strategies)}, '
+            f'up to {self.max_rows} rows per input, {self.seconds:.1f}s.',
+            '',
             self.summary(),
-            "",
-            "Each input column of each model was perturbed in turn (shifted, nulled and shuffled between rows), "
+            '',
+            'Each input column of each model was perturbed in turn (shifted, nulled and shuffled between rows), '
             "the model's SQL was rerun on the perturbed copy, and every output column whose values changed was "
-            "recorded. *Confirmed* edges are static lineage the data shows to be real. *Not exercised* edges "
-            "were claimed but no perturbation changed the output on this data. *Via joins/filters* are changes "
-            "caused by columns the static analysis recorded as join, filter or grouping references. "
-            "*Unexplained* changes were not predicted by the static analysis at all.",
-            "",
-            "| Model | Rows | Claimed | Confirmed | Not exercised | Via joins/filters | Unexplained |",
-            "|-------|------|---------|-----------|---------------|-------------------|-------------|",
+            'recorded. *Confirmed* edges are static lineage the data shows to be real. *Not exercised* edges '
+            'were claimed but no perturbation changed the output on this data. *Via joins/filters* are changes '
+            'caused by columns the static analysis recorded as join, filter or grouping references. '
+            '*Unexplained* changes were not predicted by the static analysis at all.',
+            '',
+            '| Model | Rows | Claimed | Confirmed | Not exercised | Via joins/filters | Unexplained |',
+            '|-------|------|---------|-----------|---------------|-------------------|-------------|',
         ]
         for m in self.models:
             if m.skipped:
-                lines.append(f"| `{m.label}` | | | | | | skipped: {m.skipped} |")
+                lines.append(f'| `{m.label}` | | | | | | skipped: {m.skipped} |')
             else:
                 lines.append(
-                    f"| `{m.label}` | {m.rows} | {m.claimed} | {len(m.confirmed)} | {len(m.not_exercised)} | "
-                    f"{len(m.through_references)} | {len(m.unexplained)} |"
+                    f'| `{m.label}` | {m.rows} | {m.claimed} | {len(m.confirmed)} | {len(m.not_exercised)} | '
+                    f'{len(m.through_references)} | {len(m.unexplained)} |'
                 )
         lines.append(
-            f"| **Total** | | **{t['claimed']}** | **{t['confirmed']}** | **{t['not_exercised']}** | "
-            f"**{t['through_references']}** | **{t['unexplained']}** |"
+            f'| **Total** | | **{t["claimed"]}** | **{t["confirmed"]}** | **{t["not_exercised"]}** | '
+            f'**{t["through_references"]}** | **{t["unexplained"]}** |'
         )
         for title, key in (
-            ("Unexplained influences", "unexplained"),
-            ("Claimed but not exercised", "not_exercised"),
+            ('Unexplained influences', 'unexplained'),
+            ('Claimed but not exercised', 'not_exercised'),
         ):
             items = [(m.label, o, s) for m in self.checked for o, s in getattr(m, key)]
-            lines += ["", f"## {title}", ""]
-            lines += [f"- `{label}.{o}` <- `{s}`" for label, o, s in items] or ["None."]
-        return "\n".join(lines) + "\n"
+            lines += ['', f'## {title}', '']
+            lines += [f'- `{label}.{o}` <- `{s}`' for label, o, s in items] or ['None.']
+        return '\n'.join(lines) + '\n'
 
 
 # Candidates: models (and SQL-built tables) with SQL and a relation in the warehouse
@@ -211,31 +211,31 @@ class Candidate:
 
 
 def candidates(graph: Graph, root: Path) -> list[Candidate]:
-    """Nodes whose defining SELECT konstruct can rerun: dbt models from the manifest, and tables
+    """Nodes whose defining SELECT Konstruct can rerun: dbt models from the manifest, and tables
     built by a SQL file or an Airflow SQL task."""
     found: list[Candidate] = []
     manifests: dict[str, dict[str, Any]] = {}
-    for path in sorted(root.rglob("target/manifest.json")):
-        if "dbt_packages" in path.parts:
+    for path in sorted(root.rglob('target/manifest.json')):
+        if 'dbt_packages' in path.parts:
             continue
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             continue
         manifests.update(
-            {k: v for k, v in data.get("nodes", {}).items() if v.get("resource_type") == "model"}
+            {k: v for k, v in data.get('nodes', {}).items() if v.get('resource_type') == 'model'}
         )
     for node in sorted(graph.relations(), key=lambda n: n.id):
         item = manifests.get(node.id)
-        if item and item.get("compiled_code") and node.kind == "model":
-            found.append(Candidate(node, item["compiled_code"], item.get("database"), item.get("schema")))
+        if item and item.get('compiled_code') and node.kind == 'model':
+            found.append(Candidate(node, item['compiled_code'], item.get('database'), item.get('schema')))
             continue
-        if node.kind != "table" or not node.relation:
+        if node.kind != 'table' or not node.relation:
             continue
         sql_file = defining_sql_file(graph, node, root)
         if sql_file is None:
             continue
-        query = _query_for(sql_file.read_text(encoding="utf-8"), node.relation, graph)
+        query = _query_for(sql_file.read_text(encoding='utf-8'), node.relation, graph)
         if query is not None:
             catalog, schema = _defaults(graph)
             found.append(Candidate(node, query, catalog, schema))
@@ -243,10 +243,10 @@ def candidates(graph: Graph, root: Path) -> list[Candidate]:
 
 
 def _defaults(graph: Graph) -> tuple[str | None, str | None]:
-    if graph.meta.get("default_schema"):
-        return graph.meta.get("default_catalog"), graph.meta.get("default_schema")
-    relations = [n.relation for n in graph.relations() if n.kind == "model" and n.relation]
-    parts = Counter(tuple(r.split(".")[:2]) for r in relations if r and r.count(".") == 2)
+    if graph.meta.get('default_schema'):
+        return graph.meta.get('default_catalog'), graph.meta.get('default_schema')
+    relations = [n.relation for n in graph.relations() if n.kind == 'model' and n.relation]
+    parts = Counter(tuple(r.split('.')[:2]) for r in relations if r and r.count('.') == 2)
     if parts:
         catalog, schema = parts.most_common(1)[0][0]
         return catalog, schema
@@ -254,11 +254,11 @@ def _defaults(graph: Graph) -> tuple[str | None, str | None]:
 
 
 def defining_sql_file(graph: Graph, node: Node, root: Path) -> Path | None:
-    for edge in graph.in_edges(node.id, "feeds"):
+    for edge in graph.in_edges(node.id, 'feeds'):
         source = graph.nodes.get(edge.source)
-        if source is not None and source.kind == "task" and source.attrs.get("sql_path"):
-            return root / str(source.attrs["sql_path"])
-    if node.path and node.path.endswith(".sql"):
+        if source is not None and source.kind == 'task' and source.attrs.get('sql_path'):
+            return root / str(source.attrs['sql_path'])
+    if node.path and node.path.endswith('.sql'):
         return root / node.path
     return None
 
@@ -266,7 +266,7 @@ def defining_sql_file(graph: Graph, node: Node, root: Path) -> Path | None:
 def _query_for(text: str, relation: str, graph: Graph) -> str | None:
     catalog, schema = _defaults(graph)
     try:
-        statements = sqlglot.parse(strip_templating(text), dialect="duckdb")
+        statements = sqlglot.parse(strip_templating(text), dialect='duckdb')
     except SqlglotError:
         return None
     for statement in statements:
@@ -274,7 +274,7 @@ def _query_for(text: str, relation: str, graph: Graph) -> str | None:
             this = statement.this
             table = this.this if isinstance(this, exp.Schema) else this
             if isinstance(table, exp.Table) and table_key(table, catalog, schema) == relation:
-                return statement.expression.sql(dialect="duckdb")
+                return statement.expression.sql(dialect='duckdb')
     return None
 
 
@@ -286,21 +286,21 @@ def claims(graph: Graph, node: Node) -> tuple[set[tuple[str, str]], set[str]]:
     input columns it references in joins, filters and grouping."""
     value: set[tuple[str, str]] = set()
     for column in graph.columns_of(node.id):
-        for edge in graph.out_edges(column.id, "derived_from"):
-            if edge.attrs.get("same_relation"):
+        for edge in graph.out_edges(column.id, 'derived_from'):
+            if edge.attrs.get('same_relation'):
                 continue
             upstream = graph.nodes.get(edge.target)
             parent = graph.parent_of(upstream) if upstream else None
             if upstream is not None and parent is not None and parent.relation:
-                value.add((column.name.lower(), f"{parent.relation}.{upstream.name.lower()}"))
+                value.add((column.name.lower(), f'{parent.relation}.{upstream.name.lower()}'))
     references = set()
-    for edge in graph.in_edges(node.id, "feeds"):
-        if edge.attrs.get("role") != "reference":
+    for edge in graph.in_edges(node.id, 'feeds'):
+        if edge.attrs.get('role') != 'reference':
             continue
         used = graph.nodes.get(edge.source)
         parent = graph.parent_of(used) if used else None
         if used is not None and parent is not None and parent.relation:
-            references.add(f"{parent.relation}.{used.name.lower()}")
+            references.add(f'{parent.relation}.{used.name.lower()}')
     return value, references
 
 
@@ -312,7 +312,7 @@ def _quote(name: str) -> str:
 
 
 def _rewrite(
-    sql: str, mapping: dict[str, str], catalog: str | None, schema: str | None, dialect: str = "duckdb"
+    sql: str, mapping: dict[str, str], catalog: str | None, schema: str | None, dialect: str = 'duckdb'
 ) -> tuple[str, set[str]]:
     """Point every input table at a scratch copy; return the SQL and the relations it reads."""
     tree = sqlglot.parse_one(sql, dialect=dialect)
@@ -345,8 +345,8 @@ def _signature(rows: list[tuple[Any, ...]], index: int) -> Counter[str]:
 def _via_parent(output: str, source: str, influence: set[tuple[str, str]]) -> bool:
     """Whether perturbing a struct column that contains ``source`` (``db.schema.table.column.field``)
     changed ``output``."""
-    parts = source.split(".")
-    return any((output, ".".join(parts[:end])) in influence for end in range(4, len(parts)))
+    parts = source.split('.')
+    return any((output, '.'.join(parts[:end])) in influence for end in range(4, len(parts)))
 
 
 def _paired(rows: list[tuple[Any, ...]], index: int, anchors: list[int]) -> Counter[str]:
@@ -354,23 +354,23 @@ def _paired(rows: list[tuple[Any, ...]], index: int, anchors: list[int]) -> Coun
 
 
 def _mutation(
-    reference: str, dtype: str, strategy: str, rng: random.Random, cast: str = "TRY_CAST"
+    reference: str, dtype: str, strategy: str, rng: random.Random, cast: str = 'TRY_CAST'
 ) -> str | None:
     """A perturbed value for ``reference`` (a quoted column or struct field) of type ``dtype``."""
-    base = dtype.upper().split("(")[0].strip()
-    if strategy == "null":
-        return f"CAST(NULL AS {dtype})"
-    if strategy == "shift":
+    base = dtype.upper().split('(')[0].strip()
+    if strategy == 'null':
+        return f'CAST(NULL AS {dtype})'
+    if strategy == 'shift':
         if base in _NUMERIC:
-            return f"{cast}({reference} * {rng.randint(2, 9)} + {rng.randint(1, 97)} AS {dtype})"
+            return f'{cast}({reference} * {rng.randint(2, 9)} + {rng.randint(1, 97)} AS {dtype})'
         if base in _TEXT:
             return f"{reference} || '~{rng.randint(10, 99)}'"
-        if base == "DATE":
+        if base == 'DATE':
             return f"CAST({reference} + INTERVAL '{rng.randint(3, 400)} days' AS DATE)"
-        if base.startswith("TIMESTAMP"):
+        if base.startswith('TIMESTAMP'):
             return f"{reference} + INTERVAL '{rng.randint(1, 300)} hours'"
-        if base == "BOOLEAN":
-            return f"NOT {reference}"
+        if base == 'BOOLEAN':
+            return f'NOT {reference}'
         return None
     return None
 
@@ -382,10 +382,10 @@ def _targets(column: str, dtype: str) -> list[tuple[tuple[str, ...], str]]:
     from sqlglot.errors import SqlglotError
 
     targets: list[tuple[tuple[str, ...], str]] = [((column,), dtype)]
-    if not dtype.upper().startswith("STRUCT"):
+    if not dtype.upper().startswith('STRUCT'):
         return targets
     try:
-        built = exp.DataType.build(dtype, dialect="duckdb")
+        built = exp.DataType.build(dtype, dialect='duckdb')
     except (SqlglotError, ValueError):
         return targets
 
@@ -395,34 +395,34 @@ def _targets(column: str, dtype: str) -> list[tuple[tuple[str, ...], str]]:
         for field_def in node.expressions:
             if isinstance(field_def, exp.ColumnDef) and isinstance(field_def.kind, exp.DataType):
                 child = (*path, field_def.name)
-                targets.append((child, field_def.kind.sql(dialect="duckdb")))
+                targets.append((child, field_def.kind.sql(dialect='duckdb')))
                 walk(child, field_def.kind)
 
     walk((column,), built)
     return targets
 
 
-def _reference(path: tuple[str, ...], prefix: str = "") -> str:
-    return prefix + ".".join(_quote(p) for p in path)
+def _reference(path: tuple[str, ...], prefix: str = '') -> str:
+    return prefix + '.'.join(_quote(p) for p in path)
 
 
-def _rebuild(path: tuple[str, ...], value: str, prefix: str = "") -> str:
+def _rebuild(path: tuple[str, ...], value: str, prefix: str = '') -> str:
     """The top-level column of ``path`` with only the field at ``path`` replaced by ``value``."""
     if len(path) == 1:
         return value
-    inner = _rebuild(path[1:], value, prefix=f"{_reference(path[:1], prefix)}.") if len(path) > 2 else value
-    return f"struct_update({_reference(path[:1], prefix)}, {_quote(path[1])} := {inner})"
+    inner = _rebuild(path[1:], value, prefix=f'{_reference(path[:1], prefix)}.') if len(path) > 2 else value
+    return f'struct_update({_reference(path[:1], prefix)}, {_quote(path[1])} := {inner})'
 
 
 def _overlaps(source: str, other: str) -> bool:
-    return source == other or other.startswith(source + ".") or source.startswith(other + ".")
+    return source == other or other.startswith(source + '.') or source.startswith(other + '.')
 
 
 class Engine:
     """Where perturbed copies of a model's inputs live and its SQL is rerun."""
 
-    dialect = "duckdb"
-    label = ""
+    dialect = 'duckdb'
+    label = ''
 
     def start(self) -> None:
         """Clear scratch tables before the next model."""
@@ -451,31 +451,31 @@ class Engine:
 class DuckDBEngine(Engine):
     """An in-memory DuckDB with the warehouse file attached read-only."""
 
-    dialect = "duckdb"
+    dialect = 'duckdb'
 
     def __init__(self, warehouse: Path) -> None:
         import duckdb
 
         self.label = str(warehouse)
         self.con = duckdb.connect()
-        self.con.execute(f"ATTACH {_literal(str(warehouse))} (READ_ONLY)")
+        self.con.execute(f'ATTACH {_literal(str(warehouse))} (READ_ONLY)')
         row = self.con.execute(
-            "SELECT database_name FROM duckdb_databases() WHERE path = ?", [str(warehouse.resolve())]
+            'SELECT database_name FROM duckdb_databases() WHERE path = ?', [str(warehouse.resolve())]
         ).fetchone()
         self.database = (row[0] if row else warehouse.stem).lower()
 
     def start(self) -> None:
-        self.con.execute("DROP SCHEMA IF EXISTS kp CASCADE")
-        self.con.execute("CREATE SCHEMA kp")
+        self.con.execute('DROP SCHEMA IF EXISTS kp CASCADE')
+        self.con.execute('CREATE SCHEMA kp')
 
     def copy(self, key: str, index: int, max_rows: int) -> tuple[str, list[tuple[str, str]]]:
-        parts = key.split(".")
+        parts = key.split('.')
         if len(parts) != 3 or parts[0] != self.database:
-            raise LookupError(f"input {key} is not in the warehouse {self.database}")
-        scratch = f"kp.in{index}"
-        source = ".".join(_quote(p) for p in parts)
-        self.con.execute(f"CREATE TABLE {scratch} AS SELECT * FROM {source} LIMIT {int(max_rows)}")
-        return scratch, [(row[0], row[1]) for row in self.con.execute(f"DESCRIBE {scratch}").fetchall()]
+            raise LookupError(f'input {key} is not in the warehouse {self.database}')
+        scratch = f'kp.in{index}'
+        source = '.'.join(_quote(p) for p in parts)
+        self.con.execute(f'CREATE TABLE {scratch} AS SELECT * FROM {source} LIMIT {int(max_rows)}')
+        return scratch, [(row[0], row[1]) for row in self.con.execute(f'DESCRIBE {scratch}').fetchall()]
 
     def mutate(
         self,
@@ -487,7 +487,7 @@ class DuckDBEngine(Engine):
         rng: random.Random,
     ) -> str | None:
         quoted = _quote(path[0])
-        if strategy == "shuffle":
+        if strategy == 'shuffle':
             salt = rng.randint(1, 2**31)
             self.con.execute(
                 f"""
@@ -497,19 +497,19 @@ class DuckDBEngine(Engine):
                     SELECT __kp_v, row_number() OVER (ORDER BY hash(__kp_i, {salt})) AS __kp_rn
                     FROM (SELECT {_reference(path)} AS __kp_v, row_number() OVER () AS __kp_i FROM {scratch})
                 )
-                SELECT base.* EXCLUDE (__kp_rn) REPLACE ({_rebuild(path, "perm.__kp_v", prefix="base.")} AS {quoted})
+                SELECT base.* EXCLUDE (__kp_rn) REPLACE ({_rebuild(path, 'perm.__kp_v', prefix='base.')} AS {quoted})
                 FROM base JOIN perm USING (__kp_rn)
                 """
             )
-            return "kp.mut"
+            return 'kp.mut'
         expression = _mutation(_reference(path), dtype, strategy, rng)
         if expression is None:
             return None
         self.con.execute(
-            f"CREATE OR REPLACE TABLE kp.mut AS SELECT * REPLACE ({_rebuild(path, expression)} AS {quoted}) "
-            f"FROM {scratch}"
+            f'CREATE OR REPLACE TABLE kp.mut AS SELECT * REPLACE ({_rebuild(path, expression)} AS {quoted}) '
+            f'FROM {scratch}'
         )
-        return "kp.mut"
+        return 'kp.mut'
 
     def run(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
         return _run(self.con, sql)
@@ -521,48 +521,48 @@ class DuckDBEngine(Engine):
 class PostgresEngine(Engine):
     """Temporary tables in one transaction that is always rolled back, so nothing persists."""
 
-    dialect = "postgres"
+    dialect = 'postgres'
 
     def __init__(self, dsn: str) -> None:
         import psycopg
 
-        self.label = "postgres"
+        self.label = 'postgres'
         self.con = psycopg.connect(dsn)
-        row = self.con.execute("SELECT current_database()").fetchone()
-        self.database = str(row[0]).lower() if row else ""
-        self.label = f"postgres database {self.database}"
+        row = self.con.execute('SELECT current_database()').fetchone()
+        self.database = str(row[0]).lower() if row else ''
+        self.label = f'postgres database {self.database}'
         self.tables: list[str] = []
 
     def _savepoint(self, sql: str) -> Any:
-        self.con.execute("SAVEPOINT kp")
+        self.con.execute('SAVEPOINT kp')
         try:
             cursor = self.con.execute(sql)
         except Exception:
-            self.con.execute("ROLLBACK TO SAVEPOINT kp")
+            self.con.execute('ROLLBACK TO SAVEPOINT kp')
             raise
-        self.con.execute("RELEASE SAVEPOINT kp")
+        self.con.execute('RELEASE SAVEPOINT kp')
         return cursor
 
     def start(self) -> None:
         for table in self.tables:
-            self.con.execute(f"DROP TABLE IF EXISTS {table}")
+            self.con.execute(f'DROP TABLE IF EXISTS {table}')
         self.tables = []
 
     def _columns(self, table: str) -> list[tuple[str, str]]:
         rows = self.con.execute(
-            "SELECT attname, format_type(atttypid, atttypmod) FROM pg_attribute "
-            "WHERE attrelid = %s::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+            'SELECT attname, format_type(atttypid, atttypmod) FROM pg_attribute '
+            'WHERE attrelid = %s::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum',
             [table],
         ).fetchall()
         return [(str(r[0]), str(r[1])) for r in rows]
 
     def copy(self, key: str, index: int, max_rows: int) -> tuple[str, list[tuple[str, str]]]:
-        parts = key.split(".")
+        parts = key.split('.')
         if len(parts) != 3 or parts[0] != self.database:
-            raise LookupError(f"input {key} is not in the database {self.database}")
-        scratch = f"kp_in{index}"
-        source = ".".join(_quote(p) for p in parts[1:])
-        self._savepoint(f"CREATE TEMP TABLE {scratch} AS SELECT * FROM {source} LIMIT {int(max_rows)}")
+            raise LookupError(f'input {key} is not in the database {self.database}')
+        scratch = f'kp_in{index}'
+        source = '.'.join(_quote(p) for p in parts[1:])
+        self._savepoint(f'CREATE TEMP TABLE {scratch} AS SELECT * FROM {source} LIMIT {int(max_rows)}')
         self.tables.append(scratch)
         return scratch, self._columns(scratch)
 
@@ -578,34 +578,34 @@ class PostgresEngine(Engine):
         if len(path) > 1:
             return None
         column = path[0]
-        self.con.execute("DROP TABLE IF EXISTS kp_mut")
-        if "kp_mut" not in self.tables:
-            self.tables.append("kp_mut")
-        if strategy == "shuffle":
+        self.con.execute('DROP TABLE IF EXISTS kp_mut')
+        if 'kp_mut' not in self.tables:
+            self.tables.append('kp_mut')
+        if strategy == 'shuffle':
             salt = rng.randint(1, 2**31)
-            listed = ", ".join(
-                f"perm.__kp_v AS {_quote(name)}" if name == column else f"base.{_quote(name)}"
+            listed = ', '.join(
+                f'perm.__kp_v AS {_quote(name)}' if name == column else f'base.{_quote(name)}'
                 for name, _ in columns
             )
             sql = (
-                f"CREATE TEMP TABLE kp_mut AS WITH base AS (SELECT *, row_number() OVER () AS __kp_rn FROM {scratch}), "
+                f'CREATE TEMP TABLE kp_mut AS WITH base AS (SELECT *, row_number() OVER () AS __kp_rn FROM {scratch}), '
                 f"perm AS (SELECT __kp_v, row_number() OVER (ORDER BY md5(__kp_i::text || '{salt}')) AS __kp_rn "
-                f"FROM (SELECT {_quote(column)} AS __kp_v, row_number() OVER () AS __kp_i FROM {scratch}) AS x) "
-                f"SELECT {listed} FROM base JOIN perm USING (__kp_rn)"
+                f'FROM (SELECT {_quote(column)} AS __kp_v, row_number() OVER () AS __kp_i FROM {scratch}) AS x) '
+                f'SELECT {listed} FROM base JOIN perm USING (__kp_rn)'
             )
         else:
-            expression = _mutation(_quote(column), dtype, strategy, rng, cast="CAST")
+            expression = _mutation(_quote(column), dtype, strategy, rng, cast='CAST')
             if expression is None:
                 return None
-            listed = ", ".join(
-                f"{expression} AS {_quote(name)}" if name == column else _quote(name) for name, _ in columns
+            listed = ', '.join(
+                f'{expression} AS {_quote(name)}' if name == column else _quote(name) for name, _ in columns
             )
-            sql = f"CREATE TEMP TABLE kp_mut AS SELECT {listed} FROM {scratch}"
+            sql = f'CREATE TEMP TABLE kp_mut AS SELECT {listed} FROM {scratch}'
         try:
             self._savepoint(sql)
         except Exception:  # a value the type cannot hold (an overflow, say): try the next perturbation
             return None
-        return "kp_mut"
+        return 'kp_mut'
 
     def run(self, sql: str) -> tuple[list[str], list[tuple[Any, ...]]]:
         cursor = self._savepoint(sql)
@@ -620,7 +620,7 @@ class PostgresEngine(Engine):
 def engine_for(warehouse: str | Path) -> Engine:
     """A Postgres connection string or URL, or a DuckDB file."""
     text = str(warehouse)
-    if text.startswith(("postgres://", "postgresql://")) or "host=" in text or "dbname=" in text:
+    if text.startswith(('postgres://', 'postgresql://')) or 'host=' in text or 'dbname=' in text:
         return PostgresEngine(text)
     return DuckDBEngine(Path(text))
 
@@ -649,7 +649,7 @@ def verify(
             try:
                 _verify_one(engine, graph, candidate, model, seed, max_rows, strategies)
             except Exception as error:  # a model that will not run is reported, not fatal
-                model.skipped = f"{type(error).__name__}: {str(error).strip().splitlines()[0][:160]}"
+                model.skipped = f'{type(error).__name__}: {str(error).strip().splitlines()[0][:160]}'
             model.seconds = round(time.perf_counter() - timer, 3)
     finally:
         engine.close()
@@ -683,10 +683,10 @@ def _verify_one(
     names, baseline = engine.run(query)
     _, again = engine.run(query)
     if Counter(map(repr, baseline)) != Counter(map(repr, again)):
-        raise RuntimeError("the model is not deterministic, so changes cannot be attributed")
+        raise RuntimeError('the model is not deterministic, so changes cannot be attributed')
     model.rows = len(baseline)
     if not baseline:
-        raise RuntimeError("the model returns no rows on its inputs")
+        raise RuntimeError('the model returns no rows on its inputs')
     base_signatures = [_signature(baseline, i) for i in range(len(names))]
 
     value_influence: set[tuple[str, str]] = set()
@@ -695,7 +695,7 @@ def _verify_one(
     for key in sorted(columns):
         for column, dtype in columns[key]:
             for path, field_type in _targets(column, dtype):
-                source_column = f"{key}.{'.'.join(path).lower()}"
+                source_column = f'{key}.{".".join(path).lower()}'
                 for strategy in strategies:
                     try:
                         mutated = engine.mutate(mapping[key], columns[key], path, field_type, strategy, rng)
@@ -747,16 +747,16 @@ def _classify(
     model.claimed = len(model.confirmed) + len(model.not_exercised)
     for output, source in sorted(value_influence - claimed):
         # Perturbing a struct column moves its fields; a claim on one of those fields explains it.
-        if any(o == output and s.startswith(source + ".") for o, s in claimed):
+        if any(o == output and s.startswith(source + '.') for o, s in claimed):
             continue
-        if source in references or any(r.startswith(source + ".") for r in references):
+        if source in references or any(r.startswith(source + '.') for r in references):
             model.through_references.append((output, source))
         else:
             model.unexplained.append((output, source))
     expected = references | {s for _, s in claimed}
     for source in sorted(row_influence):
         if not any(_overlaps(source, other) for other in expected):
-            model.unexplained.append(("(row count)", source))
+            model.unexplained.append(('(row count)', source))
 
 
 def _observe(
@@ -830,7 +830,7 @@ def annotate(graph: Graph, verification: Verification) -> None:
     """Record on each derived_from edge whether perturbation confirmed it."""
     states: dict[tuple[str, str, str], str] = {}
     for model in verification.checked:
-        for state, items in (("confirmed", model.confirmed), ("not exercised", model.not_exercised)):
+        for state, items in (('confirmed', model.confirmed), ('not exercised', model.not_exercised)):
             for output, source in items:
                 states[(model.node_id, output, source)] = state
     for model in verification.checked:
@@ -838,14 +838,14 @@ def annotate(graph: Graph, verification: Verification) -> None:
         if node is None:
             continue
         for column in graph.columns_of(node.id):
-            for edge in graph.out_edges(column.id, "derived_from"):
+            for edge in graph.out_edges(column.id, 'derived_from'):
                 upstream = graph.nodes.get(edge.target)
                 parent = graph.parent_of(upstream) if upstream else None
                 if upstream is None or parent is None or not parent.relation:
                     continue
                 found = states.get(
-                    (node.id, column.name.lower(), f"{parent.relation}.{upstream.name.lower()}")
+                    (node.id, column.name.lower(), f'{parent.relation}.{upstream.name.lower()}')
                 )
                 if found:
-                    edge.attrs["verified"] = found
-    graph.meta["verification"] = {"seed": verification.seed, **verification.totals()}
+                    edge.attrs['verified'] = found
+    graph.meta['verification'] = {'seed': verification.seed, **verification.totals()}

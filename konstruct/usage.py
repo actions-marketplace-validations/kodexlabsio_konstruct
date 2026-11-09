@@ -8,13 +8,13 @@ count of queries and distinct users per column over the last ``days`` days.
 Sources, as documented by each vendor (checked November 2026):
 
 * **Snowflake**: ``SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY``, Enterprise Edition or higher. Each
-  query lists the objects it read with their columns. konstruct counts ``DIRECT_OBJECTS_ACCESSED``
+  query lists the objects it read with their columns. Konstruct counts ``DIRECT_OBJECTS_ACCESSED``
   (what the query named, views included) by default, or ``BASE_OBJECTS_ACCESSED`` (the underlying
   tables, including columns used only in filters and joins) with ``objects = "base"``. The role
   needs the ``SNOWFLAKE.GOVERNANCE_VIEWER`` database role or ``IMPORTED PRIVILEGES`` on the
   SNOWFLAKE database. Latency up to three hours; one year of history.
 * **BigQuery**: ``region-REGION.INFORMATION_SCHEMA.JOBS`` for the project. It records the tables a
-  job referenced but no columns, so konstruct parses each distinct query text with its own SQL
+  job referenced but no columns, so Konstruct parses each distinct query text with its own SQL
   analysis and counts the columns it reads, including those used in joins and filters. Needs
   ``bigquery.jobs.listAll`` (BigQuery Resource Viewer). 180 days of history.
 * **Databricks**: ``system.access.column_lineage``, which records every column a query reads
@@ -38,10 +38,10 @@ from konstruct.warehouse import (
     _driver,
 )
 
-__all__ = ["ColumnUsage", "MissingDriver", "UsageSettings", "fetch"]
+__all__ = ['ColumnUsage', 'MissingDriver', 'UsageSettings', 'fetch']
 
-SUPPORTED = ("snowflake", "bigquery", "databricks")
-SNOWFLAKE_DOMAINS = ("Table", "View", "Materialized view", "External table", "Dynamic table", "Iceberg table")
+SUPPORTED = ('snowflake', 'bigquery', 'databricks')
+SNOWFLAKE_DOMAINS = ('Table', 'View', 'Materialized view', 'External table', 'Dynamic table', 'Iceberg table')
 
 
 @dataclass
@@ -50,7 +50,7 @@ class UsageSettings:
     days: int = 90
     exclude_users: list[str] = field(default_factory=list)
     """Service accounts to leave out, such as the one dbt and the orchestrator run as."""
-    objects: str = "direct"
+    objects: str = 'direct'
     """Snowflake: count ``direct`` objects (as queried) or ``base`` objects (underlying tables)."""
     max_queries: int = 50_000
     """BigQuery: at most this many distinct (query text, user) pairs are parsed."""
@@ -65,56 +65,56 @@ class ColumnUsage:
 
 
 def _literals(values: Iterable[str]) -> str:
-    return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
+    return ', '.join("'" + v.replace("'", "''") + "'" for v in values)
 
 
 def snowflake_sql(settings: UsageSettings) -> str:
-    source = "base_objects_accessed" if settings.objects == "base" else "direct_objects_accessed"
+    source = 'base_objects_accessed' if settings.objects == 'base' else 'direct_objects_accessed'
     exclude = (
-        f"\n  and upper(ah.user_name) not in ({_literals(u.upper() for u in settings.exclude_users)})"
+        f'\n  and upper(ah.user_name) not in ({_literals(u.upper() for u in settings.exclude_users)})'
         if settings.exclude_users
-        else ""
+        else ''
     )
     return (
         'select f.value:"objectName"::string as object_name, c.value:"columnName"::string as column_name, '
-        "count(distinct ah.query_id) as queries, count(distinct ah.user_name) as users\n"
-        f"from snowflake.account_usage.access_history ah,\n"
-        f"  lateral flatten(input => ah.{source}) f,\n"
+        'count(distinct ah.query_id) as queries, count(distinct ah.user_name) as users\n'
+        f'from snowflake.account_usage.access_history ah,\n'
+        f'  lateral flatten(input => ah.{source}) f,\n'
         '  lateral flatten(input => f.value:"columns") c\n'
-        f"where ah.query_start_time >= dateadd(day, -{int(settings.days)}, current_timestamp())\n"
+        f'where ah.query_start_time >= dateadd(day, -{int(settings.days)}, current_timestamp())\n'
         f'  and f.value:"objectDomain"::string in ({_literals(SNOWFLAKE_DOMAINS)}){exclude}\n'
-        "group by 1, 2"
+        'group by 1, 2'
     )
 
 
 def databricks_sql(settings: UsageSettings) -> str:
     exclude = (
-        f"\n  and created_by not in ({_literals(settings.exclude_users)})" if settings.exclude_users else ""
+        f'\n  and created_by not in ({_literals(settings.exclude_users)})' if settings.exclude_users else ''
     )
     return (
-        "select source_table_full_name, source_column_name, "
-        "count(distinct coalesce(statement_id, event_id)) as queries, count(distinct created_by) as users\n"
-        "from system.access.column_lineage\n"
-        f"where event_date >= date_sub(current_date(), {int(settings.days)})\n"
-        "  and source_table_full_name is not null and source_column_name is not null"
-        f"{exclude}\n"
-        "group by 1, 2"
+        'select source_table_full_name, source_column_name, '
+        'count(distinct coalesce(statement_id, event_id)) as queries, count(distinct created_by) as users\n'
+        'from system.access.column_lineage\n'
+        f'where event_date >= date_sub(current_date(), {int(settings.days)})\n'
+        '  and source_table_full_name is not null and source_column_name is not null'
+        f'{exclude}\n'
+        'group by 1, 2'
     )
 
 
 def bigquery_sql(project: str, region: str, settings: UsageSettings) -> str:
     exclude = (
-        f"\n  and user_email not in ({_literals(settings.exclude_users)})" if settings.exclude_users else ""
+        f'\n  and user_email not in ({_literals(settings.exclude_users)})' if settings.exclude_users else ''
     )
     return (
-        "select query, user_email, count(*) as runs\n"
-        f"from `{project}`.`region-{region.lower()}`.INFORMATION_SCHEMA.JOBS\n"
-        f"where creation_time >= timestamp_sub(current_timestamp(), interval {int(settings.days)} day)\n"
+        'select query, user_email, count(*) as runs\n'
+        f'from `{project}`.`region-{region.lower()}`.INFORMATION_SCHEMA.JOBS\n'
+        f'where creation_time >= timestamp_sub(current_timestamp(), interval {int(settings.days)} day)\n'
         "  and job_type = 'QUERY' and statement_type <> 'SCRIPT' and state = 'DONE' and error_result is null"
-        f"{exclude}\n"
-        "group by query, user_email\n"
-        "order by runs desc\n"
-        f"limit {int(settings.max_queries)}"
+        f'{exclude}\n'
+        'group by query, user_email\n'
+        'order by runs desc\n'
+        f'limit {int(settings.max_queries)}'
     )
 
 
@@ -125,7 +125,7 @@ def _cursor_rows(connection: Any, sql: str) -> list[tuple[Any, ...]]:
 
 
 def snowflake_usage(connector: SnowflakeConnector, settings: UsageSettings) -> list[ColumnUsage]:
-    module = _driver("snowflake.connector", "snowflake")
+    module = _driver('snowflake.connector', 'snowflake')
     connection = module.connect(**connector.options)
     try:
         rows = _cursor_rows(connection, snowflake_sql(settings))
@@ -135,7 +135,7 @@ def snowflake_usage(connector: SnowflakeConnector, settings: UsageSettings) -> l
 
 
 def databricks_usage(connector: DatabricksConnector, settings: UsageSettings) -> list[ColumnUsage]:
-    module = _driver("databricks.sql", "databricks")
+    module = _driver('databricks.sql', 'databricks')
     connection = module.connect(**connector.options)
     try:
         rows = _cursor_rows(connection, databricks_sql(settings))
@@ -150,9 +150,9 @@ Parser = Callable[[str], list[tuple[str, str]]]
 def bigquery_usage(connector: BigQueryConnector, settings: UsageSettings, parse: Parser) -> list[ColumnUsage]:
     """Distinct query texts with their users and runs, parsed for the columns each reads."""
     client = connector.client()
-    region = connector.location or "us"
+    region = connector.location or 'us'
     rows = client.query(bigquery_sql(connector.project, region, settings)).result()
-    return aggregate_queries(((r["query"], r["user_email"], int(r["runs"])) for r in rows), parse)
+    return aggregate_queries(((r['query'], r['user_email'], int(r['runs'])) for r in rows), parse)
 
 
 def aggregate_queries(rows: Iterable[tuple[str, str | None, int]], parse: Parser) -> list[ColumnUsage]:
@@ -186,7 +186,7 @@ def fetch(connector: Any, settings: UsageSettings, parse: Parser) -> list[Column
 
 
 SOURCES = {
-    "snowflake": "Snowflake access history",
-    "bigquery": "BigQuery job history",
-    "databricks": "Databricks column lineage",
+    'snowflake': 'Snowflake access history',
+    'bigquery': 'BigQuery job history',
+    'databricks': 'Databricks column lineage',
 }

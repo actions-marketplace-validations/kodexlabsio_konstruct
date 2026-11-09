@@ -1,17 +1,17 @@
 // The viewer's state: what is selected and shown, and everything derived from it.
 
-import { SvelteSet } from "svelte/reactivity";
-import { computeFocus, type Focus } from "./focus";
-import { computeOrder, HEAD, PAD, place, ROW } from "./layout";
-import { attr, GraphModel } from "./model";
-import { buildIndex, search, type SearchResult } from "./search";
-import type { Direction, Explanations, Formula, GraphData, GraphNode, Point } from "./types";
+import { SvelteSet } from 'svelte/reactivity';
+import { computeFocus, type Focus } from './focus';
+import { computeOrder, HEAD, PAD, place, ROW } from './layout';
+import { attr, GraphModel } from './model';
+import { buildIndex, search, type SearchResult } from './search';
+import type { Direction, Explanations, Formula, GraphData, GraphNode, Point } from './types';
 
 export const ANIMATE_LIMIT = 400;
 export const EXPAND_ALL_LIMIT = 400;
 export const AUTO_ISOLATE = 120;
 
-export type ViewRequest = { kind: "fit" | "focus" | "centre"; id?: string; n: number };
+export type ViewRequest = { kind: 'fit' | 'focus' | 'centre'; id?: string; n: number };
 
 export interface Rows {
     rows: GraphNode[];
@@ -28,12 +28,12 @@ export class Viewer {
     selected = $state<string | null>(null);
     column = $state<string | null>(null);
     term = $state<string | null>(null);
-    direction = $state<Direction>("both");
+    direction = $state<Direction>('both');
     isolate = $state(false);
     allColumns = $state(false);
-    query = $state("");
-    notice = $state("");
-    theme = $state<"dark" | "light">("dark");
+    query = $state('');
+    notice = $state('');
+    theme = $state<'dark' | 'light'>('dark');
     view = $state<ViewRequest | null>(null);
     readonly expanded = new SvelteSet<string>();
     readonly collapsed = new SvelteSet<string>();
@@ -41,7 +41,7 @@ export class Viewer {
     /** Once the user has pressed Isolate, the viewer stops choosing for them. */
     isolateTouched = false;
     private requests = 0;
-    private orderKey = "";
+    private orderKey = '';
     private orderCache: string[][] = [];
 
     constructor(data: GraphData, explanations: Explanations) {
@@ -75,7 +75,7 @@ export class Viewer {
     });
 
     readonly order: string[][] = $derived.by(() => {
-        const key = Array.from(this.visible).sort().join("\u0001");
+        const key = Array.from(this.visible).sort().join('\u0001');
         if (key !== this.orderKey) {
             this.orderCache = computeOrder(this.model, this.visible);
             this.orderKey = key;
@@ -83,7 +83,7 @@ export class Viewer {
         return this.orderCache;
     });
 
-    readonly target: Map<string, Point> = $derived.by(() => place(this.order, (id) => this.heightOf(id)));
+    readonly target: Map<string, Point> = $derived.by(() => place(this.order, id => this.heightOf(id)));
 
     /** Which column rows a card shows: all when expanded, the lineage when a column is selected. */
     rowsOf(id: string): Rows {
@@ -92,7 +92,7 @@ export class Viewer {
         if (this.expanded.has(id) || this.allColumns) return { rows: all, more: 0 };
         const columns = this.focus.columns;
         if (columns && this.focus.relations?.has(id)) {
-            const rows = all.filter((c) => columns.has(c.id));
+            const rows = all.filter(c => columns.has(c.id));
             return { rows, more: rows.length ? all.length - rows.length : 0 };
         }
         return { rows: [], more: 0 };
@@ -104,7 +104,7 @@ export class Viewer {
         return count ? HEAD + PAD + count * ROW + PAD : HEAD;
     }
 
-    request(kind: ViewRequest["kind"], id?: string): void {
+    request(kind: ViewRequest['kind'], id?: string): void {
         this.view = { kind, id, n: ++this.requests };
     }
 
@@ -123,7 +123,7 @@ export class Viewer {
         const lit = this.focus.relations;
         this.autoIsolate(!!(lit && lit.size > 1 && (columnId || this.model.viewNodes.length > AUTO_ISOLATE)));
         // A selected column, or a jump from search or a link, brings its whole lineage into view.
-        if (columnId || centre) this.request("focus", id);
+        if (columnId || centre) this.request('focus', id);
     }
 
     selectTerm(id: string): void {
@@ -132,11 +132,11 @@ export class Viewer {
         this.selected =
             this.model
                 .boundTo(id)
-                .map((b) => this.model.viewOf(b))
+                .map(b => this.model.viewOf(b))
                 .find((v): v is string => v !== null) ?? null;
         const lit = this.focus.relations;
         this.autoIsolate(!!(lit && lit.size > 0));
-        this.request("focus");
+        this.request('focus');
     }
 
     clear(): void {
@@ -149,15 +149,15 @@ export class Viewer {
     toggleIsolate(): void {
         this.isolate = !this.isolate;
         this.isolateTouched = true;
-        this.request("fit");
+        this.request('fit');
     }
 
     toggleAllColumns(): void {
         if (!this.allColumns && this.visible.size > EXPAND_ALL_LIMIT) {
-            this.notice = "Too many tables to show every column; select one or isolate first.";
+            this.notice = 'Too many tables to show every column; select one or isolate first.';
             return;
         }
-        this.notice = "";
+        this.notice = '';
         this.allColumns = !this.allColumns;
         this.collapsed.clear();
         if (!this.allColumns) this.expanded.clear();
@@ -182,8 +182,8 @@ export class Viewer {
     open(id: string): boolean {
         const n = this.model.node(id);
         if (!n) return false;
-        if (n.kind === "term") this.selectTerm(id);
-        else if (n.kind === "column" && n.parent && this.model.inView.has(n.parent))
+        if (n.kind === 'term') this.selectTerm(id);
+        else if (n.kind === 'column' && n.parent && this.model.inView.has(n.parent))
             this.select(n.parent, id, true);
         else if (this.model.inView.has(id)) this.select(id, null, true);
         else return false;
@@ -192,10 +192,10 @@ export class Viewer {
 
     get hash(): string {
         const target = this.term ?? this.column ?? this.selected;
-        return target ? `#${encodeURIComponent(target)}` : "";
+        return target ? `#${encodeURIComponent(target)}` : '';
     }
 
     status(n: GraphNode): string {
-        return attr<string>(n, "status") ?? "draft";
+        return attr<string>(n, 'status') ?? 'draft';
     }
 }

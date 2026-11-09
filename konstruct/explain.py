@@ -70,42 +70,42 @@ class Explanation:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "column": self.column,
-            "label": self.label,
-            "data_type": self.data_type,
-            "description": self.description,
-            "expression": self.expression,
-            "composed": self.composed,
-            "sources": self.sources,
-            "complete": self.complete,
-            "steps": [s.to_dict() for s in self.steps],
+            'column': self.column,
+            'label': self.label,
+            'data_type': self.data_type,
+            'description': self.description,
+            'expression': self.expression,
+            'composed': self.composed,
+            'sources': self.sources,
+            'complete': self.complete,
+            'steps': [s.to_dict() for s in self.steps],
         }
 
     def __str__(self) -> str:
-        head = self.label + (f"  ({self.data_type})" if self.data_type else "")
+        head = self.label + (f'  ({self.data_type})' if self.data_type else '')
         lines = [head]
         if self.description:
-            lines.append(f"  {self.description}")
+            lines.append(f'  {self.description}')
         if self.expression is None:
-            lines += ["", "  No expression recorded: this column is read from a source, or the SQL that"]
-            lines.append("  builds it could not be analysed.")
-            return "\n".join(lines)
-        lines += ["", f"  = {self.expression}"]
+            lines += ['', '  No expression recorded: this column is read from a source, or the SQL that']
+            lines.append('  builds it could not be analysed.')
+            return '\n'.join(lines)
+        lines += ['', f'  = {self.expression}']
         if self.composed and self.composed != self.expression:
-            lines += ["", "In terms of sources", f"  = {self.composed}"]
+            lines += ['', 'In terms of sources', f'  = {self.composed}']
         if not self.complete:
-            lines.append("  (partial: some columns on the way have no recorded expression)")
+            lines.append('  (partial: some columns on the way have no recorded expression)')
         if self.sources:
-            lines += ["", f"Sources ({len(self.sources)})", *(f"  {s}" for s in self.sources)]
+            lines += ['', f'Sources ({len(self.sources)})', *(f'  {s}' for s in self.sources)]
         derived = [s for s in self.steps if s.expression is not None]
         if derived:
-            lines += ["", "Step by step"]
+            lines += ['', 'Step by step']
             for step in derived:
-                checked = step.verified and all(v == "confirmed" for v in step.verified)
-                lines.append(f"  {step.label} = {step.expression}" + ("  [verified]" if checked else ""))
+                checked = step.verified and all(v == 'confirmed' for v in step.verified)
+                lines.append(f'  {step.label} = {step.expression}' + ('  [verified]' if checked else ''))
                 for condition in step.conditions:
-                    lines.append(f"      {condition}")
-        return "\n".join(lines)
+                    lines.append(f'      {condition}')
+        return '\n'.join(lines)
 
 
 class _Namer:
@@ -126,9 +126,9 @@ class _Namer:
         its parts that names a relation, so nested fields (``orders.customer.country``) work."""
         parts = [p.name for p in column.parts]
         for split in range(len(parts) - 1, 0, -1):
-            node = self.relation(".".join(parts[:split]))
+            node = self.relation('.'.join(parts[:split]))
             if node is not None:
-                return node, ".".join(parts[split:])
+                return node, '.'.join(parts[split:])
         return None
 
     def parse(self, sql: str) -> exp.Expr | None:
@@ -154,15 +154,15 @@ class _Namer:
         return self.short(tree) if tree is not None else sql
 
     def condition(self, text: str) -> str:
-        prefix, sep, rest = text.partition(": ")
+        prefix, sep, rest = text.partition(': ')
         if not sep:
             return self.text(text)
-        return f"{prefix}: {self.text(rest)}"
+        return f'{prefix}: {self.text(rest)}'
 
 
 def short_sql(graph: Graph, sql: str, *, condition: bool = False) -> str:
     """An expression or condition from the graph with short relation names."""
-    dialect = graph.meta.get("dialect")
+    dialect = graph.meta.get('dialect')
     namer = _Namer(graph, dialect if isinstance(dialect, str) else None)
     return namer.condition(sql) if condition else namer.text(sql)
 
@@ -208,7 +208,7 @@ class Explainer:
     def __init__(self, graph: Graph, max_composed: int = MAX_COMPOSED) -> None:
         self.graph = graph
         self.max_composed = max_composed
-        dialect = graph.meta.get("dialect")
+        dialect = graph.meta.get('dialect')
         self.namer = _Namer(graph, dialect if isinstance(dialect, str) else None)
         self.memo: dict[str, _Composed] = {}
         self.active: set[str] = set()
@@ -233,8 +233,8 @@ class Explainer:
         if node.id in self.active or depth > MAX_DEPTH:
             return _Composed(None, frozenset(), False)
         graph = self.graph
-        expression = node.attrs.get("expression")
-        upstream = [graph.nodes[e.target] for e in graph.out_edges(node.id, "derived_from")]
+        expression = node.attrs.get('expression')
+        upstream = [graph.nodes[e.target] for e in graph.out_edges(node.id, 'derived_from')]
         if not isinstance(expression, str):
             leaf = _Composed(None, frozenset() if upstream else frozenset({node.id}), not upstream)
             self.memo[node.id] = leaf
@@ -246,7 +246,7 @@ class Explainer:
             return failed
         tree: exp.Expr = parsed
         self.active.add(node.id)
-        by_name = {(u.parent or "", u.name.lower()): u for u in upstream}
+        by_name = {(u.parent or '', u.name.lower()): u for u in upstream}
         by_relation = {}
         for u in upstream:
             owner = graph.parent_of(u)
@@ -271,7 +271,7 @@ class Explainer:
             target = (
                 by_name.get((relation.id, name.lower()))
                 or (by_relation.get((relation.relation.lower(), name.lower())) if relation.relation else None)
-                or graph.nodes.get(f"{relation.id}#{name}")
+                or graph.nodes.get(f'{relation.id}#{name}')
             )
             if target is None:
                 return short
@@ -302,20 +302,20 @@ class Explainer:
         steps = []
         while queue:
             node = queue.pop(0)
-            expression = node.attrs.get("expression")
+            expression = node.attrs.get('expression')
             owner = graph.parent_of(node)
-            edges = graph.out_edges(node.id, "derived_from")
+            edges = graph.out_edges(node.id, 'derived_from')
             steps.append(
                 Step(
                     column=node.id,
                     label=graph.label(node),
-                    relation_kind=owner.kind if owner else "column",
+                    relation_kind=owner.kind if owner else 'column',
                     expression=self.namer.text(expression) if isinstance(expression, str) else None,
-                    conditions=[self.namer.condition(c) for c in owner.attrs.get("conditions", [])]
+                    conditions=[self.namer.condition(c) for c in owner.attrs.get('conditions', [])]
                     if owner
                     else [],
                     inputs=[graph.label(graph.nodes[e.target]) for e in edges],
-                    verified=[str(e.attrs["verified"]) for e in edges if e.attrs.get("verified")],
+                    verified=[str(e.attrs['verified']) for e in edges if e.attrs.get('verified')],
                 )
             )
             for edge in edges:
@@ -325,7 +325,7 @@ class Explainer:
         return steps
 
     def explain(self, column: Node) -> Explanation:
-        raw = column.attrs.get("expression")
+        raw = column.attrs.get('expression')
         result = Explanation(
             column=column.id,
             label=self.graph.label(column),
@@ -350,13 +350,13 @@ class Explainer:
         graph = self.graph
         found: dict[str, str] = {}
         for start in graph.nodes.values():
-            if start.kind != "column" or start.id in found:
+            if start.kind != 'column' or start.id in found:
                 continue
             stack: list[tuple[Node, bool]] = [(start, False)]
             on_stack = {start.id}
             while stack:
                 node, expanded = stack.pop()
-                upstream = [graph.nodes[e.target] for e in graph.out_edges(node.id, "derived_from")]
+                upstream = [graph.nodes[e.target] for e in graph.out_edges(node.id, 'derived_from')]
                 if not expanded:
                     stack.append((node, True))
                     for other in upstream:
@@ -367,22 +367,22 @@ class Explainer:
                 parts = [
                     node.id,
                     graph.label(node),
-                    str(node.attrs.get("expression", "")),
-                    *sorted(f"{u.id}={found.get(u.id, 'cycle')}" for u in upstream),
+                    str(node.attrs.get('expression', '')),
+                    *sorted(f'{u.id}={found.get(u.id, "cycle")}' for u in upstream),
                 ]
-                found[node.id] = hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
+                found[node.id] = hashlib.sha256('\x00'.join(parts).encode('utf-8')).hexdigest()
                 on_stack.discard(node.id)
         return found
 
     def summary(self, node: Node) -> dict[str, Any]:
         composed = self.compose(node)
-        entry: dict[str, Any] = {"e": composed.original or self.namer.text(node.attrs["expression"])}
+        entry: dict[str, Any] = {'e': composed.original or self.namer.text(node.attrs['expression'])}
         text = self.composed_text(node)
-        if text is not None and text != entry["e"]:
-            entry["c"] = text
-            entry["s"] = sorted(self.graph.label(self.graph.nodes[s]) for s in composed.sources)
+        if text is not None and text != entry['e']:
+            entry['c'] = text
+            entry['s'] = sorted(self.graph.label(self.graph.nodes[s]) for s in composed.sources)
         if not composed.complete:
-            entry["p"] = 1
+            entry['p'] = 1
         return entry
 
     def summaries(self, limit: int = 50_000, cache: _Cache | None = None) -> dict[str, Any]:
@@ -399,26 +399,26 @@ class Explainer:
         prints = self.fingerprints() if cache is not None else {}
         names = (
             hashlib.sha256(
-                "\x00".join(
+                '\x00'.join(
                     sorted(
-                        f"{n.relation}={self.graph.label(n)}" for n in self.graph.nodes.values() if n.relation
+                        f'{n.relation}={self.graph.label(n)}' for n in self.graph.nodes.values() if n.relation
                     )
-                ).encode("utf-8")
+                ).encode('utf-8')
             ).hexdigest()
             if cache is not None
-            else ""
+            else ''
         )
         for node in self.graph.nodes.values():
-            if node.kind == "column" and isinstance(node.attrs.get("expression"), str):
+            if node.kind == 'column' and isinstance(node.attrs.get('expression'), str):
                 if len(columns) >= limit:
                     continue
                 if cache is None:
                     columns[node.id] = self.summary(node)
                 else:
-                    key = _cache_key("explain", prints[node.id], self.max_composed, dialect)
+                    key = _cache_key('explain', prints[node.id], self.max_composed, dialect)
                     columns[node.id] = cache.get_or_compute(key, functools.partial(self.summary, node))
-            elif node.attrs.get("conditions"):
-                raw = [str(c) for c in node.attrs["conditions"]]
+            elif node.attrs.get('conditions'):
+                raw = [str(c) for c in node.attrs['conditions']]
 
                 def shorten(raw: list[str] = raw) -> list[str]:
                     return [self.namer.condition(c) for c in raw]
@@ -427,13 +427,13 @@ class Explainer:
                     conditions[node.id] = shorten()
                 else:
                     conditions[node.id] = cache.get_or_compute(
-                        _cache_key("conditions", raw, names, dialect), shorten
+                        _cache_key('conditions', raw, names, dialect), shorten
                     )
-        return {"columns": columns, "conditions": conditions}
+        return {'columns': columns, 'conditions': conditions}
 
 
 def _cache_key(*parts: Any) -> str:
-    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode("utf-8")).hexdigest()
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode('utf-8')).hexdigest()
 
 
 class _Cache(Protocol):

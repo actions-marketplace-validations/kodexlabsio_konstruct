@@ -1,22 +1,22 @@
-import { mount } from "svelte";
-import App from "./App.svelte";
-import { Viewer } from "./lib/viewer.svelte";
-import type { Explanations, GraphData } from "./lib/types";
-import "./app.css";
+import { mount } from 'svelte';
+import './app.css';
+import App from './App.svelte';
+import type { Explanations, GraphData } from './lib/types';
+import { Viewer } from './lib/viewer.svelte';
 
 function embedded<T>(id: string): T | null {
-    const text = document.getElementById(id)?.textContent ?? "";
-    if (!text.trim() || text.startsWith("__KONSTRUCT_")) return null;
+    const text = document.getElementById(id)?.textContent ?? '';
+    if (!text.trim() || text.startsWith('__KONSTRUCT_')) return null;
     return JSON.parse(text) as T;
 }
 
 /** In `pnpm dev` the placeholders are still in the page: read dev/graph.json instead. */
 async function load(): Promise<[GraphData, Explanations]> {
-    const graph = embedded<GraphData>("konstruct-data");
-    if (graph) return [graph, embedded<Explanations>("konstruct-explain") ?? {}];
+    const graph = embedded<GraphData>('konstruct-data');
+    if (graph) return [graph, embedded<Explanations>('konstruct-explain') ?? {}];
     // Only `pnpm dev` reads a file; the production build never makes a request.
     if (import.meta.env.DEV) {
-        const response = await fetch("/dev/graph.json");
+        const response = await fetch('/dev/graph.json');
         return [response.ok ? ((await response.json()) as GraphData) : {}, {}];
     }
     return [{}, {}];

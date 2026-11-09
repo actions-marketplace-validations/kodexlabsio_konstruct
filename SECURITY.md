@@ -8,13 +8,13 @@ You should receive a reply within five working days. Fixes are released as a pat
 
 ## Supported Versions
 
-konstruct is at 0.x: only the latest release receives fixes.
+Konstruct is at 0.x: only the latest release receives fixes.
 
 ## Trust Model
 
-konstruct reads a repository and, if configured, a warehouse. It is built to be safe to run on a repository you have not reviewed, such as a pull request branch in CI.
+Konstruct reads a repository and, if configured, a warehouse. It is built to be safe to run on a repository you have not reviewed, such as a pull request branch in CI.
 
-| Input | What konstruct does with it |
+| Input | What Konstruct does with it |
 |-------|----------------------------|
 | Airflow DAG and Dagster definition files | Parses them with Python's `ast` module. It never imports or runs them. |
 | dbt Jinja | Renders it in a `jinja2` `SandboxedEnvironment`, with dbt's context replaced by inert stand-ins. Macros that would query the warehouse (`run_query`, `statement`) return empty results. |
@@ -26,4 +26,4 @@ konstruct reads a repository and, if configured, a warehouse. It is built to be 
 | graph.html | A single file that loads nothing from the network. Names, descriptions and SQL from the graph are inserted as text (`textContent`), never as HTML, and the embedded JSON is escaped so it cannot close its script tag. Tests open it with hostile names and descriptions in a real browser. |
 | The MCP server | Runs on stdio for the agent that started it. Its tools are read-only queries over the built graph. |
 
-konstruct collects no telemetry. Apart from warehouse connections you configure, `konstruct build` makes no network requests.
+Konstruct collects no telemetry. Apart from warehouse connections you configure, `konstruct build` makes no network requests.

@@ -1,4 +1,4 @@
-"""The konstruct graph: nodes, edges, traversal and (de)serialisation.
+"""The Konstruct graph: nodes, edges, traversal and (de)serialisation.
 
 Edge directions
 ---------------
@@ -28,14 +28,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 NodeKind = Literal[
-    "source", "table", "column", "model", "seed", "snapshot", "dag", "task", "test", "exposure", "term"
+    'source', 'table', 'column', 'model', 'seed', 'snapshot', 'dag', 'task', 'test', 'exposure', 'term'
 ]
-EdgeKind = Literal["contains", "feeds", "derived_from", "runs", "precedes", "tests", "defines", "relates_to"]
+EdgeKind = Literal['contains', 'feeds', 'derived_from', 'runs', 'precedes', 'tests', 'defines', 'relates_to']
 
-RELATION_KINDS: frozenset[str] = frozenset({"source", "table", "model", "seed", "snapshot"})
+RELATION_KINDS: frozenset[str] = frozenset({'source', 'table', 'model', 'seed', 'snapshot'})
 # When several nodes describe one physical relation (a seed and the dbt source that reads it), SQL
 # that names the relation resolves to the first kind in this order.
-RELATION_PRIORITY: dict[str, int] = {"source": 0, "model": 1, "snapshot": 2, "seed": 3, "table": 4}
+RELATION_PRIORITY: dict[str, int] = {'source': 0, 'model': 1, 'snapshot': 2, 'seed': 3, 'table': 4}
 GRAPH_FORMAT_VERSION = 1
 
 
@@ -53,30 +53,30 @@ class Node:
     attrs: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        data: dict[str, Any] = {"id": self.id, "kind": self.kind, "name": self.name}
-        for key in ("parent", "relation", "description", "data_type", "path"):
+        data: dict[str, Any] = {'id': self.id, 'kind': self.kind, 'name': self.name}
+        for key in ('parent', 'relation', 'description', 'data_type', 'path'):
             value = getattr(self, key)
             if value:
                 data[key] = value
         if self.origins:
-            data["origins"] = sorted(self.origins)
+            data['origins'] = sorted(self.origins)
         if self.attrs:
-            data["attrs"] = self.attrs
+            data['attrs'] = self.attrs
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Node:
         return cls(
-            id=data["id"],
-            kind=data["kind"],
-            name=data["name"],
-            parent=data.get("parent"),
-            relation=data.get("relation"),
-            description=data.get("description"),
-            data_type=data.get("data_type"),
-            path=data.get("path"),
-            origins=list(data.get("origins", [])),
-            attrs=dict(data.get("attrs", {})),
+            id=data['id'],
+            kind=data['kind'],
+            name=data['name'],
+            parent=data.get('parent'),
+            relation=data.get('relation'),
+            description=data.get('description'),
+            data_type=data.get('data_type'),
+            path=data.get('path'),
+            origins=list(data.get('origins', [])),
+            attrs=dict(data.get('attrs', {})),
         )
 
 
@@ -92,24 +92,24 @@ class Edge:
         return (self.source, self.target, self.kind)
 
     def to_dict(self) -> dict[str, Any]:
-        data: dict[str, Any] = {"source": self.source, "target": self.target, "kind": self.kind}
+        data: dict[str, Any] = {'source': self.source, 'target': self.target, 'kind': self.kind}
         if self.attrs:
-            data["attrs"] = self.attrs
+            data['attrs'] = self.attrs
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Edge:
-        return cls(data["source"], data["target"], data["kind"], dict(data.get("attrs", {})))
+        return cls(data['source'], data['target'], data['kind'], dict(data.get('attrs', {})))
 
 
 def column_id(parent_id: str, column: str) -> str:
-    return f"{parent_id}#{column.lower()}"
+    return f'{parent_id}#{column.lower()}'
 
 
 def relation_key(*parts: str | None) -> str:
     """Canonical, case-insensitive key for a warehouse relation, e.g. ``jaffle.main.orders``."""
     cleaned = (part.strip('"`[]').lower() for part in parts if part)
-    return ".".join(part for part in cleaned if part)
+    return '.'.join(part for part in cleaned if part)
 
 
 @dataclass
@@ -141,7 +141,7 @@ class Graph:
             self.nodes[node.id] = node
             self._index_relation(node)
             return node
-        for key in ("parent", "relation", "description", "data_type", "path"):
+        for key in ('parent', 'relation', 'description', 'data_type', 'path'):
             if not getattr(existing, key) and getattr(node, key):
                 setattr(existing, key, getattr(node, key))
         for origin in node.origins:
@@ -172,7 +172,7 @@ class Graph:
         node = self.add_node(
             Node(
                 id=column_id(parent.id, name),
-                kind="column",
+                kind='column',
                 name=name,
                 parent=parent.id,
                 data_type=data_type,
@@ -181,7 +181,7 @@ class Graph:
                 attrs=attrs or {},
             )
         )
-        self.add_edge(parent.id, node.id, "contains")
+        self.add_edge(parent.id, node.id, 'contains')
         return node
 
     def add_edge(self, source: str, target: str, kind: EdgeKind, **attrs: Any) -> Edge | None:
@@ -238,7 +238,7 @@ class Graph:
         return (n for n in self.nodes.values() if n.kind in RELATION_KINDS)
 
     def columns_of(self, node_id: str) -> list[Node]:
-        return [self.nodes[e.target] for e in self.out_edges(node_id, "contains")]
+        return [self.nodes[e.target] for e in self.out_edges(node_id, 'contains')]
 
     def column(self, parent_id: str, name: str) -> Node | None:
         return self.nodes.get(column_id(parent_id, name))
@@ -248,13 +248,13 @@ class Graph:
 
     def label(self, node: Node) -> str:
         """Short human label: ``orders.amount`` for a column, ``orders`` for a relation."""
-        if node.kind == "column":
+        if node.kind == 'column':
             parent = self.parent_of(node)
-            return f"{self.label(parent)}.{node.name}" if parent else node.name
-        if node.kind == "source" and node.attrs.get("source_name"):
-            return f"{node.attrs['source_name']}.{node.name}"
-        if node.kind == "task" and node.attrs.get("dag"):
-            return f"{node.attrs['dag']}.{node.name}"
+            return f'{self.label(parent)}.{node.name}' if parent else node.name
+        if node.kind == 'source' and node.attrs.get('source_name'):
+            return f'{node.attrs["source_name"]}.{node.name}'
+        if node.kind == 'task' and node.attrs.get('dag'):
+            return f'{node.attrs["dag"]}.{node.name}'
         return node.name
 
     # Name resolution
@@ -269,11 +269,11 @@ class Graph:
         relations = self._match_relations(needle)
         if relations:
             return relations
-        parts = needle.split(".")
+        parts = needle.split('.')
         # Try every split into relation and column, the longest relation first, so that nested
         # columns (orders.customer.country) resolve as well as qualified tables.
         for cut in range(len(parts) - 1, 0, -1):
-            rel_part, col_part = ".".join(parts[:cut]), ".".join(parts[cut:])
+            rel_part, col_part = '.'.join(parts[:cut]), '.'.join(parts[cut:])
             columns = [
                 col
                 for rel in self._match_relations(rel_part)
@@ -285,10 +285,10 @@ class Graph:
             n
             for n in self.nodes.values()
             if n.kind not in RELATION_KINDS
-            and n.kind != "column"
+            and n.kind != 'column'
             and (
                 needle in (n.name.lower(), self.label(n).lower())
-                or (n.kind == "term" and needle in (s.lower() for s in n.attrs.get("synonyms", [])))
+                or (n.kind == 'term' and needle in (s.lower() for s in n.attrs.get('synonyms', [])))
             )
         ]
         if others:
@@ -301,7 +301,7 @@ class Graph:
             keys = {node.name.lower(), node.id.lower()}
             if node.relation:
                 keys.add(node.relation)
-            if any(k == needle or k.endswith("." + needle) for k in keys):
+            if any(k == needle or k.endswith('.' + needle) for k in keys):
                 matches.append(node)
         exact = [n for n in matches if n.name.lower() == needle or n.relation == needle]
         if len(exact) == 1 or (exact and len(matches) > len(exact)):
@@ -318,19 +318,19 @@ class Graph:
     def downstream_edges(self, node_id: str) -> Iterator[tuple[Edge, str]]:
         """Edges along which a change to ``node_id`` propagates, with the node they reach."""
         for edge in self._out.get(node_id, []):
-            if edge.kind == "feeds":
+            if edge.kind == 'feeds':
                 yield edge, edge.target
         for edge in self._in.get(node_id, []):
-            if edge.kind in ("derived_from", "tests", "runs"):
+            if edge.kind in ('derived_from', 'tests', 'runs'):
                 yield edge, edge.source
 
     def upstream_edges(self, node_id: str) -> Iterator[tuple[Edge, str]]:
         """Edges along which ``node_id`` depends on something, with the node they reach."""
         for edge in self._in.get(node_id, []):
-            if edge.kind in ("feeds", "runs"):
+            if edge.kind in ('feeds', 'runs'):
                 yield edge, edge.source
         for edge in self._out.get(node_id, []):
-            if edge.kind == "derived_from":
+            if edge.kind == 'derived_from':
                 yield edge, edge.target
 
     def _walk(
@@ -351,14 +351,14 @@ class Graph:
             if max_depth is not None and depth >= max_depth:
                 continue
             current = seen[node_id]
-            if stop_at_reference and current.via is not None and current.via.attrs.get("role") == "reference":
+            if stop_at_reference and current.via is not None and current.via.attrs.get('role') == 'reference':
                 continue
             for edge, other in step(node_id):
                 if other in seen or other not in self.nodes:
                     continue
                 seen[other] = Step(self.nodes[other], depth + 1, edge, node_id)
                 # Tests and the tasks that run a node are reported, not walked through.
-                if edge.kind not in ("tests", "runs"):
+                if edge.kind not in ('tests', 'runs'):
                     queue.append((other, depth + 1))
         return list(seen.values())
 
@@ -377,7 +377,7 @@ class Graph:
         the tasks that read or run each affected relation are reported too.
         """
         steps = self._walk(self.expand(node), self.downstream_edges, max_depth, True)
-        if node.kind == "column":
+        if node.kind == 'column':
             steps += self._relation_consumers(steps, upstream=False)
         return steps + self._through_tasks(steps)
 
@@ -389,12 +389,12 @@ class Graph:
         for step in steps:
             if step.via is None:
                 continue
-            for through in [step.via.attrs.get("via"), *step.via.attrs.get("also_via", [])]:
+            for through in [step.via.attrs.get('via'), *step.via.attrs.get('also_via', [])]:
                 if (
                     isinstance(through, str)
                     and through in self.nodes
                     and through not in seen
-                    and self.nodes[through].kind == "task"
+                    and self.nodes[through].kind == 'task'
                 ):
                     seen.add(through)
                     extra.append(Step(self.nodes[through], step.depth, step.via, step.previous))
@@ -404,7 +404,7 @@ class Graph:
         """Everything upstream of ``node``. For a column, the tasks that build each relation on the
         way (including the column's own) are reported too."""
         steps = self._walk(self.expand(node), self.upstream_edges, max_depth, False)
-        if node.kind == "column":
+        if node.kind == 'column':
             steps += self._relation_consumers(steps, upstream=True)
         return steps
 
@@ -413,21 +413,21 @@ class Graph:
         extra: list[Step] = []
         for step in steps:
             column = step.node
-            if column.kind != "column" or not column.parent or (step.depth == 0 and not upstream):
+            if column.kind != 'column' or not column.parent or (step.depth == 0 and not upstream):
                 continue
             parent = column.parent
-            candidates: list[tuple[Edge, str]] = [(e, e.source) for e in self.in_edges(parent, "runs")]
+            candidates: list[tuple[Edge, str]] = [(e, e.source) for e in self.in_edges(parent, 'runs')]
             if upstream:
                 candidates += [
                     (e, e.source)
-                    for e in self.in_edges(parent, "feeds")
-                    if e.source in self.nodes and self.nodes[e.source].kind == "task"
+                    for e in self.in_edges(parent, 'feeds')
+                    if e.source in self.nodes and self.nodes[e.source].kind == 'task'
                 ]
             else:
                 candidates += [
                     (e, e.target)
-                    for e in self.out_edges(parent, "feeds")
-                    if e.target in self.nodes and self.nodes[e.target].kind in ("exposure", "task")
+                    for e in self.out_edges(parent, 'feeds')
+                    if e.target in self.nodes and self.nodes[e.target].kind in ('exposure', 'task')
                 ]
             for edge, other in candidates:
                 if other not in seen:
@@ -446,10 +446,10 @@ class Graph:
             yield from self.downstream_edges(node_id)
             yield from self.upstream_edges(node_id)
             for edge in self._out.get(node_id, []):
-                if edge.kind in ("contains", "precedes"):
+                if edge.kind in ('contains', 'precedes'):
                     yield edge, edge.target
             for edge in self._in.get(node_id, []):
-                if edge.kind in ("contains", "precedes"):
+                if edge.kind in ('contains', 'precedes'):
                     yield edge, edge.source
 
         return self._shortest(start.id, end.id, either)
@@ -477,38 +477,38 @@ class Graph:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "format_version": GRAPH_FORMAT_VERSION,
-            "meta": self.meta,
-            "nodes": [n.to_dict() for n in sorted(self.nodes.values(), key=lambda n: n.id)],
+            'format_version': GRAPH_FORMAT_VERSION,
+            'meta': self.meta,
+            'nodes': [n.to_dict() for n in sorted(self.nodes.values(), key=lambda n: n.id)],
             # Insertion order, which a build makes deterministic, keeps columns in table order.
-            "edges": [e.to_dict() for e in self._edges.values()],
-            "warnings": self.warnings,
+            'edges': [e.to_dict() for e in self._edges.values()],
+            'warnings': self.warnings,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Graph:
         graph = cls()
-        graph.meta = dict(data.get("meta", {}))
-        for item in data.get("nodes", []):
+        graph.meta = dict(data.get('meta', {}))
+        for item in data.get('nodes', []):
             graph.add_node(Node.from_dict(item))
-        for item in data.get("edges", []):
+        for item in data.get('edges', []):
             edge = Edge.from_dict(item)
             graph.add_edge(edge.source, edge.target, edge.kind, **edge.attrs)
-        graph.warnings = list(data.get("warnings", []))
+        graph.warnings = list(data.get('warnings', []))
         return graph
 
     def write(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.to_dict(), indent=1, sort_keys=False) + "\n", encoding="utf-8")
+        path.write_text(json.dumps(self.to_dict(), indent=1, sort_keys=False) + '\n', encoding='utf-8')
 
     @classmethod
     def read(cls, path: Path) -> Graph:
-        return cls.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        return cls.from_dict(json.loads(path.read_text(encoding='utf-8')))
 
     def stats(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for node in self.nodes.values():
             counts[node.kind] = counts.get(node.kind, 0) + 1
         for edge in self._edges.values():
-            counts[f"edge:{edge.kind}"] = counts.get(f"edge:{edge.kind}", 0) + 1
+            counts[f'edge:{edge.kind}'] = counts.get(f'edge:{edge.kind}', 0) + 1
         return counts

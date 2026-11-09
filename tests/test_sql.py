@@ -5,49 +5,49 @@ import pytest
 from konstruct.sql import ColumnSource, StatementLineage, analyse, dialect_for, strip_templating
 
 SCHEMA = {
-    "db.main.orders": {
-        "id": "int",
-        "customer_id": "int",
-        "amount": "int",
-        "status": "text",
-        "ordered_at": "date",
+    'db.main.orders': {
+        'id': 'int',
+        'customer_id': 'int',
+        'amount': 'int',
+        'status': 'text',
+        'ordered_at': 'date',
     },
-    "db.main.customers": {"id": "int", "first_name": "text", "last_name": "text"},
-    "db.main.payments": {"id": "int", "order_id": "int", "amount": "int", "method": "text"},
+    'db.main.customers': {'id': 'int', 'first_name': 'text', 'last_name': 'text'},
+    'db.main.payments': {'id': 'int', 'order_id': 'int', 'amount': 'int', 'method': 'text'},
 }
 
-ORDERS = "db.main.orders"
-CUSTOMERS = "db.main.customers"
-PAYMENTS = "db.main.payments"
+ORDERS = 'db.main.orders'
+CUSTOMERS = 'db.main.customers'
+PAYMENTS = 'db.main.payments'
 
 
 def one(sql: str, **kwargs: object) -> StatementLineage:
-    kwargs.setdefault("schema", SCHEMA)
-    kwargs.setdefault("dialect", "duckdb")
-    kwargs.setdefault("default_catalog", "db")
-    kwargs.setdefault("default_db", "main")
+    kwargs.setdefault('schema', SCHEMA)
+    kwargs.setdefault('dialect', 'duckdb')
+    kwargs.setdefault('default_catalog', 'db')
+    kwargs.setdefault('default_db', 'main')
     results = analyse(sql, **kwargs)  # type: ignore[arg-type]
     assert len(results) == 1
     return results[0]
 
 
-def src(relation: str, column: str, transform: str = "direct") -> ColumnSource:
+def src(relation: str, column: str, transform: str = 'direct') -> ColumnSource:
     return ColumnSource(relation, column, transform)  # type: ignore[arg-type]
 
 
 def test_plain_select_with_alias() -> None:
-    result = one("select id as order_id, amount from orders")
-    assert result.kind == "select"
+    result = one('select id as order_id, amount from orders')
+    assert result.kind == 'select'
     assert result.reads == [ORDERS]
-    assert result.columns == {"order_id": [src(ORDERS, "id")], "amount": [src(ORDERS, "amount")]}
+    assert result.columns == {'order_id': [src(ORDERS, 'id')], 'amount': [src(ORDERS, 'amount')]}
     assert result.errors == []
 
 
 def test_expression_is_marked_transformed() -> None:
-    result = one("select amount / 100 as amount_dollars, upper(status) as status from orders")
+    result = one('select amount / 100 as amount_dollars, upper(status) as status from orders')
     assert result.columns == {
-        "amount_dollars": [src(ORDERS, "amount", "transformed")],
-        "status": [src(ORDERS, "status", "transformed")],
+        'amount_dollars': [src(ORDERS, 'amount', 'transformed')],
+        'status': [src(ORDERS, 'status', 'transformed')],
     }
 
 
@@ -61,8 +61,8 @@ def test_ctes_chain_back_to_physical_columns() -> None:
     result = one(sql)
     assert result.reads == [ORDERS]
     assert result.columns == {
-        "order_id": [src(ORDERS, "id")],
-        "total": [src(ORDERS, "amount", "transformed")],
+        'order_id': [src(ORDERS, 'id')],
+        'total': [src(ORDERS, 'amount', 'transformed')],
     }
 
 
@@ -75,12 +75,12 @@ def test_joins_resolve_each_column_to_its_own_table() -> None:
     """
     result = one(sql)
     assert sorted(result.reads) == sorted([ORDERS, CUSTOMERS, PAYMENTS])
-    assert result.columns["order_id"] == [src(ORDERS, "id")]
-    assert sorted(result.columns["customer_name"], key=lambda s: s.column) == [
-        src(CUSTOMERS, "first_name", "transformed"),
-        src(CUSTOMERS, "last_name", "transformed"),
+    assert result.columns['order_id'] == [src(ORDERS, 'id')]
+    assert sorted(result.columns['customer_name'], key=lambda s: s.column) == [
+        src(CUSTOMERS, 'first_name', 'transformed'),
+        src(CUSTOMERS, 'last_name', 'transformed'),
     ]
-    assert result.columns["amount"] == [src(PAYMENTS, "amount")]
+    assert result.columns['amount'] == [src(PAYMENTS, 'amount')]
 
 
 def test_join_filter_and_group_columns_are_references() -> None:
@@ -94,28 +94,28 @@ def test_join_filter_and_group_columns_are_references() -> None:
     """
     result = one(sql)
     assert set(result.references) == {
-        (PAYMENTS, "order_id"),
-        (ORDERS, "id"),
-        (ORDERS, "status"),
-        (ORDERS, "customer_id"),
+        (PAYMENTS, 'order_id'),
+        (ORDERS, 'id'),
+        (ORDERS, 'status'),
+        (ORDERS, 'customer_id'),
     }
 
 
 def test_unused_columns_of_an_import_cte_are_not_references() -> None:
-    result = one("with o as (select * from orders) select o.id from o")
+    result = one('with o as (select * from orders) select o.id from o')
     assert result.references == []
 
 
 def test_select_star_expands_with_a_schema() -> None:
-    result = one("select * from customers")
-    assert list(result.columns) == ["id", "first_name", "last_name"]
-    assert result.columns["first_name"] == [src(CUSTOMERS, "first_name")]
+    result = one('select * from customers')
+    assert list(result.columns) == ['id', 'first_name', 'last_name']
+    assert result.columns['first_name'] == [src(CUSTOMERS, 'first_name')]
 
 
 def test_qualified_star_in_a_join() -> None:
-    result = one("select c.*, o.amount from customers c join orders o on o.customer_id = c.id")
-    assert list(result.columns) == ["id", "first_name", "last_name", "amount"]
-    assert result.columns["amount"] == [src(ORDERS, "amount")]
+    result = one('select c.*, o.amount from customers c join orders o on o.customer_id = c.id')
+    assert list(result.columns) == ['id', 'first_name', 'last_name', 'amount']
+    assert result.columns['amount'] == [src(ORDERS, 'amount')]
 
 
 def test_star_over_an_unknown_relation_uses_the_columns_the_query_asks_for() -> None:
@@ -128,20 +128,20 @@ def test_star_over_an_unknown_relation_uses_the_columns_the_query_asks_for() -> 
     select * from renamed
     """
     result = one(sql, schema={})
-    relation = "db.raw.unknown_orders"
+    relation = 'db.raw.unknown_orders'
     assert result.columns == {
-        "order_id": [src(relation, "id")],
-        "order_total_cents": [src(relation, "order_total")],
-        "order_total": [src(relation, "order_total", "transformed")],
+        'order_id': [src(relation, 'id')],
+        'order_total_cents': [src(relation, 'order_total')],
+        'order_total': [src(relation, 'order_total', 'transformed')],
     }
-    assert any("unknown columns: db.raw.unknown_orders" in e for e in result.errors)
+    assert any('unknown columns: db.raw.unknown_orders' in e for e in result.errors)
 
 
 def test_select_star_without_a_schema_is_reported() -> None:
-    result = one("select * from mystery", schema={})
-    assert result.reads == ["db.main.mystery"]
+    result = one('select * from mystery', schema={})
+    assert result.reads == ['db.main.mystery']
     assert result.columns == {}
-    assert any("unknown columns" in e for e in result.errors)
+    assert any('unknown columns' in e for e in result.errors)
 
 
 def test_union_all_takes_columns_from_every_branch() -> None:
@@ -151,9 +151,9 @@ def test_union_all_takes_columns_from_every_branch() -> None:
     select id, amount, 'payment' from payments
     """
     result = one(sql)
-    assert result.columns["id"] == [src(ORDERS, "id"), src(PAYMENTS, "id")]
-    assert result.columns["amount"] == [src(ORDERS, "amount"), src(PAYMENTS, "amount")]
-    assert result.columns["kind"] == []
+    assert result.columns['id'] == [src(ORDERS, 'id'), src(PAYMENTS, 'id')]
+    assert result.columns['amount'] == [src(ORDERS, 'amount'), src(PAYMENTS, 'amount')]
+    assert result.columns['kind'] == []
 
 
 def test_window_function_columns_are_transformed_sources() -> None:
@@ -164,27 +164,27 @@ def test_window_function_columns_are_transformed_sources() -> None:
     from orders
     """
     result = one(sql)
-    assert result.columns["id"] == [src(ORDERS, "id")]
-    assert set(result.columns["order_seq"]) == {
-        src(ORDERS, "customer_id", "transformed"),
-        src(ORDERS, "ordered_at", "transformed"),
+    assert result.columns['id'] == [src(ORDERS, 'id')]
+    assert set(result.columns['order_seq']) == {
+        src(ORDERS, 'customer_id', 'transformed'),
+        src(ORDERS, 'ordered_at', 'transformed'),
     }
-    assert set(result.columns["customer_total"]) == {
-        src(ORDERS, "amount", "transformed"),
-        src(ORDERS, "customer_id", "transformed"),
+    assert set(result.columns['customer_total']) == {
+        src(ORDERS, 'amount', 'transformed'),
+        src(ORDERS, 'customer_id', 'transformed'),
     }
 
 
 def test_qualify_clause_columns_are_references() -> None:
-    sql = "select id from orders qualify row_number() over (partition by customer_id order by id) = 1"
-    assert (ORDERS, "customer_id") in one(sql).references
+    sql = 'select id from orders qualify row_number() over (partition by customer_id order by id) = 1'
+    assert (ORDERS, 'customer_id') in one(sql).references
 
 
 def test_subquery_in_from() -> None:
-    sql = "select t.total from (select customer_id, sum(amount) as total from orders group by 1) t"
+    sql = 'select t.total from (select customer_id, sum(amount) as total from orders group by 1) t'
     result = one(sql)
-    assert result.columns == {"total": [src(ORDERS, "amount", "transformed")]}
-    assert (ORDERS, "customer_id") in result.references
+    assert result.columns == {'total': [src(ORDERS, 'amount', 'transformed')]}
+    assert (ORDERS, 'customer_id') in result.references
 
 
 def test_aggregate_and_case() -> None:
@@ -193,37 +193,37 @@ def test_aggregate_and_case() -> None:
            sum(case when method = 'card' then amount else 0 end) as card_amount
     from payments group by customer_id
     """
-    result = one(sql, schema={PAYMENTS: {**SCHEMA[PAYMENTS], "customer_id": "int"}})
-    assert set(result.columns["card_amount"]) == {
-        src(PAYMENTS, "method", "transformed"),
-        src(PAYMENTS, "amount", "transformed"),
+    result = one(sql, schema={PAYMENTS: {**SCHEMA[PAYMENTS], 'customer_id': 'int'}})
+    assert set(result.columns['card_amount']) == {
+        src(PAYMENTS, 'method', 'transformed'),
+        src(PAYMENTS, 'amount', 'transformed'),
     }
 
 
 def test_target_names_the_relation_a_select_writes() -> None:
-    result = one("select id from orders", target="db.main.stg_orders")
-    assert result.target == "db.main.stg_orders"
+    result = one('select id from orders', target='db.main.stg_orders')
+    assert result.target == 'db.main.stg_orders'
 
 
 def test_create_table_as_select() -> None:
-    result = one("create table analytics.big_orders as select id, amount from orders where amount > 10")
-    assert result.kind == "create_table"
-    assert result.target == "db.analytics.big_orders"
+    result = one('create table analytics.big_orders as select id, amount from orders where amount > 10')
+    assert result.kind == 'create_table'
+    assert result.target == 'db.analytics.big_orders'
     assert result.reads == [ORDERS]
-    assert result.columns["amount"] == [src(ORDERS, "amount")]
-    assert result.references == [(ORDERS, "amount")]
+    assert result.columns['amount'] == [src(ORDERS, 'amount')]
+    assert result.references == [(ORDERS, 'amount')]
 
 
 def test_create_view() -> None:
-    result = one("create or replace view v_orders as select id from orders")
-    assert result.kind == "create_view"
-    assert result.target == "db.main.v_orders"
+    result = one('create or replace view v_orders as select id from orders')
+    assert result.kind == 'create_view'
+    assert result.target == 'db.main.v_orders'
 
 
 def test_insert_with_a_column_list_maps_by_position() -> None:
-    result = one("insert into archive (order_key, value) select id, amount from orders")
-    assert result.target == "db.main.archive"
-    assert result.columns == {"order_key": [src(ORDERS, "id")], "value": [src(ORDERS, "amount")]}
+    result = one('insert into archive (order_key, value) select id, amount from orders')
+    assert result.target == 'db.main.archive'
+    assert result.columns == {'order_key': [src(ORDERS, 'id')], 'value': [src(ORDERS, 'amount')]}
 
 
 def test_merge_and_delete_are_relation_level() -> None:
@@ -232,7 +232,7 @@ def test_merge_and_delete_are_relation_level() -> None:
     )
     assert merge.target == CUSTOMERS
     assert merge.reads == [PAYMENTS]
-    delete = one("delete from orders where id in (select order_id from payments)")
+    delete = one('delete from orders where id in (select order_id from payments)')
     assert delete.target == ORDERS
     assert delete.reads == [PAYMENTS]
 
@@ -242,45 +242,45 @@ def test_later_statements_see_tables_created_earlier() -> None:
     create table tmp_totals as select customer_id, sum(amount) as total from orders group by 1;
     create table report as select * from tmp_totals;
     """
-    results = analyse(sql, dialect="duckdb", schema=SCHEMA, default_catalog="db", default_db="main")
-    assert [r.target for r in results] == ["db.main.tmp_totals", "db.main.report"]
+    results = analyse(sql, dialect='duckdb', schema=SCHEMA, default_catalog='db', default_db='main')
+    assert [r.target for r in results] == ['db.main.tmp_totals', 'db.main.report']
     assert results[1].columns == {
-        "customer_id": [src("db.main.tmp_totals", "customer_id")],
-        "total": [src("db.main.tmp_totals", "total")],
+        'customer_id': [src('db.main.tmp_totals', 'customer_id')],
+        'total': [src('db.main.tmp_totals', 'total')],
     }
 
 
 def test_unqualified_tables_without_defaults_use_bare_names() -> None:
-    results = analyse("select a from t", dialect="postgres")
-    assert results[0].reads == ["t"]
-    assert results[0].columns == {"a": [src("t", "a")]}
+    results = analyse('select a from t', dialect='postgres')
+    assert results[0].reads == ['t']
+    assert results[0].columns == {'a': [src('t', 'a')]}
 
 
 def test_fully_qualified_names_win_over_defaults() -> None:
     result = one('select "ID" from "Other"."Sales"."Orders"')
-    assert result.reads == ["other.sales.orders"]
+    assert result.reads == ['other.sales.orders']
 
 
 def test_snowflake_dialect() -> None:
     results = analyse(
         "select o.id, iff(o.amount > 0, 'y', 'n') as positive from raw.shop.orders o",
-        dialect="snowflake",
+        dialect='snowflake',
     )
-    assert results[0].reads == ["raw.shop.orders"]
-    assert results[0].columns["positive"] == [src("raw.shop.orders", "amount", "transformed")]
+    assert results[0].reads == ['raw.shop.orders']
+    assert results[0].columns['positive'] == [src('raw.shop.orders', 'amount', 'transformed')]
 
 
 def test_unparseable_sql_is_reported_not_raised() -> None:
-    results = analyse("select from where (", dialect="duckdb", target="db.main.x")
-    assert results[0].kind == "unparsed"
-    assert results[0].target == "db.main.x"
+    results = analyse('select from where (', dialect='duckdb', target='db.main.x')
+    assert results[0].kind == 'unparsed'
+    assert results[0].target == 'db.main.x'
     assert results[0].errors
 
 
 def test_ddl_without_a_query_is_ignored() -> None:
-    assert analyse("drop table if exists orders; set search_path = public", dialect="postgres") == []
+    assert analyse('drop table if exists orders; set search_path = public', dialect='postgres') == []
     sql = "create schema if not exists reporting; create index ix on orders (id); create function f() returns int as 'select 1' language sql"
-    assert analyse(sql, dialect="postgres") == []
+    assert analyse(sql, dialect='postgres') == []
 
 
 def test_strip_templating() -> None:
@@ -290,9 +290,9 @@ def test_strip_templating() -> None:
     stripped = strip_templating(sql)
     assert (
         stripped
-        == "select a from __konstruct__.orders join \"__konstruct__\".x on true where d = '__konstruct__'"
+        == 'select a from __konstruct__.orders join "__konstruct__".x on true where d = \'__konstruct__\''
     )
-    assert analyse(stripped, dialect="duckdb")[0].reads == ["__konstruct__.orders", "__konstruct__.x"]
+    assert analyse(stripped, dialect='duckdb')[0].reads == ['__konstruct__.orders', '__konstruct__.x']
 
 
 def test_round_trip_to_dict() -> None:
@@ -301,12 +301,12 @@ def test_round_trip_to_dict() -> None:
 
 
 @pytest.mark.parametrize(
-    ("adapter", "dialect"),
+    ('adapter', 'dialect'),
     [
-        ("duckdb", "duckdb"),
-        ("postgres", "postgres"),
-        ("sqlserver", "tsql"),
-        ("Snowflake", "snowflake"),
+        ('duckdb', 'duckdb'),
+        ('postgres', 'postgres'),
+        ('sqlserver', 'tsql'),
+        ('Snowflake', 'snowflake'),
         (None, None),
     ],
 )
@@ -314,91 +314,91 @@ def test_dialect_for(adapter: str | None, dialect: str | None) -> None:
     assert dialect_for(adapter) == dialect
 
 
-STRUCTS = {"lake.sales.orders": {"id": "bigint", "customer": "UNKNOWN"}}
+STRUCTS = {'lake.sales.orders': {'id': 'bigint', 'customer': 'UNKNOWN'}}
 
 
 @pytest.mark.parametrize(
-    ("sql", "dialect", "expected"),
+    ('sql', 'dialect', 'expected'),
     [
-        ("select o.customer.country as c from lake.sales.orders o", "trino", ("customer.country", "direct")),
-        ("select customer.country as c from lake.sales.orders", "trino", ("customer.country", "direct")),
+        ('select o.customer.country as c from lake.sales.orders o', 'trino', ('customer.country', 'direct')),
+        ('select customer.country as c from lake.sales.orders', 'trino', ('customer.country', 'direct')),
         (
             "select o.customer['country'] as c from lake.sales.orders o",
-            "duckdb",
-            ("customer.country", "direct"),
+            'duckdb',
+            ('customer.country', 'direct'),
         ),
         (
-            "select upper(o.customer.address.city) as c from lake.sales.orders o",
-            "trino",
-            ("customer.address.city", "transformed"),
+            'select upper(o.customer.address.city) as c from lake.sales.orders o',
+            'trino',
+            ('customer.address.city', 'transformed'),
         ),
         (
-            "with x as (select customer from lake.sales.orders) select x.customer.country as c from x",
-            "trino",
-            ("customer.country", "direct"),
+            'with x as (select customer from lake.sales.orders) select x.customer.country as c from x',
+            'trino',
+            ('customer.country', 'direct'),
         ),
         (
-            "with y as (select customer.address as a from lake.sales.orders) select y.a.city as c from y",
-            "trino",
-            ("customer.address.city", "direct"),
+            'with y as (select customer.address as a from lake.sales.orders) select y.a.city as c from y',
+            'trino',
+            ('customer.address.city', 'direct'),
         ),
-        ("select o.customer as c from lake.sales.orders o", "trino", ("customer", "direct")),
+        ('select o.customer as c from lake.sales.orders o', 'trino', ('customer', 'direct')),
     ],
 )
 def test_struct_field_lineage(sql: str, dialect: str, expected: tuple[str, str]) -> None:
     [result] = analyse(sql, dialect=dialect, schema=STRUCTS)
-    assert result.columns["c"] == [src("lake.sales.orders", *expected)]
+    assert result.columns['c'] == [src('lake.sales.orders', *expected)]
 
 
 def test_a_column_read_whole_and_by_field_gives_both() -> None:
-    sql = "select coalesce(o.customer.country, cast(o.customer as varchar)) as c from lake.sales.orders o"
-    [result] = analyse(sql, dialect="trino", schema=STRUCTS)
-    assert set(result.columns["c"]) == {src("lake.sales.orders", "customer", "transformed")}
+    sql = 'select coalesce(o.customer.country, cast(o.customer as varchar)) as c from lake.sales.orders o'
+    [result] = analyse(sql, dialect='trino', schema=STRUCTS)
+    assert set(result.columns['c']) == {src('lake.sales.orders', 'customer', 'transformed')}
 
 
 def test_struct_fields_in_filters_are_references() -> None:
     sql = (
-        "with x as (select id, customer from lake.sales.orders) "
+        'with x as (select id, customer from lake.sales.orders) '
         "select id from x where x.customer.address.city = 'Leeds' and x.customer['country'] = 'UK'"
     )
-    [result] = analyse(sql, dialect="duckdb", schema=STRUCTS)
+    [result] = analyse(sql, dialect='duckdb', schema=STRUCTS)
     assert set(result.references) == {
-        ("lake.sales.orders", "customer.address.city"),
-        ("lake.sales.orders", "customer.country"),
+        ('lake.sales.orders', 'customer.address.city'),
+        ('lake.sales.orders', 'customer.country'),
     }
 
 
-LISTS = {"db.s.orders": {"id": "int", "items": "UNKNOWN", "attrs": "UNKNOWN"}}
+LISTS = {'db.s.orders': {'id': 'int', 'items': 'UNKNOWN', 'attrs': 'UNKNOWN'}}
 
 
 @pytest.mark.parametrize(
-    ("sql", "dialect", "expected"),
+    ('sql', 'dialect', 'expected'),
     [
-        ("select o.items[1].sku as c from db.s.orders o", "duckdb", ("items.sku", "direct")),
-        ("select o.items[1] as c from db.s.orders o", "duckdb", ("items", "direct")),
-        ("select upper(o.items[1].sku) as c from db.s.orders o", "duckdb", ("items.sku", "transformed")),
-        ("select i.sku as c from `db.s.orders` o, unnest(o.items) as i", "bigquery", ("items.sku", "direct")),
+        ('select o.items[1].sku as c from db.s.orders o', 'duckdb', ('items.sku', 'direct')),
+        ('select o.items[1] as c from db.s.orders o', 'duckdb', ('items', 'direct')),
+        ('select upper(o.items[1].sku) as c from db.s.orders o', 'duckdb', ('items.sku', 'transformed')),
+        ('select i.sku as c from `db.s.orders` o, unnest(o.items) as i', 'bigquery', ('items.sku', 'direct')),
         (
-            "select i.qty * 2 as c from `db.s.orders` o, unnest(o.items) as i",
-            "bigquery",
-            ("items.qty", "transformed"),
+            'select i.qty * 2 as c from `db.s.orders` o, unnest(o.items) as i',
+            'bigquery',
+            ('items.qty', 'transformed'),
         ),
-        ("select unnest(items) as c from db.s.orders", "duckdb", ("items", "direct")),
+        ('select unnest(items) as c from db.s.orders', 'duckdb', ('items', 'direct')),
         (
-            "select t.item.sku as c from db.s.orders o cross join unnest(o.items) as t(item)",
-            "duckdb",
-            ("items.sku", "direct"),
+            'select t.item.sku as c from db.s.orders o cross join unnest(o.items) as t(item)',
+            'duckdb',
+            ('items.sku', 'direct'),
         ),
-        ("select o.attrs['colour'] as c from db.s.orders o", "duckdb", ("attrs.colour", "direct")),
+        ("select o.attrs['colour'] as c from db.s.orders o", 'duckdb', ('attrs.colour', 'direct')),
     ],
 )
 def test_list_and_map_lineage(sql: str, dialect: str, expected: tuple[str, str]) -> None:
     [result] = analyse(sql, dialect=dialect, schema=LISTS)
-    assert result.columns["c"] == [src("db.s.orders", *expected)]
+    assert result.columns['c'] == [src('db.s.orders', *expected)]
 
 
 def test_list_elements_in_filters_are_references() -> None:
     [result] = analyse(
-        "select id from db.s.orders o where o.items[1].sku = 'x'", dialect="duckdb", schema=LISTS
+        "select id from db.s.orders o where o.items[1].sku = 'x'", dialect='duckdb', schema=LISTS
     )
-    assert result.references == [("db.s.orders", "items.sku")]
+    assert result.references == [('db.s.orders', 'items.sku')]

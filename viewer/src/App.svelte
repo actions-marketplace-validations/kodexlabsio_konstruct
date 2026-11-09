@@ -1,9 +1,9 @@
 <script lang="ts">
-    import { onMount } from "svelte";
-    import Canvas from "./components/Canvas.svelte";
-    import Panel from "./components/Panel.svelte";
-    import Sidebar from "./components/Sidebar.svelte";
-    import type { Viewer } from "./lib/viewer.svelte";
+    import { onMount } from 'svelte';
+    import Canvas from './components/Canvas.svelte';
+    import Panel from './components/Panel.svelte';
+    import Sidebar from './components/Sidebar.svelte';
+    import type { Viewer } from './lib/viewer.svelte';
 
     let { viewer }: { viewer: Viewer } = $props();
 
@@ -17,18 +17,18 @@
         return null;
     }
 
-    const prefersLight = window.matchMedia?.("(prefers-color-scheme: light)").matches;
+    const prefersLight = window.matchMedia?.('(prefers-color-scheme: light)').matches;
     // svelte-ignore state_referenced_locally
     viewer.theme =
-        (stored("konstruct-theme") as "dark" | "light" | null) ?? (prefersLight ? "light" : "dark");
+        (stored('konstruct-theme') as 'dark' | 'light' | null) ?? (prefersLight ? 'light' : 'dark');
 
     $effect(() => {
-        document.documentElement.setAttribute("data-theme", viewer.theme);
+        document.documentElement.setAttribute('data-theme', viewer.theme);
     });
 
     export function switchTheme(): void {
-        viewer.theme = viewer.theme === "dark" ? "light" : "dark";
-        stored("konstruct-theme", viewer.theme);
+        viewer.theme = viewer.theme === 'dark' ? 'light' : 'dark';
+        stored('konstruct-theme', viewer.theme);
     }
 
     // Deep links: #<node id>. A link in the address when the page opens is read first, before the
@@ -40,7 +40,7 @@
         const next = viewer.hash;
         if (location.hash === next) return;
         writing = true;
-        history.replaceState(null, "", next || location.pathname + location.search);
+        history.replaceState(null, '', next || location.pathname + location.search);
         writing = false;
     });
 
@@ -53,28 +53,28 @@
 
     onMount(() => {
         const name =
-            (viewer.data.meta?.root ?? "")
-                .replace(/[\\/]+$/, "")
+            (viewer.data.meta?.root ?? '')
+                .replace(/[\\/]+$/, '')
                 .split(/[\\/]/)
-                .pop() || "Graph";
-        document.title = `${name} · konstruct`;
-        if (!openedFromLink) viewer.request("fit");
+                .pop() || 'Graph';
+        document.title = `${name} · Konstruct`;
+        if (!openedFromLink) viewer.request('fit');
     });
 
     function onkeydown(event: KeyboardEvent): void {
         if (event.target instanceof HTMLInputElement || event.metaKey || event.ctrlKey || event.altKey)
             return;
         const key = event.key;
-        if (key === "/") {
+        if (key === '/') {
             event.preventDefault();
             search?.focus();
             search?.select();
-        } else if (key === "Escape") viewer.clear();
-        else if (key === "f" || key === "F") viewer.request("fit");
-        else if (key === "i" || key === "I") viewer.toggleIsolate();
-        else if (key === "c" || key === "C") viewer.toggleAllColumns();
-        else if (key === "+" || key === "=") document.getElementById("zoom-in")?.click();
-        else if (key === "-") document.getElementById("zoom-out")?.click();
+        } else if (key === 'Escape') viewer.clear();
+        else if (key === 'f' || key === 'F') viewer.request('fit');
+        else if (key === 'i' || key === 'I') viewer.toggleIsolate();
+        else if (key === 'c' || key === 'C') viewer.toggleAllColumns();
+        else if (key === '+' || key === '=') document.getElementById('zoom-in')?.click();
+        else if (key === '-') document.getElementById('zoom-out')?.click();
     }
 </script>
 

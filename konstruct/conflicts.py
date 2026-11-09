@@ -31,46 +31,46 @@ from konstruct.graph import RELATION_KINDS, Graph, Node
 # Words that qualify a measure without changing which measure it is.
 MODIFIERS = frozenset(
     {
-        "total",
-        "sum",
-        "overall",
-        "final",
-        "all",
-        "the",
-        "of",
-        "calc",
-        "calculated",
-        "adjusted",
-        "agg",
-        "metric",
-        "kpi",
+        'total',
+        'sum',
+        'overall',
+        'final',
+        'all',
+        'the',
+        'of',
+        'calc',
+        'calculated',
+        'adjusted',
+        'agg',
+        'metric',
+        'kpi',
     }
 )
 # Words that name the same idea. Each set maps to its first word.
 SYNONYMS = (
-    ("revenue", "sales", "turnover", "income", "takings", "amount", "amt"),
-    ("count", "cnt", "number", "num", "qty", "quantity"),
-    ("customer", "client", "cust", "shopper", "buyer"),
-    ("order", "purchase", "transaction", "txn"),
-    ("margin", "profit"),
-    ("cost", "expense", "spend"),
-    ("price", "unit_price"),
-    ("discount", "rebate"),
+    ('revenue', 'sales', 'turnover', 'income', 'takings', 'amount', 'amt'),
+    ('count', 'cnt', 'number', 'num', 'qty', 'quantity'),
+    ('customer', 'client', 'cust', 'shopper', 'buyer'),
+    ('order', 'purchase', 'transaction', 'txn'),
+    ('margin', 'profit'),
+    ('cost', 'expense', 'spend'),
+    ('price', 'unit_price'),
+    ('discount', 'rebate'),
 )
-KEY_WORDS = frozenset({"id", "key", "uuid", "pk", "fk", "sk", "hash"})
-FILTER_HEADS = ("WHERE", "HAVING", "QUALIFY")
+KEY_WORDS = frozenset({'id', 'key', 'uuid', 'pk', 'fk', 'sk', 'hash'})
+FILTER_HEADS = ('WHERE', 'HAVING', 'QUALIFY')
 _CANONICAL = {word: group[0] for group in SYNONYMS for word in group}
 
 
 def _words(name: str) -> list[str]:
-    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
-    return [w for w in re.split(r"[^a-z0-9]+", spaced.lower()) if w]
+    spaced = re.sub(r'([a-z0-9])([A-Z])', r'\1 \2', name)
+    return [w for w in re.split(r'[^a-z0-9]+', spaced.lower()) if w]
 
 
 def _singular(word: str) -> str:
-    if len(word) > 3 and word.endswith("ies"):
-        return word[:-3] + "y"
-    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+    if len(word) > 3 and word.endswith('ies'):
+        return word[:-3] + 'y'
+    if len(word) > 3 and word.endswith('s') and not word.endswith('ss'):
         return word[:-1]
     return word
 
@@ -117,14 +117,14 @@ class Side:
     def weight(self) -> int:
         r = self.reach
         return (
-            10 * r.get("exposures", 0) + 5 * r.get("terms", 0) + 3 * r.get("tasks", 0) + r.get("columns", 0)
+            10 * r.get('exposures', 0) + 5 * r.get('terms', 0) + 3 * r.get('tasks', 0) + r.get('columns', 0)
         )
 
     def to_dict(self) -> dict[str, Any]:
         data = dict(self.__dict__)
-        data["filters"] = [{"relation": r, "condition": c, "path": p} for r, c, p in self.filters]
-        data["joins"] = [{"relation": r, "condition": c, "path": p} for r, c, p in self.joins]
-        data["weight"] = self.weight
+        data['filters'] = [{'relation': r, 'condition': c, 'path': p} for r, c, p in self.filters]
+        data['joins'] = [{'relation': r, 'condition': c, 'path': p} for r, c, p in self.joins]
+        data['weight'] = self.weight
         return data
 
 
@@ -143,37 +143,37 @@ class Conflict:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "idea": self.idea,
-            "reason": self.reason,
-            "score": self.score,
-            "a": self.a.to_dict(),
-            "b": self.b.to_dict(),
-            "differences": [d.to_dict() for d in self.differences],
+            'idea': self.idea,
+            'reason': self.reason,
+            'score': self.score,
+            'a': self.a.to_dict(),
+            'b': self.b.to_dict(),
+            'differences': [d.to_dict() for d in self.differences],
         }
 
     def lines(self) -> list[str]:
-        out = [f"{self.a.label}  vs  {self.b.label}  ({self.reason}; downstream weight {self.score})"]
-        for side, name in ((self.a, "a"), (self.b, "b")):
-            formula = side.composed or side.expression or "no recorded formula"
-            out.append(f"  {name}: {side.label} = {formula}")
-            where = side.path or "?"
-            out.append(f"     in {where}; feeds {_reach_text(side.reach)}")
+        out = [f'{self.a.label}  vs  {self.b.label}  ({self.reason}; downstream weight {self.score})']
+        for side, name in ((self.a, 'a'), (self.b, 'b')):
+            formula = side.composed or side.expression or 'no recorded formula'
+            out.append(f'  {name}: {side.label} = {formula}')
+            where = side.path or '?'
+            out.append(f'     in {where}; feeds {_reach_text(side.reach)}')
             if side.carried_into:
-                out.append(f"     carried into {', '.join(side.carried_into)}")
+                out.append(f'     carried into {", ".join(side.carried_into)}')
         for difference in self.differences:
             who = (
-                f" only in {self.a.label if difference.side == 'a' else self.b.label}"
+                f' only in {self.a.label if difference.side == "a" else self.b.label}'
                 if difference.side
-                else ""
+                else ''
             )
-            where = f"  ({difference.path})" if difference.path else ""
-            out.append(f"  - {difference.kind}{who}: {difference.detail}{where}")
+            where = f'  ({difference.path})' if difference.path else ''
+            out.append(f'  - {difference.kind}{who}: {difference.detail}{where}')
         return out
 
 
 def _reach_text(reach: dict[str, int]) -> str:
-    parts = [f"{v} {k}" for k, v in reach.items() if v]
-    return ", ".join(parts) or "nothing downstream"
+    parts = [f'{v} {k}' for k, v in reach.items() if v]
+    return ', '.join(parts) or 'nothing downstream'
 
 
 @dataclass
@@ -184,19 +184,19 @@ class Conflicts:
 
     def summary(self) -> str:
         if not self.conflicts:
-            return f"No conflicting definitions among {self.candidates} computed columns."
+            return f'No conflicting definitions among {self.candidates} computed columns.'
         count = len(self.conflicts)
         return (
-            f"{count} conflicting definition{'s' if count != 1 else ''} among "
-            f"{self.candidates} computed columns."
+            f'{count} conflicting definition{"s" if count != 1 else ""} among '
+            f'{self.candidates} computed columns.'
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "summary": self.summary(),
-            "candidates": self.candidates,
-            "groups": self.groups,
-            "conflicts": [c.to_dict() for c in self.conflicts],
+            'summary': self.summary(),
+            'candidates': self.candidates,
+            'groups': self.groups,
+            'conflicts': [c.to_dict() for c in self.conflicts],
         }
 
     def __str__(self) -> str:
@@ -205,43 +205,43 @@ class Conflicts:
         for conflict in self.conflicts:
             if conflict.idea != current:
                 current = conflict.idea
-                lines += ["", f"{conflict.idea}"]
-            lines += ["  " + line for line in conflict.lines()]
-        return "\n".join(lines)
+                lines += ['', f'{conflict.idea}']
+            lines += ['  ' + line for line in conflict.lines()]
+        return '\n'.join(lines)
 
     def markdown(self) -> str:
-        lines = ["# Conflicting definitions", "", self.summary(), ""]
+        lines = ['# Conflicting definitions', '', self.summary(), '']
         if self.conflicts:
             lines += [
-                "Each entry is a pair of columns that appear to measure the same thing but are computed "
-                "differently. They are ranked by how much depends on them downstream.",
-                "",
+                'Each entry is a pair of columns that appear to measure the same thing but are computed '
+                'differently. They are ranked by how much depends on them downstream.',
+                '',
             ]
         for index, conflict in enumerate(self.conflicts, start=1):
-            lines += [f"## {index}. {conflict.idea}: `{conflict.a.label}` and `{conflict.b.label}`", ""]
-            lines += [f"Found because they {conflict.reason}. Downstream weight {conflict.score}.", ""]
-            lines += ["| | Column | Formula in terms of sources | File | Feeds |", "|---|---|---|---|---|"]
-            for side, name in ((conflict.a, "A"), (conflict.b, "B")):
-                formula = (side.composed or side.expression or "none recorded").replace("|", "\\|")
+            lines += [f'## {index}. {conflict.idea}: `{conflict.a.label}` and `{conflict.b.label}`', '']
+            lines += [f'Found because they {conflict.reason}. Downstream weight {conflict.score}.', '']
+            lines += ['| | Column | Formula in terms of sources | File | Feeds |', '|---|---|---|---|---|']
+            for side, name in ((conflict.a, 'A'), (conflict.b, 'B')):
+                formula = (side.composed or side.expression or 'none recorded').replace('|', '\\|')
                 lines.append(
-                    f"| {name} | `{side.label}` | `{formula}` | {side.path or ''} | {_reach_text(side.reach)} |"
+                    f'| {name} | `{side.label}` | `{formula}` | {side.path or ""} | {_reach_text(side.reach)} |'
                 )
-            lines += ["", "**What differs**", ""]
+            lines += ['', '**What differs**', '']
             for difference in conflict.differences:
-                who = ""
+                who = ''
                 if difference.side:
-                    who = f" (only in {'A' if difference.side == 'a' else 'B'})"
-                where = f", in `{difference.path}`" if difference.path else ""
-                lines.append(f"- {difference.kind}{who}: `{difference.detail}`{where}")
-            for side, name in ((conflict.a, "A"), (conflict.b, "B")):
+                    who = f' (only in {"A" if difference.side == "a" else "B"})'
+                where = f', in `{difference.path}`' if difference.path else ''
+                lines.append(f'- {difference.kind}{who}: `{difference.detail}`{where}')
+            for side, name in ((conflict.a, 'A'), (conflict.b, 'B')):
                 if side.carried_into:
-                    copies = ", ".join(f"`{c}`" for c in side.carried_into)
-                    lines += ["", f"{name}'s definition is carried into {copies}."]
+                    copies = ', '.join(f'`{c}`' for c in side.carried_into)
+                    lines += ['', f"{name}'s definition is carried into {copies}."]
             terms = sorted(set(conflict.a.terms) | set(conflict.b.terms))
             if terms:
-                lines += ["", f"Business terms involved: {', '.join(terms)}."]
-            lines.append("")
-        return "\n".join(lines).rstrip() + "\n"
+                lines += ['', f'Business terms involved: {", ".join(terms)}.']
+            lines.append('')
+        return '\n'.join(lines).rstrip() + '\n'
 
 
 def _top_function(formula: str | None, dialect: str | None) -> str | None:
@@ -262,7 +262,7 @@ def _top_function(formula: str | None, dialect: str | None) -> str | None:
 class _Finder:
     def __init__(self, graph: Graph) -> None:
         self.graph = graph
-        dialect = graph.meta.get("dialect")
+        dialect = graph.meta.get('dialect')
         self.dialect = dialect if isinstance(dialect, str) else None
         self.explainer = Explainer(graph)
         self.ancestors: dict[str, set[str]] = {}
@@ -272,7 +272,7 @@ class _Finder:
             seen: set[str] = set()
             stack = [column_id]
             while stack:
-                for edge in self.graph.out_edges(stack.pop(), "derived_from"):
+                for edge in self.graph.out_edges(stack.pop(), 'derived_from'):
                     if edge.target not in seen:
                         seen.add(edge.target)
                         stack.append(edge.target)
@@ -282,7 +282,7 @@ class _Finder:
     def candidates(self) -> list[Node]:
         found = []
         for node in self.graph.nodes.values():
-            if node.kind != "column" or not isinstance(node.attrs.get("expression"), str):
+            if node.kind != 'column' or not isinstance(node.attrs.get('expression'), str):
                 continue
             owner = self.graph.parent_of(node)
             if owner is None or owner.kind not in RELATION_KINDS:
@@ -291,8 +291,8 @@ class _Finder:
             if words & KEY_WORDS or not core(node.name):
                 continue
             # A column copied as it is (a dimension, a key, a date) is lineage, not a definition.
-            inputs = self.graph.out_edges(node.id, "derived_from")
-            if inputs and all(e.attrs.get("transform") == "direct" for e in inputs):
+            inputs = self.graph.out_edges(node.id, 'derived_from')
+            if inputs and all(e.attrs.get('transform') == 'direct' for e in inputs):
                 continue
             found.append(node)
         return found
@@ -300,8 +300,8 @@ class _Finder:
     def term_keys(self) -> dict[frozenset[str], str]:
         keys: dict[frozenset[str], str] = {}
         for node in self.graph.nodes.values():
-            if node.kind == "term":
-                for name in [node.name, *node.attrs.get("synonyms", [])]:
+            if node.kind == 'term':
+                for name in [node.name, *node.attrs.get('synonyms', [])]:
                     key = core(name)
                     if key:
                         keys.setdefault(key, node.name)
@@ -311,9 +311,9 @@ class _Finder:
         """The file that builds a relation: its own, or that of the task that writes it."""
         if relation.path:
             return relation.path
-        for edge in self.graph.in_edges(relation.id, "feeds"):
+        for edge in self.graph.in_edges(relation.id, 'feeds'):
             source = self.graph.nodes[edge.source]
-            if source.kind == "task" and source.path:
+            if source.kind == 'task' and source.path:
                 return source.path
         return None
 
@@ -330,32 +330,32 @@ class _Finder:
             if parent is not None:
                 relations[parent.id] = parent
         for relation in relations.values():
-            for condition in relation.attrs.get("conditions", []):
+            for condition in relation.attrs.get('conditions', []):
                 text = short_sql(graph, str(condition), condition=True)
-                head = text.split(":", 1)[0].upper()
+                head = text.split(':', 1)[0].upper()
                 entry = (graph.label(relation), text, self.where(relation))
                 if head.startswith(FILTER_HEADS):
                     filters.append(entry)
-                elif "JOIN" in head:
+                elif 'JOIN' in head:
                     joins.append(entry)
         walk = graph.impact(column)
         reach = {
-            "exposures": sum(1 for s in walk if s.node.kind == "exposure"),
-            "tasks": sum(1 for s in walk if s.node.kind == "task"),
-            "columns": sum(1 for s in walk if s.node.kind == "column"),
+            'exposures': sum(1 for s in walk if s.node.kind == 'exposure'),
+            'tasks': sum(1 for s in walk if s.node.kind == 'task'),
+            'columns': sum(1 for s in walk if s.node.kind == 'column'),
         }
         terms = sorted(
             {
                 graph.nodes[e.source].name
                 for target in [column.id, *(s.node.id for s in walk)]
-                for e in graph.in_edges(target, "defines")
+                for e in graph.in_edges(target, 'defines')
             }
         )
-        reach["terms"] = sum(
+        reach['terms'] = sum(
             1
             for name in terms
             for n in graph.nodes.values()
-            if n.kind == "term" and n.name == name and n.attrs.get("status") == "approved"
+            if n.kind == 'term' and n.name == name and n.attrs.get('status') == 'approved'
         )
         return Side(
             column=column.id,
@@ -375,23 +375,23 @@ class _Finder:
         differences: list[Difference] = []
         sources_a, sources_b = set(a.sources), set(b.sources)
         for source in sorted(sources_a - sources_b):
-            differences.append(Difference("source", source, "a"))
+            differences.append(Difference('source', source, 'a'))
         for source in sorted(sources_b - sources_a):
-            differences.append(Difference("source", source, "b"))
-        for kind, items_a, items_b in (("filter", a.filters, b.filters), ("join", a.joins, b.joins)):
+            differences.append(Difference('source', source, 'b'))
+        for kind, items_a, items_b in (('filter', a.filters, b.filters), ('join', a.joins, b.joins)):
             conditions_a = {c for _, c, _ in items_a}
             conditions_b = {c for _, c, _ in items_b}
             for _relation, condition, path in items_a:
                 if condition not in conditions_b:
-                    differences.append(Difference(kind, condition, "a", path))
+                    differences.append(Difference(kind, condition, 'a', path))
             for _relation, condition, path in items_b:
                 if condition not in conditions_a:
-                    differences.append(Difference(kind, condition, "b", path))
+                    differences.append(Difference(kind, condition, 'b', path))
         top_a, top_b = _top_function(a.composed, self.dialect), _top_function(b.composed, self.dialect)
         if top_a != top_b and (top_a or top_b):
-            differences.append(Difference("aggregation", f"{top_a or 'none'} against {top_b or 'none'}"))
-        if a.composed != b.composed and not any(d.kind in ("source", "aggregation") for d in differences):
-            differences.append(Difference("formula", f"{a.composed} against {b.composed}"))
+            differences.append(Difference('aggregation', f'{top_a or "none"} against {top_b or "none"}'))
+        if a.composed != b.composed and not any(d.kind in ('source', 'aggregation') for d in differences):
+            differences.append(Difference('formula', f'{a.composed} against {b.composed}'))
         return differences
 
 
@@ -406,15 +406,15 @@ def find_conflicts(graph: Graph, limit: int | None = None) -> Conflicts:
         words = core(column.name)
         term = term_keys.get(words)
         if term:
-            groups[f"term:{term}"].append(column)
-            reasons[f"term:{term}"] = f"are named like the business term {term!r}"
+            groups[f'term:{term}'].append(column)
+            reasons[f'term:{term}'] = f'are named like the business term {term!r}'
         else:
-            groups["name:" + " ".join(sorted(words))].append(column)
-        for edge in graph.in_edges(column.id, "defines"):
+            groups['name:' + ' '.join(sorted(words))].append(column)
+        for edge in graph.in_edges(column.id, 'defines'):
             name = graph.nodes[edge.source].name
-            if column not in groups[f"term:{name}"]:
-                groups[f"term:{name}"].append(column)
-            reasons[f"term:{name}"] = f"are bound to the business term {name!r}"
+            if column not in groups[f'term:{name}']:
+                groups[f'term:{name}'].append(column)
+            reasons[f'term:{name}'] = f'are bound to the business term {name!r}'
     result = Conflicts(candidates=len(candidates))
     sides: dict[str, Side] = {}
     seen_pairs: set[tuple[str, str]] = set()
@@ -423,8 +423,8 @@ def find_conflicts(graph: Graph, limit: int | None = None) -> Conflicts:
         if len(members) < 2 or len(relations) < 2:
             continue
         result.groups += 1
-        idea = key.split(":", 1)[1]
-        reason = reasons.get(key, "have names that mean the same thing")
+        idea = key.split(':', 1)[1]
+        reason = reasons.get(key, 'have names that mean the same thing')
         # Compare only the columns that define the idea themselves; one derived from another
         # member inherits its definition and is listed as carried into it.
         ids = {m.id for m in members}

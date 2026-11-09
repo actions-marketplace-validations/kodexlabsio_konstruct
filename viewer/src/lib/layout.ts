@@ -1,8 +1,8 @@
 // Layered layout: layers by longest path over feeds (cycles broken by depth-first search), order
 // within layers by barycentre sweeps, then cards stacked by their heights.
 
-import { byName, type GraphModel, type LayoutEdge } from "./model";
-import type { Point } from "./types";
+import { byName, type GraphModel, type LayoutEdge } from './model';
+import type { Point } from './types';
 
 export const W = 268;
 export const HEAD = 46;
@@ -19,7 +19,7 @@ function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 }
 
 export function computeLayers(ids: string[], links: LayoutEdge[]): Map<string, number> {
-    const succ = new Map(ids.map((id) => [id, [] as string[]]));
+    const succ = new Map(ids.map(id => [id, [] as string[]]));
     const hasInput = new Set<string>();
     for (const e of links) {
         succ.get(e.source)?.push(e.target);
@@ -28,7 +28,7 @@ export function computeLayers(ids: string[], links: LayoutEdge[]): Map<string, n
     // Edges that close cycles are found by DFS from nodes without inputs, and ignored.
     const state = new Map<string, number>();
     const back = new Set<string>();
-    for (const root of ids.filter((id) => !hasInput.has(id)).concat(ids)) {
+    for (const root of ids.filter(id => !hasInput.has(id)).concat(ids)) {
         if (state.has(root)) continue;
         state.set(root, 1);
         const stack: [string, number][] = [[root, 0]];
@@ -49,15 +49,15 @@ export function computeLayers(ids: string[], links: LayoutEdge[]): Map<string, n
             }
         }
     }
-    const indegree = new Map(ids.map((id) => [id, 0]));
-    const forward = new Map(ids.map((id) => [id, [] as string[]]));
+    const indegree = new Map(ids.map(id => [id, 0]));
+    const forward = new Map(ids.map(id => [id, [] as string[]]));
     for (const e of links) {
         if (back.has(`${e.source}\u0000${e.target}`)) continue;
         forward.get(e.source)?.push(e.target);
         indegree.set(e.target, (indegree.get(e.target) ?? 0) + 1);
     }
-    const layer = new Map(ids.map((id) => [id, 0]));
-    const queue = ids.filter((id) => indegree.get(id) === 0);
+    const layer = new Map(ids.map(id => [id, 0]));
+    const queue = ids.filter(id => indegree.get(id) === 0);
     for (let i = 0; i < queue.length; i++) {
         const id = queue[i]!;
         for (const t of forward.get(id) ?? []) {
@@ -72,15 +72,15 @@ export function computeLayers(ids: string[], links: LayoutEdge[]): Map<string, n
 /** The visible relations in layers, each layer ordered to reduce crossings. */
 export function computeOrder(model: GraphModel, visible: Set<string>): string[][] {
     const ids = model.viewNodes
-        .filter((n) => visible.has(n.id))
+        .filter(n => visible.has(n.id))
         .sort(byName)
-        .map((n) => n.id);
-    const links = model.layoutEdges.filter((e) => visible.has(e.source) && visible.has(e.target));
-    const feeds = links.filter((e) => e.kind === "feeds");
+        .map(n => n.id);
+    const links = model.layoutEdges.filter(e => visible.has(e.source) && visible.has(e.target));
+    const feeds = links.filter(e => e.kind === 'feeds');
     const layer = computeLayers(ids, feeds);
     const at = (id: string): number => layer.get(id) ?? 0;
     // A node with nothing upstream sits just before the earliest node it feeds.
-    const hasInput = new Set(feeds.map((e) => e.target));
+    const hasInput = new Set(feeds.map(e => e.target));
     const feedsTo = new Map<string, number[]>();
     for (const e of feeds) if (!hasInput.has(e.source)) push(feedsTo, e.source, at(e.target));
     for (const [id, targets] of feedsTo) layer.set(id, Math.max(0, Math.min(...targets) - 1));
@@ -92,7 +92,7 @@ export function computeOrder(model: GraphModel, visible: Set<string>): string[][
     }
     const runsFrom = new Map<string, number[]>();
     for (const e of links)
-        if (e.kind === "runs" && !linked.has(e.source)) push(runsFrom, e.source, at(e.target));
+        if (e.kind === 'runs' && !linked.has(e.source)) push(runsFrom, e.source, at(e.target));
     let shift = 0;
     for (const targets of runsFrom.values()) if (Math.min(...targets) === 0) shift = 1;
     if (shift) for (const id of ids) layer.set(id, at(id) + shift);
@@ -101,8 +101,8 @@ export function computeOrder(model: GraphModel, visible: Set<string>): string[][
     for (const id of ids) depth = Math.max(depth, at(id));
     const layers: string[][] = Array.from({ length: depth + 1 }, () => []);
     for (const id of ids) layers[at(id)]!.push(id);
-    const before = new Map(ids.map((id) => [id, [] as string[]]));
-    const after = new Map(ids.map((id) => [id, [] as string[]]));
+    const before = new Map(ids.map(id => [id, [] as string[]]));
+    const after = new Map(ids.map(id => [id, [] as string[]]));
     for (const e of links) {
         const ls = at(e.source);
         const lt = at(e.target);
@@ -133,7 +133,7 @@ export function computeOrder(model: GraphModel, visible: Set<string>): string[][
             place(row);
         }
     }
-    return layers.filter((row) => row.length);
+    return layers.filter(row => row.length);
 }
 
 /** Cards stacked in each layer, centred on zero, given each card's height. */

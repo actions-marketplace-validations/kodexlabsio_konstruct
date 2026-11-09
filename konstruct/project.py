@@ -1,4 +1,4 @@
-"""The Python API: one object for a project, its graph and every question konstruct answers.
+"""The Python API: one object for a project, its graph and every question Konstruct answers.
 
 import konstruct
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from konstruct.explain import Explanation
     from konstruct.verify import Verification
 
-OUT_DIR = "konstruct-out"
+OUT_DIR = 'konstruct-out'
 
 
 def find_out_dir(start: Path) -> Path:
@@ -36,43 +36,43 @@ def find_out_dir(start: Path) -> Path:
     ``start/konstruct-out``."""
     start = start.resolve()
     for directory in (start, *start.parents):
-        if (directory / OUT_DIR / "graph.json").is_file():
+        if (directory / OUT_DIR / 'graph.json').is_file():
             return directory / OUT_DIR
-        if directory.name == OUT_DIR and (directory / "graph.json").is_file():
+        if directory.name == OUT_DIR and (directory / 'graph.json').is_file():
             return directory
     return start / OUT_DIR
 
 
 class Project:
-    """A repository konstruct builds a graph for.
+    """A repository Konstruct builds a graph for.
 
     ``path`` is the project root (or any directory inside one that has already been built).
     ``out_dir`` overrides where the graph is written and read; by default it is the
     ``konstruct-out`` directory found at or above ``path``, or ``<path>/konstruct-out``.
     """
 
-    def __init__(self, path: str | Path = ".", *, out_dir: str | Path | None = None) -> None:
+    def __init__(self, path: str | Path = '.', *, out_dir: str | Path | None = None) -> None:
         self.path = Path(path).resolve()
         if out_dir is not None:
             self.out_dir = Path(out_dir).resolve()
         else:
             found = find_out_dir(self.path)
-            self.out_dir = found if (found / "graph.json").is_file() else self.path / OUT_DIR
+            self.out_dir = found if (found / 'graph.json').is_file() else self.path / OUT_DIR
         self._graph: Graph | None = None
         self._stamp: tuple[float, int] | None = None
 
     def __repr__(self) -> str:
-        return f"Project({str(self.path)!r})"
+        return f'Project({str(self.path)!r})'
 
     @property
     def root(self) -> Path:
         """The directory the graph was built from (``path`` until a graph exists)."""
-        graph_root = self.graph.meta.get("root") if self.has_graph() else None
+        graph_root = self.graph.meta.get('root') if self.has_graph() else None
         return Path(graph_root) if graph_root else self.path
 
     @property
     def graph_path(self) -> Path:
-        return self.out_dir / "graph.json"
+        return self.out_dir / 'graph.json'
 
     def has_graph(self) -> bool:
         return self.graph_path.is_file()
@@ -121,7 +121,7 @@ class Project:
         if stamp is None:
             if self._graph is not None:
                 return self._graph
-            raise query.QueryError(f"no graph at {self.graph_path}; run `konstruct build` first")
+            raise query.QueryError(f'no graph at {self.graph_path}; run `konstruct build` first')
         if self._graph is None or stamp != self._stamp:
             self._graph = Graph.read(self.graph_path)
             self._stamp = stamp
@@ -159,9 +159,9 @@ class Project:
 
         result = find_conflicts(self.graph, limit)
         if write:
-            (self.out_dir / "CONFLICTS.md").write_text(result.markdown(), encoding="utf-8")
-            (self.out_dir / "conflicts.json").write_text(
-                json.dumps(result.to_dict(), indent=1) + "\n", encoding="utf-8"
+            (self.out_dir / 'CONFLICTS.md').write_text(result.markdown(), encoding='utf-8')
+            (self.out_dir / 'conflicts.json').write_text(
+                json.dumps(result.to_dict(), indent=1) + '\n', encoding='utf-8'
             )
         return result
 
@@ -175,9 +175,9 @@ class Project:
         from konstruct.explain import explain
 
         node = query.resolve_one(self.graph, ref)
-        if node.kind != "column":
+        if node.kind != 'column':
             raise query.QueryError(
-                f"{ref!r} is a {node.kind}; explain takes a column such as {self.graph.label(node)}.<column>"
+                f'{ref!r} is a {node.kind}; explain takes a column such as {self.graph.label(node)}.<column>'
             )
         return explain(self.graph, node)
 
@@ -223,25 +223,25 @@ class Project:
             graph, self.root, target, seed=seed, max_rows=max_rows, only=list(models) if models else None
         )
         path = Path(target)
-        if not result.warehouse.startswith("postgres") and path.resolve().is_relative_to(self.root.resolve()):
+        if not result.warehouse.startswith('postgres') and path.resolve().is_relative_to(self.root.resolve()):
             result.warehouse = str(path.resolve().relative_to(self.root.resolve()))
         if write:
             annotate(graph, result)
             graph.write(self.graph_path)
             self._stamp = self._file_stamp()
-            if (self.out_dir / "graph.html").is_file():
-                write_html(graph, self.out_dir / "graph.html")
-            (self.out_dir / "VERIFY.md").write_text(result.markdown(), encoding="utf-8")
-            (self.out_dir / "verify.json").write_text(
-                json.dumps(result.to_dict(), indent=1) + "\n", encoding="utf-8"
+            if (self.out_dir / 'graph.html').is_file():
+                write_html(graph, self.out_dir / 'graph.html')
+            (self.out_dir / 'VERIFY.md').write_text(result.markdown(), encoding='utf-8')
+            (self.out_dir / 'verify.json').write_text(
+                json.dumps(result.to_dict(), indent=1) + '\n', encoding='utf-8'
             )
         return result
 
     def _verification_warehouse(self) -> str:
         """The DuckDB file the build read, or else the Postgres warehouse it connected to."""
-        for source in self.graph.meta.get("sources", []):
-            if source.get("input") == "duckdb" and source.get("status") != "failed":
-                path = Path(str(source["name"]).removeprefix("duckdb ").strip())
+        for source in self.graph.meta.get('sources', []):
+            if source.get('input') == 'duckdb' and source.get('status') != 'failed':
+                path = Path(str(source['name']).removeprefix('duckdb ').strip())
                 return str(path if path.is_absolute() else self.root / path)
         from konstruct.config import discover_warehouses
         from konstruct.dbt import find_projects
@@ -249,13 +249,13 @@ class Project:
 
         config = self.config()
         for warehouse in discover_warehouses(config, find_projects(config.root)):
-            if warehouse.type in ("postgres", "postgresql"):
+            if warehouse.type in ('postgres', 'postgresql'):
                 connector = warehouse.connector(config.root)
                 if isinstance(connector, PostgresConnector):
                     return connector.dsn
         raise query.QueryError(
-            "verification needs the models built in a local DuckDB file or a Postgres database; "
-            "none was found (pass --warehouse PATH or a postgresql:// URL)"
+            'verification needs the models built in a local DuckDB file or a Postgres database; '
+            'none was found (pass --warehouse PATH or a postgresql:// URL)'
         )
 
     def diff(self, base: str | None = None, head: str | None = None) -> Diff:

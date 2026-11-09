@@ -18,7 +18,7 @@ A definitions file records what the business means by a term and which columns h
         related: [Order amount]
         exceptions: Gift card payments made before 2024 are excluded.
 
-``columns`` and the columns in ``filters`` use the names the rest of konstruct accepts
+``columns`` and the columns in ``filters`` use the names the rest of Konstruct accepts
 (``table.column``, ``schema.table.column``, a dbt source). The build attaches each term to the
 graph as a ``term`` node with ``defines`` edges to its columns and ``relates_to`` edges to related
 terms, and warns about anything that no longer matches the data stack.
@@ -34,26 +34,26 @@ from typing import Any
 
 import yaml
 
-STATUSES = ("draft", "agreed", "approved", "retired")
-FILE_NAMES = ("definitions.yml", "definitions.yaml")
+STATUSES = ('draft', 'agreed', 'approved', 'retired')
+FILE_NAMES = ('definitions.yml', 'definitions.yaml')
 FIELDS = frozenset(
     {
-        "name",
-        "synonyms",
-        "definition",
-        "owner",
-        "status",
-        "approved",
-        "grain",
-        "columns",
-        "filters",
-        "unit",
-        "currency",
-        "related",
-        "exceptions",
+        'name',
+        'synonyms',
+        'definition',
+        'owner',
+        'status',
+        'approved',
+        'grain',
+        'columns',
+        'filters',
+        'unit',
+        'currency',
+        'related',
+        'exceptions',
     }
 )
-_CURRENCY = re.compile(r"^[A-Z]{3}$")
+_CURRENCY = re.compile(r'^[A-Z]{3}$')
 
 
 @dataclass
@@ -62,7 +62,7 @@ class Owner:
     role: str | None = None
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.role})" if self.role else self.name
+        return f'{self.name} ({self.role})' if self.role else self.name
 
 
 @dataclass
@@ -73,7 +73,7 @@ class Term:
     line: int
     synonyms: list[str] = field(default_factory=list)
     owner: Owner | None = None
-    status: str = "draft"
+    status: str = 'draft'
     approved: str | None = None
     grain: str | None = None
     columns: list[str] = field(default_factory=list)
@@ -95,13 +95,13 @@ class Term:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         if self.owner is None:
-            data["owner"] = None
+            data['owner'] = None
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Term:
         fields = dict(data)
-        owner = fields.pop("owner", None)
+        owner = fields.pop('owner', None)
         return cls(owner=Owner(**owner) if owner else None, **fields)
 
 
@@ -112,20 +112,20 @@ class DefinitionsFile:
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"path": self.path, "terms": [t.to_dict() for t in self.terms], "errors": self.errors}
+        return {'path': self.path, 'terms': [t.to_dict() for t in self.terms], 'errors': self.errors}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DefinitionsFile:
         return cls(
-            path=data["path"],
-            terms=[Term.from_dict(t) for t in data.get("terms", [])],
-            errors=list(data.get("errors", [])),
+            path=data['path'],
+            terms=[Term.from_dict(t) for t in data.get('terms', [])],
+            errors=list(data.get('errors', [])),
         )
 
 
 def slug(name: str) -> str:
     """``Customer lifetime value`` -> ``customer_lifetime_value``: the term's node id suffix."""
-    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "term"
+    return re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_') or 'term'
 
 
 class _LineLoader(yaml.SafeLoader):
@@ -134,7 +134,7 @@ class _LineLoader(yaml.SafeLoader):
 
 def _mapping_with_line(loader: _LineLoader, node: yaml.MappingNode) -> dict[str, Any]:
     mapping = {str(k): v for k, v in loader.construct_mapping(node, deep=True).items()}
-    mapping["__line__"] = node.start_mark.line + 1
+    mapping['__line__'] = node.start_mark.line + 1
     return mapping
 
 
@@ -145,7 +145,7 @@ def _text(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
-        return " ".join(value.split()) or None
+        return ' '.join(value.split()) or None
     if isinstance(value, (int, float, dt.date)):
         return str(value)
     return None
@@ -168,33 +168,33 @@ def parse(text: str, path: str) -> DefinitionsFile:
     result = DefinitionsFile(path=path)
 
     def problem(line: int, message: str) -> None:
-        result.errors.append(f"{path}:{line}: {message}")
+        result.errors.append(f'{path}:{line}: {message}')
 
     try:
         data = yaml.load(text, Loader=_LineLoader)  # a SafeLoader subclass
     except yaml.YAMLError as error:
-        mark = getattr(error, "problem_mark", None)
+        mark = getattr(error, 'problem_mark', None)
         line = mark.line + 1 if mark is not None else 1
-        problem(line, f"not valid YAML: {getattr(error, 'problem', None) or error}")
+        problem(line, f'not valid YAML: {getattr(error, "problem", None) or error}')
         return result
     if data is None:
         return result
     if not isinstance(data, dict):
-        problem(1, "expected a mapping with a `terms` list")
+        problem(1, 'expected a mapping with a `terms` list')
         return result
-    version = data.get("version", 1)
+    version = data.get('version', 1)
     if version != 1:
-        problem(int(data.get("__line__", 1)), f"unsupported version {version!r}; expected 1")
+        problem(int(data.get('__line__', 1)), f'unsupported version {version!r}; expected 1')
         return result
-    terms = data.get("terms")
+    terms = data.get('terms')
     if terms is None:
         return result
     if not isinstance(terms, list):
-        problem(int(data.get("__line__", 1)), "`terms` must be a list")
+        problem(int(data.get('__line__', 1)), '`terms` must be a list')
         return result
     for entry in terms:
         if not isinstance(entry, dict):
-            problem(int(data.get("__line__", 1)), "each term must be a mapping")
+            problem(int(data.get('__line__', 1)), 'each term must be a mapping')
             continue
         term = _term(entry, path, problem)
         if term is not None:
@@ -203,25 +203,25 @@ def parse(text: str, path: str) -> DefinitionsFile:
 
 
 def _term(entry: dict[str, Any], path: str, problem: Any) -> Term | None:
-    line = int(entry.pop("__line__", 1))
-    name = _text(entry.get("name"))
+    line = int(entry.pop('__line__', 1))
+    name = _text(entry.get('name'))
     if not name:
-        problem(line, "term has no `name`")
+        problem(line, 'term has no `name`')
         return None
-    label = f"term {name!r}"
+    label = f'term {name!r}'
     for key in sorted(set(entry) - FIELDS):
         close = [f for f in FIELDS if f.startswith(key[:3])]
-        hint = f"; did you mean `{close[0]}`?" if close else ""
-        problem(line, f"{label}: unknown field `{key}`{hint}")
-    definition = _text(entry.get("definition"))
+        hint = f'; did you mean `{close[0]}`?' if close else ''
+        problem(line, f'{label}: unknown field `{key}`{hint}')
+    definition = _text(entry.get('definition'))
     if not definition:
-        problem(line, f"{label}: no `definition`")
-        definition = ""
-    status = _text(entry.get("status")) or "draft"
+        problem(line, f'{label}: no `definition`')
+        definition = ''
+    status = _text(entry.get('status')) or 'draft'
     if status not in STATUSES:
-        problem(line, f"{label}: status {status!r} is not one of {', '.join(STATUSES)}")
-        status = "draft"
-    approved_value = entry.get("approved")
+        problem(line, f'{label}: status {status!r} is not one of {", ".join(STATUSES)}')
+        status = 'draft'
+    approved_value = entry.get('approved')
     approved: str | None = None
     if isinstance(approved_value, dt.date):
         approved = approved_value.isoformat()
@@ -229,56 +229,56 @@ def _term(entry: dict[str, Any], path: str, problem: Any) -> Term | None:
         try:
             approved = dt.date.fromisoformat(approved_value.strip()).isoformat()
         except ValueError:
-            problem(line, f"{label}: `approved` must be a date such as 2026-10-30, not {approved_value!r}")
+            problem(line, f'{label}: `approved` must be a date such as 2026-10-30, not {approved_value!r}')
     elif approved_value is not None:
-        problem(line, f"{label}: `approved` must be a date such as 2026-10-30")
-    owner_value = entry.get("owner")
+        problem(line, f'{label}: `approved` must be a date such as 2026-10-30')
+    owner_value = entry.get('owner')
     owner: Owner | None = None
     if isinstance(owner_value, dict):
-        owner_value.pop("__line__", None)
-        owner_name = _text(owner_value.get("name"))
+        owner_value.pop('__line__', None)
+        owner_name = _text(owner_value.get('name'))
         if owner_name:
-            owner = Owner(owner_name, _text(owner_value.get("role")))
+            owner = Owner(owner_name, _text(owner_value.get('role')))
         else:
-            problem(line, f"{label}: `owner` needs a `name`")
-        for key in sorted(set(owner_value) - {"name", "role"}):
-            problem(line, f"{label}: unknown owner field `{key}`")
+            problem(line, f'{label}: `owner` needs a `name`')
+        for key in sorted(set(owner_value) - {'name', 'role'}):
+            problem(line, f'{label}: unknown owner field `{key}`')
     elif isinstance(owner_value, str) and owner_value.strip():
-        match = re.match(r"^(.*?)\s*\(([^()]*)\)\s*$", owner_value.strip())
+        match = re.match(r'^(.*?)\s*\(([^()]*)\)\s*$', owner_value.strip())
         owner = Owner(match[1], match[2] or None) if match else Owner(owner_value.strip())
     elif owner_value is not None:
-        problem(line, f"{label}: `owner` must be a name or a mapping with `name` and `role`")
+        problem(line, f'{label}: `owner` must be a name or a mapping with `name` and `role`')
     lists: dict[str, list[str]] = {}
-    for key in ("synonyms", "columns", "filters", "related"):
+    for key in ('synonyms', 'columns', 'filters', 'related'):
         value = _strings(entry.get(key))
         if value is None:
-            problem(line, f"{label}: `{key}` must be a list of strings")
+            problem(line, f'{label}: `{key}` must be a list of strings')
             value = []
         lists[key] = value
-    currency = _text(entry.get("currency"))
+    currency = _text(entry.get('currency'))
     if currency and not _CURRENCY.match(currency):
-        problem(line, f"{label}: currency {currency!r} should be an ISO 4217 code such as GBP")
+        problem(line, f'{label}: currency {currency!r} should be an ISO 4217 code such as GBP')
     return Term(
         name=name,
         definition=definition,
         path=path,
         line=line,
-        synonyms=lists["synonyms"],
+        synonyms=lists['synonyms'],
         owner=owner,
         status=status,
         approved=approved,
-        grain=_text(entry.get("grain")),
-        columns=lists["columns"],
-        filters=lists["filters"],
-        unit=_text(entry.get("unit")),
+        grain=_text(entry.get('grain')),
+        columns=lists['columns'],
+        filters=lists['filters'],
+        unit=_text(entry.get('unit')),
         currency=currency,
-        related=lists["related"],
-        exceptions=_text(entry.get("exceptions")),
+        related=lists['related'],
+        exceptions=_text(entry.get('exceptions')),
     )
 
 
 def parse_file(path: Path, relative: str | None = None) -> DefinitionsFile:
-    return parse(path.read_text(encoding="utf-8"), relative or str(path))
+    return parse(path.read_text(encoding='utf-8'), relative or str(path))
 
 
 def validate(terms: list[Term]) -> list[str]:
@@ -293,21 +293,21 @@ def validate(terms: list[Term]) -> list[str]:
             other = seen.get(key)
             if other is not None and other is not term:
                 problems.append(
-                    f"{term.path}:{term.line}: term {term.name!r}: {name!r} is also a name of "
-                    f"{other.name!r} ({other.path}:{other.line})"
+                    f'{term.path}:{term.line}: term {term.name!r}: {name!r} is also a name of '
+                    f'{other.name!r} ({other.path}:{other.line})'
                 )
             else:
                 seen[key] = term
     for term in terms:
-        where = f"{term.path}:{term.line}: term {term.name!r}"
-        if term.status == "approved":
+        where = f'{term.path}:{term.line}: term {term.name!r}'
+        if term.status == 'approved':
             if term.owner is None:
-                problems.append(f"{where}: approved but has no owner")
+                problems.append(f'{where}: approved but has no owner')
             if term.approved is None:
-                problems.append(f"{where}: approved but has no `approved` date")
-        if term.status in ("agreed", "approved") and not term.columns:
-            problems.append(f"{where}: {term.status} but bound to no columns")
+                problems.append(f'{where}: approved but has no `approved` date')
+        if term.status in ('agreed', 'approved') and not term.columns:
+            problems.append(f'{where}: {term.status} but bound to no columns')
         for related in term.related:
             if related.lower() not in seen:
-                problems.append(f"{where}: related term {related!r} is not defined")
+                problems.append(f'{where}: related term {related!r} is not defined')
     return problems

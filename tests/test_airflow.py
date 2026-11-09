@@ -8,11 +8,11 @@ import pytest
 from konstruct.airflow import DagInfo, DbtInvocation, looks_like_dag_file, parse_dbt_commands, parse_file
 
 EXAMPLE_DAG = (
-    Path(__file__).resolve().parents[1] / "examples" / "jaffle_shop" / "dags" / "jaffle_shop_daily.py"
+    Path(__file__).resolve().parents[1] / 'examples' / 'jaffle_shop' / 'dags' / 'jaffle_shop_daily.py'
 )
 
 
-def parse(tmp_path: Path, source: str, name: str = "dag.py") -> list[DagInfo]:
+def parse(tmp_path: Path, source: str, name: str = 'dag.py') -> list[DagInfo]:
     path = tmp_path / name
     path.write_text(textwrap.dedent(source))
     return parse_file(path)
@@ -20,37 +20,37 @@ def parse(tmp_path: Path, source: str, name: str = "dag.py") -> list[DagInfo]:
 
 def test_example_dag() -> None:
     [dag] = parse_file(EXAMPLE_DAG)
-    assert dag.dag_id == "jaffle_shop_daily"
-    assert dag.schedule == "@daily"
-    assert dag.tags == ["jaffle_shop"]
-    assert dag.description and dag.description.startswith("Daily jaffle_shop run")
+    assert dag.dag_id == 'jaffle_shop_daily'
+    assert dag.schedule == '@daily'
+    assert dag.tags == ['jaffle_shop']
+    assert dag.description and dag.description.startswith('Daily jaffle_shop run')
     assert list(dag.tasks) == [
-        "dbt_seed",
-        "dbt_run_staging",
-        "dbt_run_marts",
-        "dbt_test",
-        "build_customer_ltv",
-        "notify_crm",
+        'dbt_seed',
+        'dbt_run_staging',
+        'dbt_run_marts',
+        'dbt_test',
+        'build_customer_ltv',
+        'notify_crm',
     ]
     assert dag.dependencies == [
-        ("dbt_seed", "dbt_run_staging"),
-        ("dbt_run_staging", "dbt_run_marts"),
-        ("dbt_run_marts", "dbt_test"),
-        ("dbt_test", "build_customer_ltv"),
-        ("build_customer_ltv", "notify_crm"),
+        ('dbt_seed', 'dbt_run_staging'),
+        ('dbt_run_staging', 'dbt_run_marts'),
+        ('dbt_run_marts', 'dbt_test'),
+        ('dbt_test', 'build_customer_ltv'),
+        ('build_customer_ltv', 'notify_crm'),
     ]
-    staging = dag.tasks["dbt_run_staging"]
-    assert staging.bash_command == "cd /opt/airflow/jaffle_shop && dbt run --select staging"
-    assert staging.dbt == [DbtInvocation(command="run", selectors=["staging"])]
-    assert dag.tasks["dbt_run_marts"].dbt[0].selectors == ["customers", "orders"]
-    sql_task = dag.tasks["build_customer_ltv"]
-    assert sql_task.operator == "SQLExecuteQueryOperator"
-    assert sql_task.sql_path and sql_task.sql_path.endswith("dags/sql/customer_ltv.sql")
-    assert sql_task.sql and "reporting.customer_ltv" in sql_task.sql
-    notify = dag.tasks["notify_crm"]
-    assert notify.operator == "@task"
-    assert notify.outlets == ["duckdb://jaffle_shop/reporting/customer_ltv"]
-    assert notify.doc == "Tell the CRM that lifetime values have been refreshed."
+    staging = dag.tasks['dbt_run_staging']
+    assert staging.bash_command == 'cd /opt/airflow/jaffle_shop && dbt run --select staging'
+    assert staging.dbt == [DbtInvocation(command='run', selectors=['staging'])]
+    assert dag.tasks['dbt_run_marts'].dbt[0].selectors == ['customers', 'orders']
+    sql_task = dag.tasks['build_customer_ltv']
+    assert sql_task.operator == 'SQLExecuteQueryOperator'
+    assert sql_task.sql_path and sql_task.sql_path.endswith('dags/sql/customer_ltv.sql')
+    assert sql_task.sql and 'reporting.customer_ltv' in sql_task.sql
+    notify = dag.tasks['notify_crm']
+    assert notify.operator == '@task'
+    assert notify.outlets == ['duckdb://jaffle_shop/reporting/customer_ltv']
+    assert notify.doc == 'Tell the CRM that lifetime values have been refreshed.'
     assert dag.warnings == []
 
 
@@ -78,13 +78,13 @@ def test_assigned_dag_with_dag_kwarg_and_airflow2_imports(tmp_path: Path) -> Non
         """,
     )
     first, second = dags
-    assert first.dag_id == "first" and first.schedule == "0 3 * * *"
-    assert list(first.tasks) == ["load", "report"]
-    assert list(second.tasks) == ["other"]
-    assert first.tasks["load"].sql == "insert into analytics.events select * from raw.events"
-    assert first.dependencies == [("load", "report")]
-    assert first.tasks["report"].dbt == [
-        DbtInvocation(command="build", selectors=["+events"], excludes=["tag:slow"])
+    assert first.dag_id == 'first' and first.schedule == '0 3 * * *'
+    assert list(first.tasks) == ['load', 'report']
+    assert list(second.tasks) == ['other']
+    assert first.tasks['load'].sql == 'insert into analytics.events select * from raw.events'
+    assert first.dependencies == [('load', 'report')]
+    assert first.tasks['report'].dbt == [
+        DbtInvocation(command='build', selectors=['+events'], excludes=['tag:slow'])
     ]
 
 
@@ -116,16 +116,16 @@ def test_dag_decorator_taskflow_expand_and_override(tmp_path: Path) -> None:
         pipeline()
         """,
     )
-    assert dag.dag_id == "pipeline"
-    assert dag.tags == ["etl"]
-    assert set(dag.tasks) == {"extract", "transform_rows", "transform_again", "run_dbt"}
-    assert dag.tasks["run_dbt"].operator == "@task.bash"
-    assert dag.tasks["run_dbt"].dbt == [DbtInvocation(command="run", selectors=["marts"])]
+    assert dag.dag_id == 'pipeline'
+    assert dag.tags == ['etl']
+    assert set(dag.tasks) == {'extract', 'transform_rows', 'transform_again', 'run_dbt'}
+    assert dag.tasks['run_dbt'].operator == '@task.bash'
+    assert dag.tasks['run_dbt'].dbt == [DbtInvocation(command='run', selectors=['marts'])]
     assert set(dag.dependencies) == {
-        ("extract", "transform_rows"),
-        ("extract", "transform_again"),
-        ("transform_rows", "run_dbt"),
-        ("transform_again", "run_dbt"),
+        ('extract', 'transform_rows'),
+        ('extract', 'transform_again'),
+        ('transform_rows', 'run_dbt'),
+        ('transform_again', 'run_dbt'),
     }
 
 
@@ -146,21 +146,21 @@ def test_task_groups_prefix_ids_and_expand_in_dependencies(tmp_path: Path) -> No
             start >> load >> end
         """,
     )
-    assert list(dag.tasks) == ["start", "load.a", "load.inner.b", "end"]
+    assert list(dag.tasks) == ['start', 'load.a', 'load.inner.b', 'end']
     assert set(dag.dependencies) == {
-        ("start", "load.a"),
-        ("start", "load.inner.b"),
-        ("load.a", "end"),
-        ("load.inner.b", "end"),
+        ('start', 'load.a'),
+        ('start', 'load.inner.b'),
+        ('load.a', 'end'),
+        ('load.inner.b', 'end'),
     }
 
 
 def test_task_group_dependencies_use_its_first_and_last_tasks(tmp_path: Path) -> None:
-    [dag] = parse_file(Path(__file__).parent / "fixtures" / "airflow" / "groups.py")
+    [dag] = parse_file(Path(__file__).parent / 'fixtures' / 'airflow' / 'groups.py')
     assert set(dag.dependencies) == {
-        ("start", "load.a"),
-        ("load.a", "load.inner.b"),
-        ("load.inner.b", "end"),
+        ('start', 'load.a'),
+        ('load.a', 'load.inner.b'),
+        ('load.inner.b', 'end'),
     }
 
 
@@ -187,11 +187,11 @@ def test_task_group_functions(tmp_path: Path) -> None:
             first() >> stage() >> last()
         """,
     )
-    assert set(dag.tasks) == {"first", "stage.one", "stage.two", "last"}
+    assert set(dag.tasks) == {'first', 'stage.one', 'stage.two', 'last'}
     assert set(dag.dependencies) == {
-        ("first", "stage.one"),
-        ("stage.one", "stage.two"),
-        ("stage.two", "last"),
+        ('first', 'stage.one'),
+        ('stage.one', 'stage.two'),
+        ('stage.two', 'last'),
     }
 
 
@@ -215,16 +215,16 @@ def test_chain_cross_downstream_and_left_shift(tmp_path: Path) -> None:
         """,
     )
     assert set(dag.dependencies) == {
-        ("a", "b"),
-        ("a", "c"),
-        ("b", "d"),
-        ("c", "d"),
-        ("a", "x"),
-        ("a", "y"),
-        ("b", "x"),
-        ("b", "y"),
-        ("y", "d"),
-        ("x", "c"),
+        ('a', 'b'),
+        ('a', 'c'),
+        ('b', 'd'),
+        ('c', 'd'),
+        ('a', 'x'),
+        ('a', 'y'),
+        ('b', 'x'),
+        ('b', 'y'),
+        ('y', 'd'),
+        ('x', 'c'),
     }
 
 
@@ -242,16 +242,16 @@ def test_cosmos_and_dbt_operators(tmp_path: Path) -> None:
             group >> single
         """,
     )
-    assert dag.tasks["transform"].dbt == [
-        DbtInvocation(command="build", selectors=["path:models/marts"], excludes=["tag:wip"])
+    assert dag.tasks['transform'].dbt == [
+        DbtInvocation(command='build', selectors=['path:models/marts'], excludes=['tag:wip'])
     ]
-    assert dag.tasks["one"].dbt == [DbtInvocation(command="run", selectors=["orders"], project_dir="/dbt")]
-    assert dag.dependencies == [("transform", "one")]
+    assert dag.tasks['one'].dbt == [DbtInvocation(command='run', selectors=['orders'], project_dir='/dbt')]
+    assert dag.dependencies == [('transform', 'one')]
 
 
 def test_sql_files_from_template_searchpath_and_bigquery_jobs(tmp_path: Path) -> None:
-    (tmp_path / "queries").mkdir()
-    (tmp_path / "queries" / "daily.sql").write_text("insert into mart.daily select * from staging.events")
+    (tmp_path / 'queries').mkdir()
+    (tmp_path / 'queries' / 'daily.sql').write_text('insert into mart.daily select * from staging.events')
     [dag] = parse(
         tmp_path,
         """
@@ -271,13 +271,13 @@ def test_sql_files_from_template_searchpath_and_bigquery_jobs(tmp_path: Path) ->
             check = SQLTableCheckOperator(task_id="check", table="mart.daily", checks={})
         """,
     )
-    assert dag.tasks["daily"].sql == "insert into mart.daily select * from staging.events"
-    assert dag.tasks["many"].sql == "delete from t1;\ninsert into t2 select 1"
-    assert dag.tasks["missing"].sql is None
-    assert dag.tasks["bq"].sql == "select a from ds.src"
-    assert dag.tasks["bq"].writes == ["p.ds.dst"]
-    assert dag.tasks["check"].reads == ["mart.daily"]
-    assert any("nope.sql not found" in w for w in dag.warnings)
+    assert dag.tasks['daily'].sql == 'insert into mart.daily select * from staging.events'
+    assert dag.tasks['many'].sql == 'delete from t1;\ninsert into t2 select 1'
+    assert dag.tasks['missing'].sql is None
+    assert dag.tasks['bq'].sql == 'select a from ds.src'
+    assert dag.tasks['bq'].writes == ['p.ds.dst']
+    assert dag.tasks['check'].reads == ['mart.daily']
+    assert any('nope.sql not found' in w for w in dag.warnings)
 
 
 def test_inlets_and_outlets(tmp_path: Path) -> None:
@@ -293,9 +293,9 @@ def test_inlets_and_outlets(tmp_path: Path) -> None:
             t = PythonOperator(task_id="t", python_callable=print, inlets=[RAW], outlets=[Dataset("s3://bucket/key"), Asset(name="named")])
         """,
     )
-    task = dag.tasks["t"]
-    assert task.inlets == ["postgres://db:5432/shop/public/orders"]
-    assert task.outlets == ["s3://bucket/key", "named"]
+    task = dag.tasks['t']
+    assert task.inlets == ['postgres://db:5432/shop/public/orders']
+    assert task.outlets == ['s3://bucket/key', 'named']
 
 
 def test_unresolvable_things_become_warnings(tmp_path: Path) -> None:
@@ -311,8 +311,8 @@ def test_unresolvable_things_become_warnings(tmp_path: Path) -> None:
         """,
     )
     assert len(dags) == 1
-    assert dags[0].dag_id.startswith("dag_line_")
-    assert any("task_id" in w for w in dags[0].warnings)
+    assert dags[0].dag_id.startswith('dag_line_')
+    assert any('task_id' in w for w in dags[0].warnings)
 
 
 def test_syntax_errors_raise(tmp_path: Path) -> None:
@@ -321,26 +321,26 @@ def test_syntax_errors_raise(tmp_path: Path) -> None:
 
 
 def test_looks_like_dag_file() -> None:
-    assert looks_like_dag_file("from airflow import DAG")
-    assert looks_like_dag_file("from airflow.sdk import dag\n@dag()")
-    assert not looks_like_dag_file("import pandas")
+    assert looks_like_dag_file('from airflow import DAG')
+    assert looks_like_dag_file('from airflow.sdk import dag\n@dag()')
+    assert not looks_like_dag_file('import pandas')
 
 
 @pytest.mark.parametrize(
-    ("command", "expected"),
+    ('command', 'expected'),
     [
-        ("dbt run", [DbtInvocation("run")]),
-        ("cd /x && dbt run -s a b --exclude c", [DbtInvocation("run", ["a", "b"], ["c"])]),
-        ("dbt build --select=tag:nightly", [DbtInvocation("build", ["tag:nightly"])]),
-        ("dbt --no-write-json test -m a", [DbtInvocation("test", ["a"])]),
-        ("dbt seed && dbt run --models x", [DbtInvocation("seed"), DbtInvocation("run", ["x"])]),
-        ("dbt run --project-dir /p --target prod", [DbtInvocation("run", project_dir="/p")]),
-        ("/venv/bin/dbt run --selector nightly", [DbtInvocation("run", unsupported=["--selector"])]),
-        ("dbt run -s state:modified+", [DbtInvocation("run", unsupported=["state:modified+"])]),
-        ("dbt deps", []),
-        ("dbt docs generate", []),
-        ("echo dbt", []),
-        ("dbt run --select 'unterminated", [DbtInvocation("run", ["'unterminated"])]),
+        ('dbt run', [DbtInvocation('run')]),
+        ('cd /x && dbt run -s a b --exclude c', [DbtInvocation('run', ['a', 'b'], ['c'])]),
+        ('dbt build --select=tag:nightly', [DbtInvocation('build', ['tag:nightly'])]),
+        ('dbt --no-write-json test -m a', [DbtInvocation('test', ['a'])]),
+        ('dbt seed && dbt run --models x', [DbtInvocation('seed'), DbtInvocation('run', ['x'])]),
+        ('dbt run --project-dir /p --target prod', [DbtInvocation('run', project_dir='/p')]),
+        ('/venv/bin/dbt run --selector nightly', [DbtInvocation('run', unsupported=['--selector'])]),
+        ('dbt run -s state:modified+', [DbtInvocation('run', unsupported=['state:modified+'])]),
+        ('dbt deps', []),
+        ('dbt docs generate', []),
+        ('echo dbt', []),
+        ("dbt run --select 'unterminated", [DbtInvocation('run', ["'unterminated"])]),
     ],
 )
 def test_parse_dbt_commands(command: str, expected: list[DbtInvocation]) -> None:

@@ -1,4 +1,4 @@
-name: konstruct lineage review
+name: Konstruct lineage review
 description: Column-level review of dbt, SQL and DAG changes on pull requests, with breaking changes flagged.
 author: Kodex Labs
 branding:
@@ -28,15 +28,15 @@ inputs:
     description: >-
       Arguments for `konstruct build`. The default reads no warehouse and never runs dbt, so no
       credentials are needed and a pull request's own macros never run; lineage then comes from
-      committed dbt artefacts, konstruct's own sandboxed rendering of dbt models, and the SQL.
+      committed dbt artefacts, Konstruct's own sandboxed rendering of dbt models, and the SQL.
     required: false
     default: "--no-warehouse --no-dbt"
   extras:
-    description: konstruct extras to install, for example `snowflake` or `bigquery,databricks`.
+    description: Konstruct extras to install, for example `snowflake` or `bigquery,databricks`.
     required: false
     default: ""
   python-version:
-    description: Python version to run konstruct with.
+    description: Python version to run Konstruct with.
     required: false
     default: "3.12"
   token:
@@ -65,12 +65,12 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
-    - name: Install konstruct
+    - name: Install Konstruct
       shell: bash
       env:
         EXTRAS: ${{ inputs.extras }}
       run: |
-        # The action's own checkout is the konstruct version to run, so a pinned `@v0.7.0` runs 0.7.0.
+        # The action's own checkout is the Konstruct version to run, so a pinned `@v0.7.0` runs 0.7.0.
         if [ -n "$EXTRAS" ]; then
           uv tool install --quiet "konstruct[${EXTRAS}] @ file://${GITHUB_ACTION_PATH}"
         else

@@ -1,13 +1,13 @@
 // Text measured with a canvas, so names are cut to the width of a card.
 
-export const FONT_NAME = "700 15px Manrope, system-ui, sans-serif";
-export const FONT_ROW = "500 14px Manrope, system-ui, sans-serif";
+export const FONT_NAME = '700 15px Manrope, system-ui, sans-serif';
+export const FONT_ROW = '500 14px Manrope, system-ui, sans-serif';
 export const FONT_MONO = "500 14px 'JetBrains Mono', ui-monospace, monospace";
 
 let context: CanvasRenderingContext2D | null = null;
 
 function measure(font: string): CanvasRenderingContext2D | null {
-    context ??= typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
+    context ??= typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
     if (context) context.font = font;
     return context;
 }

@@ -23,28 +23,28 @@ from sqlglot.schema import MappingSchema
 
 from konstruct.graph import relation_key
 
-Transform = Literal["direct", "transformed"]
+Transform = Literal['direct', 'transformed']
 
 # dbt adapter types (and common aliases) to sqlglot dialect names.
 DIALECTS: dict[str, str] = {
-    "duckdb": "duckdb",
-    "postgres": "postgres",
-    "postgresql": "postgres",
-    "redshift": "redshift",
-    "snowflake": "snowflake",
-    "bigquery": "bigquery",
-    "databricks": "databricks",
-    "spark": "spark",
-    "trino": "trino",
-    "athena": "athena",
-    "sqlserver": "tsql",
-    "synapse": "tsql",
-    "fabric": "tsql",
-    "clickhouse": "clickhouse",
-    "mysql": "mysql",
-    "sqlite": "sqlite",
-    "oracle": "oracle",
-    "teradata": "teradata",
+    'duckdb': 'duckdb',
+    'postgres': 'postgres',
+    'postgresql': 'postgres',
+    'redshift': 'redshift',
+    'snowflake': 'snowflake',
+    'bigquery': 'bigquery',
+    'databricks': 'databricks',
+    'spark': 'spark',
+    'trino': 'trino',
+    'athena': 'athena',
+    'sqlserver': 'tsql',
+    'synapse': 'tsql',
+    'fabric': 'tsql',
+    'clickhouse': 'clickhouse',
+    'mysql': 'mysql',
+    'sqlite': 'sqlite',
+    'oracle': 'oracle',
+    'teradata': 'teradata',
 }
 
 # Schema columns: relation key ("catalog.db.table") -> {column: type}
@@ -80,39 +80,39 @@ class StatementLineage:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "kind": self.kind,
-            "target": self.target,
-            "reads": self.reads,
-            "columns": {
+            'kind': self.kind,
+            'target': self.target,
+            'reads': self.reads,
+            'columns': {
                 name: [[s.relation, s.column, s.transform] for s in sources]
                 for name, sources in self.columns.items()
             },
-            "references": [list(r) for r in self.references],
-            "errors": self.errors,
-            "expressions": self.expressions,
-            "conditions": self.conditions,
+            'references': [list(r) for r in self.references],
+            'errors': self.errors,
+            'expressions': self.expressions,
+            'conditions': self.conditions,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> StatementLineage:
         return cls(
-            kind=data["kind"],
-            target=data.get("target"),
-            reads=list(data.get("reads", [])),
+            kind=data['kind'],
+            target=data.get('target'),
+            reads=list(data.get('reads', [])),
             columns={
                 name: [ColumnSource(r, c, t) for r, c, t in sources]
-                for name, sources in data.get("columns", {}).items()
+                for name, sources in data.get('columns', {}).items()
             },
-            references=[(r, c) for r, c in data.get("references", [])],
-            errors=list(data.get("errors", [])),
-            expressions=dict(data.get("expressions", {})),
-            conditions=list(data.get("conditions", [])),
+            references=[(r, c) for r, c in data.get('references', [])],
+            errors=list(data.get('errors', [])),
+            expressions=dict(data.get('expressions', {})),
+            conditions=list(data.get('conditions', [])),
         )
 
 
 _JINJA_EXPR = re.compile(r"(['\"]?)\{\{.*?\}\}(['\"]?)", re.DOTALL)
-_JINJA_BLOCK = re.compile(r"\{%.*?%\}|\{#.*?#\}", re.DOTALL)
-PLACEHOLDER = "__konstruct__"
+_JINJA_BLOCK = re.compile(r'\{%.*?%\}|\{#.*?#\}', re.DOTALL)
+PLACEHOLDER = '__konstruct__'
 
 
 def strip_templating(sql: str) -> str:
@@ -124,25 +124,25 @@ def strip_templating(sql: str) -> str:
     """
 
     def replace(match: re.Match[str]) -> str:
-        before = sql[match.start() - 1] if match.start() > 0 else ""
-        after = sql[match.end()] if match.end() < len(sql) else ""
+        before = sql[match.start() - 1] if match.start() > 0 else ''
+        after = sql[match.end()] if match.end() < len(sql) else ''
         open_quote, close_quote = match.group(1), match.group(2)
-        if open_quote == '"' or before == "." or after == ".":
-            return f"{open_quote}{PLACEHOLDER}{close_quote}"
+        if open_quote == '"' or before == '.' or after == '.':
+            return f'{open_quote}{PLACEHOLDER}{close_quote}'
         return f"'{PLACEHOLDER}'"
 
-    return _JINJA_BLOCK.sub("", _JINJA_EXPR.sub(replace, sql))
+    return _JINJA_BLOCK.sub('', _JINJA_EXPR.sub(replace, sql))
 
 
 def build_schema(columns: SchemaColumns, dialect: str | None) -> MappingSchema:
     """A sqlglot schema with every relation at catalog.db.table depth."""
     nested: dict[str, Any] = {}
     for key, cols in columns.items():
-        parts = key.split(".")
+        parts = key.split('.')
         if len(parts) == 2:
-            parts = ["", *parts]
+            parts = ['', *parts]
         elif len(parts) == 1:
-            parts = ["", "", *parts]
+            parts = ['', '', *parts]
         if len(parts) != 3 or not cols:
             continue
         catalog, db, table = parts
@@ -154,11 +154,11 @@ def build_schema(columns: SchemaColumns, dialect: str | None) -> MappingSchema:
 
 def _safe_type(dtype: str | None, dialect: str | None) -> str:
     if not dtype:
-        return "UNKNOWN"
+        return 'UNKNOWN'
     try:
         exp.DataType.build(dtype, dialect=dialect)
     except (SqlglotError, ValueError):
-        return "UNKNOWN"
+        return 'UNKNOWN'
     return dtype
 
 
@@ -188,7 +188,7 @@ def analyse(
     try:
         statements = [s for s in sqlglot.parse(sql, dialect=dialect) if s is not None]
     except SqlglotError as error:
-        return [StatementLineage(kind="unparsed", target=target, errors=[_first_line(error)])]
+        return [StatementLineage(kind='unparsed', target=target, errors=[_first_line(error)])]
 
     results: list[StatementLineage] = []
     for statement in statements:
@@ -196,7 +196,7 @@ def analyse(
         if result is None:
             continue
         if result.target and result.columns and result.target not in known:
-            known[result.target] = dict.fromkeys(result.columns, "UNKNOWN")
+            known[result.target] = dict.fromkeys(result.columns, 'UNKNOWN')
         results.append(result)
     return results
 
@@ -220,9 +220,9 @@ def _analyse_statement(
     write: exp.Table | None = None
 
     if isinstance(statement, exp.Query):
-        query, kind = statement, "select"
+        query, kind = statement, 'select'
     elif isinstance(statement, exp.Create):
-        if str(statement.args.get("kind") or "").upper() not in ("TABLE", "VIEW"):
+        if str(statement.args.get('kind') or '').upper() not in ('TABLE', 'VIEW'):
             return None
         this = statement.this
         write = this.this if isinstance(this, exp.Schema) else this
@@ -230,7 +230,7 @@ def _analyse_statement(
             out_names = [c.name for c in this.expressions if isinstance(c, exp.ColumnDef)] or None
         expression = statement.expression
         query = expression if isinstance(expression, exp.Query) else None
-        kind = f"create_{(statement.args.get('kind') or 'table').lower()}"
+        kind = f'create_{(statement.args.get("kind") or "table").lower()}'
         if query is None and not isinstance(write, exp.Table):
             return None
     elif isinstance(statement, exp.Insert):
@@ -265,7 +265,7 @@ def _analyse_statement(
     try:
         _column_lineage(query, dialect, known, default_catalog, default_db, out_names, result)
     except (SqlglotError, ValueError, KeyError, IndexError, AttributeError, RecursionError) as error:
-        result.errors.append(f"column lineage failed: {_first_line(error)}")
+        result.errors.append(f'column lineage failed: {_first_line(error)}')
     return result
 
 
@@ -280,19 +280,19 @@ def _column_lineage(
 ) -> None:
     schema = build_schema(known, dialect)
     qualify_kwargs: dict[str, Any] = {
-        "dialect": dialect,
-        "schema": schema,
-        "validate_qualify_columns": False,
-        "identify": False,
+        'dialect': dialect,
+        'schema': schema,
+        'validate_qualify_columns': False,
+        'identify': False,
     }
     if default_db:
-        qualify_kwargs["db"] = default_db
+        qualify_kwargs['db'] = default_db
         if default_catalog:
-            qualify_kwargs["catalog"] = default_catalog
+            qualify_kwargs['catalog'] = default_catalog
     qualified = qualify(query.copy(), **qualify_kwargs)
     scope = build_scope(qualified)
     if scope is None:
-        result.errors.append("column lineage failed: not a query")
+        result.errors.append('column lineage failed: not a query')
         return
 
     # trim_selects only tidies node labels, at the cost of copying the query for every node.
@@ -300,12 +300,12 @@ def _column_lineage(
         None, qualified, schema=schema, dialect=dialect, scope=scope, copy=False, trim_selects=False
     )
     if out_names is not None and len(out_names) != len(nodes):
-        result.errors.append("INSERT column list does not match the SELECT list")
+        result.errors.append('INSERT column list does not match the SELECT list')
         out_names = None
 
     star_tables = [table_key(t, default_catalog, default_db) for t in _unexpanded_star_tables(scope)]
     for index, (name, node) in enumerate(nodes.items()):
-        if name == "*":
+        if name == '*':
             continue
         out_name = (out_names[index] if out_names else name).lower()
         sources: list[ColumnSource] = []
@@ -316,13 +316,13 @@ def _column_lineage(
         result.columns[out_name] = sources
     if star_tables:
         result.errors.append(
-            "SELECT * over relations with unknown columns: " + ", ".join(sorted(set(star_tables)))
+            'SELECT * over relations with unknown columns: ' + ', '.join(sorted(set(star_tables)))
         )
 
     result.references = _references(scope, dialect, schema, default_catalog, default_db)
     canon = _Canonical(dialect, default_catalog, default_db)
     for index, (name, node) in enumerate(nodes.items()):
-        if name != "*":
+        if name != '*':
             out_name = (out_names[index] if out_names else name).lower()
             result.expressions[out_name] = _unbracket(canon.node(node))
     result.conditions = canon.conditions(scope, schema)
@@ -371,7 +371,7 @@ def _is_passthrough(node: LineageNode) -> bool:
 
 
 def _plain(name: str) -> str:
-    return re.sub(r'["`\[\]]', "", name).lower()
+    return re.sub(r'["`\[\]]', '', name).lower()
 
 
 def _fields_read(column: exp.Column) -> tuple[str, ...]:
@@ -398,7 +398,7 @@ def _field_suffixes(expression: exp.Expr, child: LineageNode) -> set[tuple[str, 
     wanted = _plain(child.name)
     suffixes: set[tuple[str, ...]] = set()
     for column in expression.find_all(exp.Column):
-        name = f"{column.table}.{column.name}" if column.table else column.name
+        name = f'{column.table}.{column.name}' if column.table else column.name
         if _plain(name) != wanted:
             continue
         suffixes.add(_fields_read(column))
@@ -424,7 +424,7 @@ def _leaves(node: LineageNode) -> Iterator[Leaf]:
         direct = direct and _is_passthrough(current)
         if not current.downstream:
             if isinstance(current.expression, exp.Table):
-                yield current, "direct" if direct else "transformed", parent, path
+                yield current, 'direct' if direct else 'transformed', parent, path
             continue
         for child in reversed(current.downstream):
             for suffix in sorted(_field_suffixes(current.expression, child)):
@@ -444,14 +444,14 @@ def _leaf_source(
     if not isinstance(table, exp.Table) or not table.name:
         return None
     relation = table_key(table, default_catalog, default_db)
-    column = leaf.name.rsplit(".", 1)[-1].strip('"`[]').lower()
-    if column == "*":
+    column = leaf.name.rsplit('.', 1)[-1].strip('"`[]').lower()
+    if column == '*':
         # A relation whose columns sqlglot could not expand: the column is the one the query
         # asked the star for, which the relation must therefore have.
-        column = asked_for.rsplit(".", 1)[-1].strip('"`[]').lower()
-        if not column or column == "*":
+        column = asked_for.rsplit('.', 1)[-1].strip('"`[]').lower()
+        if not column or column == '*':
             return None
-    return ColumnSource(relation, ".".join((column, *path)), transform)
+    return ColumnSource(relation, '.'.join((column, *path)), transform)
 
 
 def _unexpanded_star_tables(scope: Scope) -> Iterator[exp.Table]:
@@ -463,7 +463,7 @@ def _unexpanded_star_tables(scope: Scope) -> Iterator[exp.Table]:
                 yield source
 
 
-_REFERENCE_CLAUSES = ("joins", "where", "group", "having", "qualify")
+_REFERENCE_CLAUSES = ('joins', 'where', 'group', 'having', 'qualify')
 
 
 _ATOM = re.compile(r'[\w."`$]+')
@@ -476,11 +476,11 @@ def _inline(text: str) -> exp.Expr:
 
 def _unbracket(text: str) -> str:
     """Drop brackets that enclose the whole expression: ``(a / 100)`` becomes ``a / 100``."""
-    while text.startswith("(") and text.endswith(")"):
+    while text.startswith('(') and text.endswith(')'):
         depth = 0
         for index, char in enumerate(text):
-            depth += char == "("
-            depth -= char == ")"
+            depth += char == '('
+            depth -= char == ')'
             if depth == 0 and index < len(text) - 1:
                 return text
         text = text[1:-1]
@@ -502,7 +502,7 @@ class _Canonical:
         cached = self.memo.get(id(node))
         if cached is not None and cached[0] is node:
             return cached[1]
-        self.memo[id(node)] = (node, "...")  # guards against cycles while this node is expanded
+        self.memo[id(node)] = (node, '...')  # guards against cycles while this node is expanded
         text = self._expand(node)
         self.memo[id(node)] = (node, text)
         return text
@@ -511,29 +511,29 @@ class _Canonical:
         expression = node.expression
         if isinstance(expression, exp.Table):
             relation = table_key(expression, self.default_catalog, self.default_db)
-            return f"{relation}.{_plain(node.name.rsplit('.', 1)[-1])}"
+            return f'{relation}.{_plain(node.name.rsplit(".", 1)[-1])}'
         if isinstance(node.source, exp.SetOperation) and node.downstream:
             branches = sorted(self.node(child) for child in node.downstream)
-            return f"{node.name}({', '.join(branches)})"
+            return f'{node.name}({", ".join(branches)})'
         if isinstance(expression, exp.Alias):
             expression = expression.this
         if isinstance(expression, exp.Star):
-            return ", ".join(self.node(child) for child in node.downstream)
+            return ', '.join(self.node(child) for child in node.downstream)
         children = {_plain(child.name): child for child in node.downstream}
         star_tables = [
-            c for c in node.downstream if isinstance(c.expression, exp.Table) and c.name.endswith("*")
+            c for c in node.downstream if isinstance(c.expression, exp.Table) and c.name.endswith('*')
         ]
 
         def replace(item: exp.Expr) -> exp.Expr:
             if not isinstance(item, exp.Column):
                 return item
-            name = f"{item.table}.{item.name}" if item.table else item.name
+            name = f'{item.table}.{item.name}' if item.table else item.name
             child = children.get(_plain(name))
             if child is not None:
                 return _inline(self.node(child))
             if len(star_tables) == 1 and isinstance(star_tables[0].expression, exp.Table):
                 relation = table_key(star_tables[0].expression, self.default_catalog, self.default_db)
-                return exp.Var(this=f"{relation}.{item.name.lower()}")
+                return exp.Var(this=f'{relation}.{item.name.lower()}')
             return item
 
         return expression.copy().transform(replace).sql(dialect=self.dialect)
@@ -550,21 +550,21 @@ class _Canonical:
                     if not isinstance(part, exp.Expr):
                         continue
                     if isinstance(part, exp.Join):
-                        on = part.args.get("on")
+                        on = part.args.get('on')
                         if not isinstance(on, exp.Expr):
                             continue
-                        label = " ".join(x for x in (part.side, part.kind, "JOIN ON") if x).upper()
+                        label = ' '.join(x for x in (part.side, part.kind, 'JOIN ON') if x).upper()
                         part = on
                     else:
                         label = {
-                            "where": "WHERE",
-                            "group": "GROUP BY",
-                            "having": "HAVING",
-                            "qualify": "QUALIFY",
+                            'where': 'WHERE',
+                            'group': 'GROUP BY',
+                            'having': 'HAVING',
+                            'qualify': 'QUALIFY',
                         }[key]
                         if isinstance(part, (exp.Where, exp.Having, exp.Qualify)):
                             part = part.this
-                    found.add(f"{label}: {self._condition(part, scope, schema)}")
+                    found.add(f'{label}: {self._condition(part, scope, schema)}')
         return sorted(found)
 
     def _condition(self, part: exp.Expr, scope: Scope, schema: MappingSchema) -> str:
@@ -574,7 +574,7 @@ class _Canonical:
             source = scope.sources.get(item.table)
             if isinstance(source, exp.Table):
                 return exp.Var(
-                    this=f"{table_key(source, self.default_catalog, self.default_db)}.{item.name.lower()}"
+                    this=f'{table_key(source, self.default_catalog, self.default_db)}.{item.name.lower()}'
                 )
             if isinstance(source, Scope):
                 try:
@@ -585,9 +585,9 @@ class _Canonical:
             return item
 
         if isinstance(part, exp.Group):
-            if part.args.get("all") or not part.expressions:
-                return "ALL"
-            return ", ".join(
+            if part.args.get('all') or not part.expressions:
+                return 'ALL'
+            return ', '.join(
                 sorted(e.copy().transform(replace).sql(dialect=self.dialect) for e in part.expressions)
             )
         return part.copy().transform(replace).sql(dialect=self.dialect)
@@ -622,7 +622,7 @@ def _references(
             source = scope.sources.get(column.table)
             fields = _fields_read(column)
             if isinstance(source, exp.Table):
-                add(table_key(source, default_catalog, default_db), ".".join((column.name, *fields)))
+                add(table_key(source, default_catalog, default_db), '.'.join((column.name, *fields)))
             elif isinstance(source, Scope):
                 try:
                     traced = to_node(column.name, scope=source, dialect=dialect, schema=schema)
@@ -630,7 +630,7 @@ def _references(
                     continue
                 for leaf, _, asked_for, path in _leaves(traced):
                     leaf_source = _leaf_source(
-                        leaf, asked_for, "direct", default_catalog, default_db, path + fields
+                        leaf, asked_for, 'direct', default_catalog, default_db, path + fields
                     )
                     if leaf_source:
                         add(leaf_source.relation, leaf_source.column)

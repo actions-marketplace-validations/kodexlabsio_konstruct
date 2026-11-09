@@ -1,8 +1,8 @@
 <script lang="ts">
-    import { attr, display, KIND_NAMES, type LineageItem } from "../lib/model";
-    import type { GraphNode, Owner, Usage } from "../lib/types";
-    import type { Viewer } from "../lib/viewer.svelte";
-    import Command from "./Command.svelte";
+    import { attr, display, KIND_NAMES, type LineageItem } from '../lib/model';
+    import type { GraphNode, Owner, Usage } from '../lib/types';
+    import type { Viewer } from '../lib/viewer.svelte';
+    import Command from './Command.svelte';
 
     let { viewer }: { viewer: Viewer } = $props();
     // The viewer object is created once and never replaced, so reading it here is intended.
@@ -42,8 +42,8 @@
 
     function testsOf(n: GraphNode): [string, string][] {
         const found: [string, string][] = [];
-        for (const target of [n.id, ...model.columnsOf(n.id).map((c) => c.id)]) {
-            for (const e of model.ins(target, "tests")) found.push([e.source, target]);
+        for (const target of [n.id, ...model.columnsOf(n.id).map(c => c.id)]) {
+            for (const e of model.ins(target, 'tests')) found.push([e.source, target]);
         }
         return found;
     }
@@ -52,7 +52,7 @@
         const seen = new Map<string, GraphNode>();
         for (const t of [
             ...model.termsOf(n.id),
-            ...model.columnsOf(n.id).flatMap((c) => model.termsOf(c.id)),
+            ...model.columnsOf(n.id).flatMap(c => model.termsOf(c.id)),
         ]) {
             seen.set(t.id, t);
         }
@@ -60,21 +60,21 @@
     }
 
     function related(n: GraphNode): GraphNode[] {
-        return [...model.outs(n.id, "relates_to"), ...model.ins(n.id, "relates_to")]
-            .map((e) => model.node(e.source === n.id ? e.target : e.source))
+        return [...model.outs(n.id, 'relates_to'), ...model.ins(n.id, 'relates_to')]
+            .map(e => model.node(e.source === n.id ? e.target : e.source))
             .filter((t): t is GraphNode => t !== undefined);
     }
 
     function owner(n: GraphNode): string {
-        const o = attr<Owner>(n, "owner");
-        return o ? (o.role ? `${o.name}, ${o.role}` : o.name) : "";
+        const o = attr<Owner>(n, 'owner');
+        return o ? (o.role ? `${o.name}, ${o.role}` : o.name) : '';
     }
 
     const lineage = $derived.by(() => {
         if (!column) return { up: [] as LineageItem[], down: [] as LineageItem[] };
         return {
-            up: viewer.direction !== "downstream" ? model.columnLineage(column.id, true) : [],
-            down: viewer.direction !== "upstream" ? model.columnLineage(column.id, false) : [],
+            up: viewer.direction !== 'downstream' ? model.columnLineage(column.id, true) : [],
+            down: viewer.direction !== 'upstream' ? model.columnLineage(column.id, false) : [],
         };
     });
 </script>
@@ -97,7 +97,7 @@
 
 {#snippet termsSection(items: GraphNode[])}
     {#if items.length}
-        {@render section("Defined by", items.length)}
+        {@render section('Defined by', items.length)}
         <ul class="list">
             {#each items as t (t.id)}
                 <li>
@@ -108,7 +108,7 @@
                         onclick={() => viewer.selectTerm(t.id)}>{t.name}</button
                     >
                     <span class="grow"></span>
-                    <span class={viewer.status(t) === "approved" ? "ok" : "meta"}>{viewer.status(t)}</span>
+                    <span class={viewer.status(t) === 'approved' ? 'ok' : 'meta'}>{viewer.status(t)}</span>
                 </li>
             {/each}
         </ul>
@@ -117,7 +117,7 @@
 
 {#snippet conditions(items: string[])}
     {#if items.length}
-        {@render section("Rows shaped by", items.length)}
+        {@render section('Rows shaped by', items.length)}
         <div class="conditions">
             {#each items as c, i (i)}<code>{c}</code>{/each}
         </div>
@@ -144,11 +144,11 @@
                 <h2>{model.label(column.id)}</h2>
                 {#if column.data_type}<p class="relation">{column.data_type.toLowerCase()}</p>{/if}
                 {#if column.description}<p class="description">{column.description}</p>{/if}
-                {@const used = attr<Usage>(column, "usage")}
+                {@const used = attr<Usage>(column, 'usage')}
                 {#if used}
                     <div class="tags">
                         <span class="tag"
-                            >{used.queries.toLocaleString("en-GB")} queries, {used.users} users in {used.days} days</span
+                            >{used.queries.toLocaleString('en-GB')} queries, {used.users} users in {used.days} days</span
                         >
                     </div>
                 {/if}
@@ -158,7 +158,7 @@
                 {#if relation.relation}<p class="relation">{relation.relation}</p>{/if}
                 {#if relation.description}<p class="description">{relation.description}</p>{/if}
                 <div class="tags">
-                    {#each ["materialized", "table_type", "schedule", "operator", "orchestrator"] as key (key)}
+                    {#each ['materialized', 'table_type', 'schedule', 'operator', 'orchestrator'] as key (key)}
                         {#if attr(relation, key)}<span class="tag">{display(attr(relation, key))}</span>{/if}
                     {/each}
                     {#each relation.origins ?? [] as origin (origin)}<span class="tag">{origin}</span>{/each}
@@ -177,16 +177,16 @@
         {#if term}
             {@const facts = (
                 [
-                    ["Also called", (attr<string[]>(term, "synonyms") ?? []).join(", ")],
-                    ["Grain", attr<string>(term, "grain")],
+                    ['Also called', (attr<string[]>(term, 'synonyms') ?? []).join(', ')],
+                    ['Grain', attr<string>(term, 'grain')],
                     [
-                        "Unit",
-                        [attr<string>(term, "unit"), attr<string>(term, "currency")]
+                        'Unit',
+                        [attr<string>(term, 'unit'), attr<string>(term, 'currency')]
                             .filter(Boolean)
-                            .join(" "),
+                            .join(' '),
                     ],
-                    ["Approved", attr<string>(term, "approved")],
-                    ["Exceptions", attr<string>(term, "exceptions")],
+                    ['Approved', attr<string>(term, 'approved')],
+                    ['Exceptions', attr<string>(term, 'exceptions')],
                 ] as [string, string | undefined][]
             ).filter(([, v]) => v)}
             {#if facts.length}
@@ -196,19 +196,19 @@
                         </li>{/each}
                 </ul>
             {/if}
-            {@const filters = attr<string[]>(term, "filters") ?? []}
+            {@const filters = attr<string[]>(term, 'filters') ?? []}
             {#if filters.length}
-                {@render section("Required filters", filters.length)}
+                {@render section('Required filters', filters.length)}
                 <div class="conditions">
                     {#each filters as f, i (i)}<code>{f}</code>{/each}
                 </div>
             {/if}
             {@const bound = model.boundTo(term.id)}
-            {@render section("Columns", bound.length)}
+            {@render section('Columns', bound.length)}
             {#if !bound.length}<p class="note">Not bound to any column yet.</p>{/if}
             {#each bound as id (id)}
                 <div>
-                    {#if model.node(id)?.kind === "column"}{@render columnLink(
+                    {#if model.node(id)?.kind === 'column'}{@render columnLink(
                             id,
                         )}{:else}{@render relationLink(id)}{/if}
                 </div>
@@ -217,7 +217,7 @@
             {/each}
             {@const relatedTerms = related(term)}
             {#if relatedTerms.length}
-                {@render section("Related terms", relatedTerms.length)}
+                {@render section('Related terms', relatedTerms.length)}
                 <ul class="list">
                     {#each relatedTerms as t (t.id)}
                         <li>
@@ -232,41 +232,41 @@
                 </ul>
             {/if}
             {#if term.path}
-                {@render section("Where")}
+                {@render section('Where')}
                 <ul class="list">
                     <li>
                         <span class="meta">File</span><span class="grow mono"
-                            >{term.path}{attr(term, "line") ? `:${attr(term, "line")}` : ""}</span
+                            >{term.path}{attr(term, 'line') ? `:${attr(term, 'line')}` : ''}</span
                         >
                     </li>
                 </ul>
             {/if}
-            {@render section("Ask konstruct")}
+            {@render section('Ask Konstruct')}
             <div class="commands"><Command text="konstruct define {quoted(term.name)}" /></div>
         {:else if column && relation}
             {@render termsSection(model.termsOf(column.id))}
             {@const info = viewer.formulas[column.id]}
-            {@render section("Formula")}
+            {@render section('Formula')}
             {#if info?.e}
                 {@render formula(info.e)}
                 {#if info.c && info.c !== info.e}
-                    {@render section("In terms of sources")}
+                    {@render section('In terms of sources')}
                     {@render formula(info.c)}
                     {#if info.s?.length}
                         <p class="note">
-                            From {info.s.join(", ")}{info.p
-                                ? ". Partial: some steps are not inlined, because they have no recorded expression or the formula would grow too long; konstruct explain shows each step."
-                                : ""}
+                            From {info.s.join(', ')}{info.p
+                                ? '. Partial: some steps are not inlined, because they have no recorded expression or the formula would grow too long; the explain command shows each step.'
+                                : ''}
                         </p>
                     {/if}
                 {/if}
             {:else}
                 <p class="note">
-                    {model.ins(column.id, "derived_from").length
-                        ? "Read directly from the warehouse or a seed."
-                        : model.outs(column.id, "derived_from").length
-                          ? "The SQL that builds this column could not be reduced to a formula."
-                          : "Read from a source; nothing upstream in the graph."}
+                    {model.ins(column.id, 'derived_from').length
+                        ? 'Read directly from the warehouse or a seed.'
+                        : model.outs(column.id, 'derived_from').length
+                          ? 'The SQL that builds this column could not be reduced to a formula.'
+                          : 'Read from a source; nothing upstream in the graph.'}
                 </p>
             {/if}
             {#snippet lineageList(items: LineageItem[])}
@@ -276,19 +276,19 @@
                             {@render columnLink(item.id)}
                             <span class="grow"></span>
                             {#if item.transform}<span class="meta">{item.transform}</span>{/if}
-                            {#if item.verified === "confirmed"}<span class="ok">verified</span>{/if}
+                            {#if item.verified === 'confirmed'}<span class="ok">verified</span>{/if}
                         </li>
                     {/each}
                 </ul>
             {/snippet}
-            {#if viewer.direction !== "downstream"}
-                {@render section("Comes from", lineage.up.length)}
+            {#if viewer.direction !== 'downstream'}
+                {@render section('Comes from', lineage.up.length)}
                 {#if lineage.up.length}{@render lineageList(lineage.up)}{:else}<p class="note">
                         Nothing upstream.
                     </p>{/if}
             {/if}
-            {#if viewer.direction !== "upstream"}
-                {@render section("Feeds", lineage.down.length)}
+            {#if viewer.direction !== 'upstream'}
+                {@render section('Feeds', lineage.down.length)}
                 {#if lineage.down.length}{@render lineageList(lineage.down)}{:else}<p class="note">
                         Nothing downstream reads this column.
                     </p>{/if}
@@ -296,30 +296,30 @@
             {@const refs = [
                 ...new Set(
                     model
-                        .outs(column.id, "feeds")
-                        .filter((e) => attr(e, "role") === "reference")
-                        .map((e) => model.viewOf(e.target))
+                        .outs(column.id, 'feeds')
+                        .filter(e => attr(e, 'role') === 'reference')
+                        .map(e => model.viewOf(e.target))
                         .filter((v): v is string => v !== null),
                 ),
             ]}
             {#if refs.length}
-                {@render section("Joined, filtered or grouped on by", refs.length)}
+                {@render section('Joined, filtered or grouped on by', refs.length)}
                 <ul class="list">
                     {#each refs as id (id)}<li>{@render relationLink(id)}</li>{/each}
                 </ul>
             {/if}
-            {@render conditions(viewer.conditions[column.parent ?? ""] ?? [])}
+            {@render conditions(viewer.conditions[column.parent ?? ''] ?? [])}
             {@const tests = model
-                .ins(column.id, "tests")
-                .map((e) => model.node(e.source))
+                .ins(column.id, 'tests')
+                .map(e => model.node(e.source))
                 .filter((t): t is GraphNode => !!t)}
             {#if tests.length}
-                {@render section("Tests", tests.length)}
+                {@render section('Tests', tests.length)}
                 <ul class="list">
                     {#each tests as t (t.id)}<li><span class="grow">{t.name}</span></li>{/each}
                 </ul>
             {/if}
-            {@render section("Ask konstruct")}
+            {@render section('Ask Konstruct')}
             <div class="commands">
                 <Command text="konstruct explain {ref(column.id)}" />
                 <Command text="konstruct impact {ref(column.id)}" />
@@ -330,13 +330,13 @@
             {@const downs = relationsAround(relation.id, model.downAdj)}
             {@const tests = testsOf(relation)}
             <div class="facts">
-                {#each [[columns.length, "columns"], [ups.length, "upstream"], [downs.length, "downstream"], [tests.length, "tests"]] as const as [value, text] (text)}
+                {#each [[columns.length, 'columns'], [ups.length, 'upstream'], [downs.length, 'downstream'], [tests.length, 'tests']] as const as [value, text] (text)}
                     <div><b>{value}</b><span>{text}</span></div>
                 {/each}
             </div>
             {@render termsSection(relationTerms(relation))}
             {#if columns.length}
-                {@render section("Columns", columns.length)}
+                {@render section('Columns', columns.length)}
                 <table class="columns">
                     <tbody>
                         {#each columns as c (c.id)}
@@ -350,7 +350,7 @@
                                     >
                                     {#if c.description}<div class="note">{c.description}</div>{/if}
                                 </td>
-                                <td class="type">{c.data_type ? c.data_type.toLowerCase() : ""}</td>
+                                <td class="type">{c.data_type ? c.data_type.toLowerCase() : ''}</td>
                             </tr>
                         {/each}
                     </tbody>
@@ -358,7 +358,7 @@
             {/if}
             {@render conditions(viewer.conditions[relation.id] ?? [])}
             {#if ups.length}
-                {@render section("Upstream", ups.length)}
+                {@render section('Upstream', ups.length)}
                 <ul class="list">
                     {#each ups as id (id)}<li>
                             {@render relationLink(id)}<span class="meta">{model.node(id)?.kind}</span>
@@ -366,7 +366,7 @@
                 </ul>
             {/if}
             {#if downs.length}
-                {@render section("Downstream", downs.length)}
+                {@render section('Downstream', downs.length)}
                 <ul class="list">
                     {#each downs as id (id)}<li>
                             {@render relationLink(id)}<span class="meta">{model.node(id)?.kind}</span>
@@ -374,7 +374,7 @@
                 </ul>
             {/if}
             {#if tests.length}
-                {@render section("Tests", tests.length)}
+                {@render section('Tests', tests.length)}
                 <ul class="list">
                     {#each tests as [test, target], i (i)}
                         <li>
@@ -386,11 +386,11 @@
                 </ul>
             {/if}
             {@const runs = model
-                .outs(relation.id, "runs")
-                .map((e) => e.target)
-                .filter((id) => model.byId.has(id))}
+                .outs(relation.id, 'runs')
+                .map(e => e.target)
+                .filter(id => model.byId.has(id))}
             {#if runs.length}
-                {@render section("Runs", runs.length)}
+                {@render section('Runs', runs.length)}
                 <ul class="list">
                     {#each runs as id (id)}
                         <li>
@@ -403,32 +403,32 @@
                 </ul>
             {/if}
             {@const runBy = model
-                .ins(relation.id, "runs")
-                .map((e) => e.source)
-                .filter((id) => model.node(id)?.kind === "task")}
+                .ins(relation.id, 'runs')
+                .map(e => e.source)
+                .filter(id => model.node(id)?.kind === 'task')}
             {#if runBy.length}
-                {@render section("Run by", runBy.length)}
+                {@render section('Run by', runBy.length)}
                 <ul class="list">
                     {#each runBy as id (id)}<li>{@render relationLink(id)}</li>{/each}
                 </ul>
             {/if}
             {@const where = (
                 [
-                    ["File", relation.path],
-                    ["Line", attr(relation, "line")],
-                    ["SQL", attr(relation, "sql_path")],
-                    ["Sensors", attr(relation, "sensors")],
+                    ['File', relation.path],
+                    ['Line', attr(relation, 'line')],
+                    ['SQL', attr(relation, 'sql_path')],
+                    ['Sensors', attr(relation, 'sensors')],
                 ] as [string, unknown][]
             ).filter(([, v]) => v)}
             {#if where.length}
-                {@render section("Where")}
+                {@render section('Where')}
                 <ul class="list">
                     {#each where as [k, v] (k)}<li>
                             <span class="meta">{k}</span><span class="grow mono">{display(v)}</span>
                         </li>{/each}
                 </ul>
             {/if}
-            {@render section("Ask konstruct")}
+            {@render section('Ask Konstruct')}
             <div class="commands">
                 <Command text="konstruct impact {ref(relation.id)}" />
                 <Command text="konstruct describe {ref(relation.id)}" />

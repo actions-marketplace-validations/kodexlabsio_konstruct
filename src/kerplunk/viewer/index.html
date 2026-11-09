@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en-GB" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="kerplunk">
+<title>kerplunk</title>
+<style>__STYLE__</style>
+</head>
+<body>
+<a class="skip" href="#search">Skip to search</a>
+<aside id="sidebar" aria-label="Project">
+  <p class="kicker"><b>&#x276F;</b> kerplunk</p>
+  <p class="eyebrow">Lineage graph</p>
+  <h1 id="project">Project</h1>
+  <div id="stats"></div>
+  <p id="built"></p>
+  <div class="search">
+    <label for="search" class="eyebrow" hidden>Search</label>
+    <input id="search" type="search" placeholder="Search tables and columns" autocomplete="off" spellcheck="false" aria-controls="results">
+    <kbd aria-hidden="true">/</kbd>
+  </div>
+  <div id="match-count" aria-live="polite"></div>
+  <ul id="results" role="listbox" aria-label="Search results"></ul>
+  <div class="section-title"><span>Show</span></div>
+  <div id="filters"></div>
+  <details id="warnings" hidden><summary></summary><ul></ul></details>
+  <div id="legend" aria-label="Legend"></div>
+</aside>
+<main id="canvas" aria-label="Graph">
+  <svg id="texture" aria-hidden="true"></svg>
+  <svg id="graph" role="img" aria-label="Lineage graph">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z"></path></marker>
+      <marker id="arrow-hl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z"></path></marker>
+    </defs>
+    <g id="viewport"><g id="edges"></g><g id="nodes"></g></g>
+  </svg>
+  <div id="empty"></div>
+  <div id="toolbar">
+    <div class="group" role="group" aria-label="Direction">
+      <button type="button" data-direction="upstream" aria-pressed="false" title="Show what the selection comes from">Upstream</button>
+      <button type="button" data-direction="both" aria-pressed="true" title="Show both directions">Both</button>
+      <button type="button" data-direction="downstream" aria-pressed="false" title="Show what depends on the selection">Downstream</button>
+    </div>
+    <div class="group" role="group" aria-label="View">
+      <button type="button" id="isolate" aria-pressed="false" title="Show only the lineage of the selection (I)">Isolate</button>
+      <button type="button" id="columns" aria-pressed="false" title="Show every column (C)">Columns</button>
+    </div>
+    <div class="group" role="group" aria-label="Zoom">
+      <button type="button" class="icon" id="zoom-out" title="Zoom out (-)" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+      <button type="button" class="icon" id="zoom-in" title="Zoom in (+)" aria-label="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14M12 5v14"/></svg></button>
+      <button type="button" id="fit" title="Fit the graph to the window (F)">Fit</button>
+      <button type="button" class="icon" id="theme" title="Switch between dark and light" aria-label="Switch theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg></button>
+    </div>
+  </div>
+  <canvas id="minimap" width="440" height="280" aria-label="Overview; click to move there"></canvas>
+  <div id="hint"><kbd>/</kbd> search &nbsp; <kbd>F</kbd> fit &nbsp; <kbd>I</kbd> isolate &nbsp; <kbd>Esc</kbd> clear</div>
+</main>
+<aside id="panel" hidden aria-label="Details">
+  <header>
+    <div id="panel-head"></div>
+    <button id="close" type="button" aria-label="Close details" title="Close (Esc)">&#xD7;</button>
+  </header>
+  <div id="panel-body"></div>
+</aside>
+<script type="application/json" id="kerplunk-data">__KERPLUNK_DATA__</script>
+<script type="application/json" id="kerplunk-explain">__KERPLUNK_EXPLAIN__</script>
+<script>__SCRIPT__</script>
+</body>
+</html>

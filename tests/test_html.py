@@ -81,7 +81,7 @@ def test_embedded_data_cannot_break_out_of_its_script_tag(tmp_path: Path) -> Non
     assert "</script><script>alert" not in page
     assert "<b>more" not in page
     assert "\u2028" not in page
-    assert page.count("</script>") == 2
+    assert page.count("</script>") == 3
     data = json.loads(embedded_json(page))
     stg = next(n for n in data["nodes"] if n["id"] == "model.shop.stg_orders")
     assert stg["description"] == HOSTILE
@@ -92,9 +92,49 @@ def test_page_references_no_external_resources(tmp_path: Path) -> None:
     remainder = page.replace(SVG_NAMESPACE, "")
     assert "http://" not in remainder
     assert "https://" not in remainder
-    assert not re.search(r"\b(src|href)\s*=", remainder)
+    # In-page links only (the skip link), and fonts embedded as data URLs.
+    assert re.findall(r"\b(?:src|href)\s*=\s*\"([^\"]*)\"", remainder) == ["#search"]
     assert "@import" not in remainder
-    assert "url(" not in remainder.replace("url(#arrow)", "")
+    fonts = re.findall(r"url\(data:font/woff2;base64,[A-Za-z0-9+/=]+\)", remainder)
+    assert len(fonts) == 4
+    for font in fonts:
+        remainder = remainder.replace(font, "")
+    assert "url(" not in re.sub(r"url\(#arrow(-hl)?\)", "", remainder)
+
+
+def test_column_formulas_and_conditions_are_embedded(tmp_path: Path) -> None:
+    graph = sample_graph()
+    stg = graph.nodes["model.shop.stg_orders"]
+    stg.attrs["conditions"] = ["WHERE: db.raw.orders.status <> 'void'"]
+    graph.nodes[column_id(stg.id, "amount")].attrs["expression"] = "db.raw.orders.amount / 100"
+    graph.nodes[column_id("model.shop.orders", "amount")].attrs["expression"] = (
+        "SUM(db.main.stg_orders.amount)"
+    )
+    page = write_html(graph, tmp_path / "graph.html").read_text(encoding="utf-8")
+    match = re.search(r'<script type="application/json" id="kerplunk-explain">(.*?)</script>', page, re.S)
+    assert match is not None
+    data = json.loads(match.group(1))
+    assert data["conditions"] == {stg.id: ["WHERE: orders.status <> 'void'"]}
+    assert data["columns"][column_id("model.shop.orders", "amount")] == {
+        "e": "SUM(stg_orders.amount)",
+        "c": "SUM(orders.amount / 100)",
+        "s": ["orders.amount"],
+    }
+
+
+def test_the_viewer_assets_follow_the_design_rules() -> None:
+    """DESIGN.md: Manrope and JetBrains Mono, no text below 14px, no em dashes in copy."""
+    from kerplunk.html import template
+
+    page = template()
+    assert 'font-family: "Manrope"' in page and 'font-family: "JetBrains Mono"' in page
+    sizes = [
+        float(size)
+        for size in re.findall(r"(?<![\w-])(\d+(?:\.\d+)?)px (?:var\(--font|Manrope|'JetBrains)", page)
+    ]
+    sizes += [float(size) for size in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", page)]
+    assert sizes and min(sizes) >= 13.5
+    assert "\u2014" not in page and "\u2013" not in page
 
 
 def test_inline_script_is_valid_javascript(tmp_path: Path) -> None:

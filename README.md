@@ -7,14 +7,20 @@
 <a href="https://kodexlabs.io/" target="_blank">Kodex Labs</a> Ltd.
 </p>
 
-kerplunk turns a data stack into a graph that coding agents can query: dbt models, sources, seeds, tests and exposures; warehouse and Iceberg tables with their columns; Airflow DAGs and tasks; and column-level lineage parsed from the SQL that connects them. One command builds it locally. Agents then ask what a change will break, where a value comes from, or how two tables connect, from the command line, a `/kerplunk` skill in Claude Code and Cursor, or an MCP server.
+**Column-level lineage for dbt, SQL, Airflow and Dagster: explained as formulas, checked against the data, and reviewed on every pull request.**
 
-Two things set it apart from other lineage tools:
+kerplunk reads a data repository and its warehouse and builds a graph of every table, column, model, task, test and dashboard, with column-level lineage parsed from the SQL that connects them. It runs locally in one command, with no server and no account, and answers from the command line, a Python API, an MCP server and `/kerplunk` skill for coding agents, a GitHub Action, and a single offline HTML page.
 
-- **The lineage is tested against the data.** `kerplunk verify` perturbs each input column of each model (shifting, nulling and shuffling it with a fixed seed), reruns the SQL on a scratch copy and records which outputs actually change. On dbt Labs' jaffle-shop, every one of the 87 claimed column edges is confirmed, and every observed influence was predicted. See [How Much to Trust the Lineage](#how-much-to-trust-the-lineage).
-- **It reviews changes before they merge.** `kerplunk diff` compares a branch with main column by column, ignoring formatting and renamed CTEs, and names the downstream models that a removed column will break. It can post the result as a pull request comment and fail the check.
+What it does that lineage tools usually leave out:
 
-![kerplunk impact analysis on the jaffle_shop example](docs/demo-cli.gif)
+- **It shows how a column is calculated.** `kerplunk explain` composes a column's SQL through every model upstream, so `customer_ltv.lifetime_value` reads as `SUM(raw_payments.amount / 100)`, with the joins and filters of each step listed beside it. A test evaluates composed formulas on the data and checks they give the model's values row for row. [Explaining a Column](#explaining-a-column)
+- **It checks its lineage against the data.** `kerplunk verify` perturbs each input column, reruns each model and records which outputs change. On dbt Labs' jaffle-shop all 87 claimed column edges are confirmed, and nothing changed that the graph did not predict. [How Much to Trust the Lineage](#how-much-to-trust-the-lineage)
+- **It reviews pull requests column by column.** `uses: kodexlabsio/kerplunk@v0` comments with what a change does to each column, ignoring formatting and renamed CTEs, and fails the check when a removed column is still read downstream. It also prints a `dbt build --select` for only what the change affects. [Reviewing Changes](#reviewing-changes)
+- **One chain across tools.** A column computed in dbt, copied by an Airflow SQL task, written by a Dagster asset and shown on a dashboard is one lineage chain, through DuckDB, Postgres, Snowflake, BigQuery, Databricks and Iceberg.
+- **It handles large projects.** 2,000 models and 52,000 column edges build in 26 seconds and update in 4; queries answer in milliseconds. [Performance](#performance)
+- **It exports open formats.** OpenLineage events validated against the specification, Mermaid, Graphviz and CSV. [Exporting](#exporting)
+
+![graph.html showing the lineage of customer_ltv.lifetime_value: four columns across an Airflow SQL table, two dbt models and a seed, each verified, with the formula SUM(raw_payments.amount / 100)](docs/graph-html.png)
 
 ## Quick Start
 
@@ -32,7 +38,7 @@ uvx --from git+https://github.com/kodexlabsio/kerplunk kerplunk build
 
 For a warehouse extra, name it in the requirement, for example
 `uv tool install "kerplunk[snowflake] @ git+https://github.com/kodexlabsio/kerplunk"` (or `[bigquery]`, `[databricks]`, `[all]`).
-To pin a release, add its tag: `git+https://github.com/kodexlabsio/kerplunk@v0.5.0`. Each [release](https://github.com/kodexlabsio/kerplunk/releases) also has the wheel attached.
+To pin a release, add its tag: `git+https://github.com/kodexlabsio/kerplunk@v0.8.0`. Each [release](https://github.com/kodexlabsio/kerplunk/releases) also has the wheel attached.
 
 Then, in a repository with dbt models, SQL, DAGs or a warehouse:
 
@@ -44,6 +50,8 @@ kerplunk impact orders.amount   # everything downstream of a column
 kerplunk open                   # the interactive graph in a browser
 kerplunk install                # adds the /kerplunk skill to Claude Code and Cursor
 ```
+
+![kerplunk impact analysis on the jaffle_shop example](docs/demo-cli.gif)
 
 To try it on the bundled example (jaffle_shop on DuckDB, with an Airflow DAG), from a clone of this repository:
 
@@ -154,7 +162,9 @@ Results are dataclasses (`Walk`, `PathResult`, `SearchResult`, `Description`, `L
 | `precedes` | task to task | Airflow ordering, Dagster op and asset ordering, and sensors that start one job after another |
 | `tests` | test to relation or column | What a dbt test checks |
 
-![graph.html showing the lineage of customer_ltv.lifetime_value: four columns across an Airflow SQL table, two dbt models and a seed, each verified, with the formula SUM(raw_payments.amount / 100)](docs/graph-html.png)
+With **Columns** on, graph.html is a column-level map of the whole project:
+
+![graph.html with every table expanded to its columns and column lineage drawn between them](docs/graph-columns.png)
 
 ## Exporting
 

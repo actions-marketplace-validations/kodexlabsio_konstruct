@@ -1,0 +1,43 @@
+name: Bug report
+description: Wrong lineage, a misread DAG or model, or a command that fails.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. A small reproducible case is the most useful thing you can give. Please rename
+        anything confidential before pasting. For a security problem, see SECURITY.md instead.
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: The smallest SQL, dbt model, DAG or Dagster file that shows the problem.
+      render: sql
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What kerplunk said
+      description: The command you ran and its output (trace, explain, diff, or the warning in REPORT.md).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What it should have said
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: kerplunk version
+      description: Output of `kerplunk --version`.
+    validations:
+      required: true
+  - type: input
+    id: dialect
+    attributes:
+      label: Dialect and dbt adapter
+      placeholder: snowflake, dbt-snowflake 1.10

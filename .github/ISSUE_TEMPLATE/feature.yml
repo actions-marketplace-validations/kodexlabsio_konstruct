@@ -1,0 +1,21 @@
+name: Feature request
+description: A new input, command or output.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to find out or prevent, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you would like kerplunk to do. An example command and its output helps.
+  - type: textarea
+    id: context
+    attributes:
+      label: Your stack
+      description: Orchestrator, warehouse, dbt version and roughly how many models.

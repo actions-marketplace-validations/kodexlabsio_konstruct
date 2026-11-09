@@ -331,7 +331,7 @@ jobs:
 | `base` | the pull request's base branch | Commit to compare with |
 | `comment` | `true` | Post the review on the pull request |
 | `fail-on-breaking` | `true` | Fail the check on a breaking change |
-| `build-args` | `--no-warehouse` | Arguments for `kerplunk build` |
+| `build-args` | `--no-warehouse --no-dbt` | Arguments for `kerplunk build`. The default needs no credentials and never runs the pull request's dbt macros |
 | `extras` | none | kerplunk extras, such as `snowflake` |
 
 The outputs `breaking`, `summary`, `report` (markdown) and `json` let later steps act on the result. CI runs the action against a breaking change and a safe one on every commit. Pin a release (`@v0.7.0`) for a fixed version; `@v0` moves to each new 0.x release. [`docs/kerplunk-pull-request.yml`](docs/kerplunk-pull-request.yml) shows the same steps written out, for adding a `dbt parse` or other setup first.
@@ -496,7 +496,9 @@ uv run pytest --cov                             # everything, with branch covera
 | Integration | `test_warehouse`, `test_build`, `test_cloud_warehouses` | DuckDB, Postgres and Iceberg (SQL and REST catalogs) for real; Snowflake against fakesnow and BigQuery against its emulator; Databricks against a stub; builds of projects with and without dbt |
 | End to end | `test_build`, `test_cli`, `test_query`, `test_mcp` | The example built with real dbt, every CLI command, the Python API, and the MCP server in process and over stdio |
 | Golden files | `test_golden`, `tests/golden/` | The exact text of the CLI output and REPORT.md; regenerate with `KERPLUNK_UPDATE_GOLDEN=1` and review the diff |
-| Browser | `test_browser` | graph.html in Chromium: selection, column lineage, search, hostile text, a 400-relation graph |
+| Browser | `test_browser` | graph.html in Chromium: selection, column rows and edges, formulas, deep links, isolate, direction, filters, themes, search, hostile text, a 400-relation graph |
+| Formulas | `test_explain` | `explain` on dbt and Airflow SQL, and composed formulas evaluated on the data against the final model, row for row; the viewer's formula cache |
+| Export | `test_export` | OpenLineage events validated against the OpenLineage JSON schemas; Mermaid, DOT and CSV |
 | Scale | `test_scale` | A generated 300-model project: full build and `--update` times |
 | Real world | `test_realworld` | dbt Labs' jaffle-shop at a pinned commit (needs network; `KERPLUNK_REALWORLD=1`) |
 | Lineage against data | `test_verify` | `verify` confirms true lineage and catches removed edges, false edges and dropped filters; a differential property test runs generated queries on generated data and requires the static lineage to agree with execution |
@@ -523,14 +525,20 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/), che
 | Path | Contents |
 |------|----------|
 | `src/kerplunk/graph.py` | Graph model, name resolution, impact, trace and path |
-| `src/kerplunk/sql.py` | sqlglot column lineage |
-| `src/kerplunk/dbt.py`, `airflow.py`, `warehouse.py` | Inputs |
+| `src/kerplunk/sql.py` | sqlglot column lineage, canonical expressions and conditions |
+| `src/kerplunk/dbt.py`, `jinja.py`, `airflow.py`, `dagster.py`, `warehouse.py` | Inputs, and the sandboxed dbt renderer |
 | `src/kerplunk/config.py`, `build.py` | Configuration, discovery, the build and its cache |
-| `src/kerplunk/query.py`, `report.py`, `html.py` | Questions over the graph, REPORT.md and graph.html |
+| `src/kerplunk/query.py`, `explain.py`, `diff.py`, `verify.py` | Questions over the graph: impact and the rest, formulas, change review, lineage against data |
+| `src/kerplunk/report.py`, `html.py`, `viewer/`, `export.py` | REPORT.md, graph.html (its HTML, CSS, script and fonts) and the export formats |
 | `src/kerplunk/project.py` | The Python API |
 | `src/kerplunk/cli.py`, `console.py`, `status.py`, `mcp_server.py`, `skill.py` | Interfaces |
+| `action.yml` | The GitHub Action |
 | `examples/jaffle_shop` | dbt Labs' jaffle_shop_duckdb (Apache-2.0, see its NOTICE) with an Airflow DAG |
-| `.kodex/scripts` | Project scripts: example preparation, test services, commit rules, demo tapes |
+| `.kodex/scripts` | Project scripts: example preparation, test services, commit rules, benchmark, demo tapes |
+
+## Contributing and Security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report a problem or propose a change, and [SECURITY.md](SECURITY.md) for how to report a vulnerability and what kerplunk executes, reads and writes (it never imports DAG code, renders dbt Jinja in a sandbox and collects no telemetry).
 
 ## Licence
 

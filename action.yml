@@ -26,10 +26,11 @@ inputs:
     default: "true"
   build-args:
     description: >-
-      Arguments for `kerplunk build`. The default reads no warehouse, so no credentials are needed;
-      lineage then comes from dbt artefacts, kerplunk's own rendering of dbt models, and the SQL.
+      Arguments for `kerplunk build`. The default reads no warehouse and never runs dbt, so no
+      credentials are needed and a pull request's own macros never run; lineage then comes from
+      committed dbt artefacts, kerplunk's own sandboxed rendering of dbt models, and the SQL.
     required: false
-    default: "--no-warehouse"
+    default: "--no-warehouse --no-dbt"
   extras:
     description: kerplunk extras to install, for example `snowflake` or `bigquery,databricks`.
     required: false

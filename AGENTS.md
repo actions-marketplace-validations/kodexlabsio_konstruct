@@ -54,6 +54,11 @@ a change.
   in `tests/test_sql.py`). Changes to what Konstruct claims should hold under `konstruct verify`.
 - **The README and the docs say what a user would notice**: a new command, option, input,
   limitation or number. The detailed reference is in `docs/`; keep the README an overview.
+- **No peripheral information in the README or docs.** Describe what Konstruct does and how to use
+  it. Do not write how a feature was tested or what it has not been tested against (stubs,
+  emulators, "not yet run against a real ..."), when a fact was checked, notes about how the work
+  was done, or caveats that do not change what a reader does. Test details belong in the tests
+  and, for contributors, the test table on the development page.
 - **The name** is Konstruct in prose, page headings and UI, and `konstruct` where it is typed: the
   command, package, file names (`konstruct.toml`, `konstruct-out/`), URLs, environment variables
   (`KONSTRUCT_*`), the `--version` output and the `konstruct:` prefix on progress messages.

@@ -13,7 +13,6 @@
 
 ## Not Yet (v1)
 
-- Testing the Databricks connector against a real workspace. The tests are written (`tests/test_databricks_live.py`: metadata, struct fields, view lineage and system-table usage, in a scratch schema that is dropped afterwards) and a CI job runs them when the `KONSTRUCT_TEST_DATABRICKS_*` repository secrets are set; they have not yet run against a workspace.
 - Column-level lineage for dbt Python models and through UDFs.
 - `verify` against sampled remote warehouses (Snowflake, BigQuery, Databricks).
 - Incremental warehouse metadata (it is re-read on every build; it is fast for local warehouses but not for large remote ones).

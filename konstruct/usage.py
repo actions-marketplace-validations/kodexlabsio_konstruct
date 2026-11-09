@@ -5,7 +5,7 @@ queried. Usage is off by default; ``[usage] enabled = true`` in konstruct.toml t
 Snowflake, BigQuery and Databricks warehouse in the build. It reads metadata only, aggregated to a
 count of queries and distinct users per column over the last ``days`` days.
 
-Sources, as documented by each vendor (checked November 2026):
+Sources, as documented by each vendor:
 
 * **Snowflake**: ``SNOWFLAKE.ACCOUNT_USAGE.ACCESS_HISTORY``, Enterprise Edition or higher. Each
   query lists the objects it read with their columns. Konstruct counts ``DIRECT_OBJECTS_ACCESSED``
@@ -51,9 +51,9 @@ class UsageSettings:
     exclude_users: list[str] = field(default_factory=list)
     """Service accounts to leave out, such as the one dbt and the orchestrator run as."""
     objects: str = 'direct'
-    """Snowflake: count ``direct`` objects (as queried) or ``base`` objects (underlying tables)."""
+    """For Snowflake, count ``direct`` objects (as queried) or ``base`` objects (underlying tables)."""
     max_queries: int = 50_000
-    """BigQuery: at most this many distinct (query text, user) pairs are parsed."""
+    """For BigQuery, the most distinct (query text, user) pairs parsed."""
 
 
 @dataclass
@@ -176,6 +176,7 @@ def aggregate_queries(rows: Iterable[tuple[str, str | None, int]], parse: Parser
 
 
 def fetch(connector: Any, settings: UsageSettings, parse: Parser) -> list[ColumnUsage]:
+    """Usage counts per column from the query history of a Snowflake, BigQuery or Databricks connector; empty for any other connector."""
     if isinstance(connector, SnowflakeConnector):
         return snowflake_usage(connector, settings)
     if isinstance(connector, DatabricksConnector):

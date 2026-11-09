@@ -19,6 +19,9 @@ description: Update the Konstruct documentation (Sphinx with MyST Markdown in do
   uv run --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
   open docs/_build/html/index.html
   ```
+- **No peripheral information.** Only what Konstruct does and how to use it: no notes on how a
+  feature was tested or what it was not tested against, no dates facts were checked, no remarks
+  about the work itself.
 - **Style.** British English, neutral and concise, no emojis, no em or en dashes. Konstruct in
   prose, `konstruct` for anything typed. Every number states its source or the test behind it.
 - Pushing to main publishes the site through `.github/workflows/docs.yml`.

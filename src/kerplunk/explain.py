@@ -18,8 +18,12 @@ it rather than folded in.
 
 from __future__ import annotations
 
+import functools
+import hashlib
+import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
 import sqlglot
 from sqlglot import exp
@@ -143,7 +147,7 @@ class _Namer:
                     return exp.column(name, table=self.graph.label(relation), quoted=False)
             return node
 
-        return _unparen(tree.copy().transform(rename)).sql(dialect=self.dialect)
+        return _unparen(tree.transform(rename)).sql(dialect=self.dialect)
 
     def text(self, sql: str) -> str:
         tree = self.parse(sql)
@@ -179,7 +183,7 @@ def _unparen(tree: exp.Expr) -> exp.Expr:
                 return inner
         return node
 
-    result: exp.Expr = tree.transform(drop)
+    result: exp.Expr = tree.transform(drop, copy=False)
     return result
 
 
@@ -189,19 +193,37 @@ class _Composed:
     every column on the way had an expression."""
 
     tree: exp.Expr | None
+    """The composed formula, already with short names."""
     sources: frozenset[str]
     complete: bool
+    size: int = 0
+    """Approximate length of the composed formula as SQL, to keep substitution within budget."""
+    original: str | None = None
+    """The column's own expression with short names, before substitution."""
 
 
 class Explainer:
     """Explains columns of one graph, composing each column once however many ask for it."""
 
-    def __init__(self, graph: Graph) -> None:
+    def __init__(self, graph: Graph, max_composed: int = MAX_COMPOSED) -> None:
         self.graph = graph
+        self.max_composed = max_composed
         dialect = graph.meta.get("dialect")
         self.namer = _Namer(graph, dialect if isinstance(dialect, str) else None)
         self.memo: dict[str, _Composed] = {}
         self.active: set[str] = set()
+        self.short_memo: dict[str, str | None] = {}
+
+    def composed_text(self, node: Node) -> str | None:
+        """The composed formula of ``node`` with short names, rendered once per column."""
+        if node.id not in self.short_memo:
+            composed = self.compose(node)
+            self.short_memo[node.id] = (
+                _unparen(composed.tree.copy()).sql(dialect=self.namer.dialect)
+                if composed.tree is not None
+                else None
+            )
+        return self.short_memo[node.id]
 
     def compose(self, node: Node, depth: int = 0) -> _Composed:
         """``node``'s expression with every input column replaced by that column's own composed
@@ -217,11 +239,12 @@ class Explainer:
             leaf = _Composed(None, frozenset() if upstream else frozenset({node.id}), not upstream)
             self.memo[node.id] = leaf
             return leaf
-        tree = self.namer.parse(expression)
-        if tree is None:
+        parsed = self.namer.parse(expression)
+        if parsed is None:
             failed = _Composed(None, frozenset(), False)
             self.memo[node.id] = failed
             return failed
+        tree: exp.Expr = parsed
         self.active.add(node.id)
         by_name = {(u.parent or "", u.name.lower()): u for u in upstream}
         by_relation = {}
@@ -231,36 +254,43 @@ class Explainer:
                 by_relation[(owner.relation.lower(), u.name.lower())] = u
         sources: set[str] = set()
         complete = True
+        # Formulas roughly double at each join, so the budget is checked before substituting,
+        # not after: an input too large to inline stays a column reference.
+        size = len(expression)
 
         def substitute(item: exp.Expr) -> exp.Expr:
-            nonlocal complete
+            nonlocal complete, size
             if not isinstance(item, exp.Column):
                 return item
             found = self.namer.resolve(item)
             if found is None:
                 return item
             relation, name = found
+            # Whatever happens next, a column that stays in the formula gets its short name.
+            short = exp.column(name, table=graph.label(relation), quoted=False)
             target = (
                 by_name.get((relation.id, name.lower()))
                 or (by_relation.get((relation.relation.lower(), name.lower())) if relation.relation else None)
                 or graph.nodes.get(f"{relation.id}#{name}")
             )
             if target is None:
-                return item
+                return short
             inner = self.compose(target, depth + 1)
             sources.update(inner.sources)
             complete = complete and inner.complete
             if inner.tree is None:
-                return item
+                return short
+            if size + inner.size > self.max_composed:
+                complete = False
+                return short
+            size += inner.size
             if isinstance(inner.tree, (exp.Column, exp.Literal, exp.Func, exp.Paren)):
                 return inner.tree.copy()
             return exp.Paren(this=inner.tree.copy())
 
         composed = tree.transform(substitute)
-        if len(composed.sql()) > MAX_COMPOSED:
-            composed, complete = tree, False
         self.active.discard(node.id)
-        result = _Composed(composed, frozenset(sources), complete)
+        result = _Composed(composed, frozenset(sources), complete, size, self.namer.short(tree))
         self.memo[node.id] = result
         return result
 
@@ -307,35 +337,107 @@ class Explainer:
         if not isinstance(raw, str):
             return result
         composed = self.compose(column)
-        result.composed = self.namer.short(composed.tree) if composed.tree is not None else None
+        result.composed = self.composed_text(column)
         result.sources = sorted(self.graph.label(self.graph.nodes[s]) for s in composed.sources)
         result.complete = composed.complete
         result.steps = self.steps(column)
         return result
 
-    def summaries(self, limit: int = 50_000) -> dict[str, Any]:
+    def fingerprints(self) -> dict[str, str]:
+        """A hash per column of everything its summary depends on: its expression, its label and
+        the fingerprints of the columns it is derived from (a Merkle hash over the lineage), so a
+        cached summary is reused exactly when nothing upstream of the column changed."""
+        graph = self.graph
+        found: dict[str, str] = {}
+        for start in graph.nodes.values():
+            if start.kind != "column" or start.id in found:
+                continue
+            stack: list[tuple[Node, bool]] = [(start, False)]
+            on_stack = {start.id}
+            while stack:
+                node, expanded = stack.pop()
+                upstream = [graph.nodes[e.target] for e in graph.out_edges(node.id, "derived_from")]
+                if not expanded:
+                    stack.append((node, True))
+                    for other in upstream:
+                        if other.id not in found and other.id not in on_stack:
+                            on_stack.add(other.id)
+                            stack.append((other, False))
+                    continue
+                parts = [
+                    node.id,
+                    graph.label(node),
+                    str(node.attrs.get("expression", "")),
+                    *sorted(f"{u.id}={found.get(u.id, 'cycle')}" for u in upstream),
+                ]
+                found[node.id] = hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()
+                on_stack.discard(node.id)
+        return found
+
+    def summary(self, node: Node) -> dict[str, Any]:
+        composed = self.compose(node)
+        entry: dict[str, Any] = {"e": composed.original or self.namer.text(node.attrs["expression"])}
+        text = self.composed_text(node)
+        if text is not None and text != entry["e"]:
+            entry["c"] = text
+            entry["s"] = sorted(self.graph.label(self.graph.nodes[s]) for s in composed.sources)
+        if not composed.complete:
+            entry["p"] = 1
+        return entry
+
+    def summaries(self, limit: int = 50_000, cache: _Cache | None = None) -> dict[str, Any]:
         """Formulas for every column that has one, and conditions for every relation, compactly:
         ``{"columns": {id: {"e": expression, "c": composed, "s": sources, "p": partial}},
-        "conditions": {relation id: [condition, ...]}}``. Used by graph.html."""
+        "conditions": {relation id: [condition, ...]}}``. Used by graph.html.
+
+        With ``cache`` (the build cache), each column's summary is keyed by its fingerprint and
+        each relation's conditions by their text and the names in the graph, so an update only
+        recomputes what changed."""
         columns: dict[str, dict[str, Any]] = {}
         conditions: dict[str, list[str]] = {}
+        dialect = self.namer.dialect
+        prints = self.fingerprints() if cache is not None else {}
+        names = (
+            hashlib.sha256(
+                "\x00".join(
+                    sorted(
+                        f"{n.relation}={self.graph.label(n)}" for n in self.graph.nodes.values() if n.relation
+                    )
+                ).encode("utf-8")
+            ).hexdigest()
+            if cache is not None
+            else ""
+        )
         for node in self.graph.nodes.values():
             if node.kind == "column" and isinstance(node.attrs.get("expression"), str):
                 if len(columns) >= limit:
                     continue
-                composed = self.compose(node)
-                entry: dict[str, Any] = {"e": self.namer.text(node.attrs["expression"])}
-                if composed.tree is not None:
-                    text = self.namer.short(composed.tree)
-                    if text != entry["e"]:
-                        entry["c"] = text
-                        entry["s"] = sorted(self.graph.label(self.graph.nodes[s]) for s in composed.sources)
-                if not composed.complete:
-                    entry["p"] = 1
-                columns[node.id] = entry
+                if cache is None:
+                    columns[node.id] = self.summary(node)
+                else:
+                    key = _cache_key("explain", prints[node.id], self.max_composed, dialect)
+                    columns[node.id] = cache.get_or_compute(key, functools.partial(self.summary, node))
             elif node.attrs.get("conditions"):
-                conditions[node.id] = [self.namer.condition(c) for c in node.attrs["conditions"]]
+                raw = [str(c) for c in node.attrs["conditions"]]
+
+                def shorten(raw: list[str] = raw) -> list[str]:
+                    return [self.namer.condition(c) for c in raw]
+
+                if cache is None:
+                    conditions[node.id] = shorten()
+                else:
+                    conditions[node.id] = cache.get_or_compute(
+                        _cache_key("conditions", raw, names, dialect), shorten
+                    )
         return {"columns": columns, "conditions": conditions}
+
+
+def _cache_key(*parts: Any) -> str:
+    return hashlib.sha256(json.dumps(parts, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+class _Cache(Protocol):
+    def get_or_compute(self, key: str, compute: Callable[[], Any]) -> Any: ...
 
 
 def explain(graph: Graph, column: Node) -> Explanation:

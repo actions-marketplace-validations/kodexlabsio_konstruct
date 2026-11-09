@@ -145,3 +145,32 @@ def test_steps_list_each_column_on_the_way(tmp_path: Path) -> None:
     assert steps["lines.net"] == "(priced.price * priced.qty) * (1 - priced.discount)"
     assert steps["priced.price"] == "events.price_cents / 100.0"
     assert steps["events.qty"] is None
+
+
+def _viewer_formulas(project: Project) -> dict[str, dict[str, object]]:
+    import re
+
+    page = (project.out_dir / "graph.html").read_text()
+    match = re.search(r'<script type="application/json" id="kerplunk-explain">(.*?)</script>', page, re.S)
+    assert match is not None
+    return dict(json.loads(match.group(1))["columns"])
+
+
+def test_viewer_formulas_are_cached_and_recomputed_downstream_of_a_change(tmp_path: Path) -> None:
+    path = _chain_warehouse(tmp_path)
+    project = Project(tmp_path)
+    project.build()
+    amount = "table.w.mart.signed#amount"
+    before = _viewer_formulas(project)[amount]
+    assert "events.price_cents / 100.0" in str(before["c"])
+    again = project.build(update=True)
+    assert again.cache_misses == 0
+    assert _viewer_formulas(project)[amount] == before
+    # Change a view two steps upstream: the formula of every column below it must follow.
+    con = duckdb.connect(str(path))
+    con.execute(CHAIN[1].replace("create view", "create or replace view").replace("100.0", "1000.0"))
+    con.close()
+    project.build(update=True)
+    after = _viewer_formulas(project)
+    assert "events.price_cents / 1000.0" in str(after[amount]["c"])
+    assert after["table.w.mart.priced#qty"] == _viewer_formulas(project)["table.w.mart.priced#qty"]

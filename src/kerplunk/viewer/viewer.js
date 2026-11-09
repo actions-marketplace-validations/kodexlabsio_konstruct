@@ -1137,7 +1137,7 @@
       if (info.c && info.c !== info.e) {
         body.append(section("In terms of sources"));
         body.append(formula(info.c));
-        if (info.s && info.s.length) body.append(el("p", "note", "From " + info.s.join(", ") + (info.p ? " (partial: some steps have no recorded expression)" : "")));
+        if (info.s && info.s.length) body.append(el("p", "note", "From " + info.s.join(", ") + (info.p ? ". Partial: some steps are not inlined, because they have no recorded expression or the formula would grow too long; kerplunk explain shows each step." : "")));
       }
     } else {
       body.append(section("Formula"));

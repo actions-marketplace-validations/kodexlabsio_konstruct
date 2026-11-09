@@ -53,20 +53,33 @@ class Cache:
         blob = json.dumps(parts, sort_keys=True, default=str).encode("utf-8")
         return hashlib.sha256(blob).hexdigest()
 
-    def get_or_compute(self, key: str, compute: Callable[[], Any]) -> Any:
+    def get_or_compute(self, key: str, compute: Callable[[], Any], *, count: bool = True) -> Any:
         if key in self.entries:
-            self.hits += 1
+            self.hits += count
             value = self.entries[key]
         else:
-            self.misses += 1
+            self.misses += count
             value = compute()
         self.used[key] = value
         return value
+
+    def quiet(self) -> _QuietCache:
+        """The same cache for derived outputs (the viewer's formulas), which are not counted
+        among the analyses a build reports reusing."""
+        return _QuietCache(self)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"version": CACHE_VERSION, "kerplunk": __version__, "entries": self.used}
         self.path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+
+
+@dataclass
+class _QuietCache:
+    cache: Cache
+
+    def get_or_compute(self, key: str, compute: Callable[[], Any]) -> Any:
+        return self.cache.get_or_compute(key, compute, count=False)
 
 
 @dataclass
@@ -1064,7 +1077,7 @@ def build(config: Config, *, update: bool = False) -> BuildResult:
     outputs = [
         graph_path,
         write_report(graph, config.out_dir / "REPORT.md"),
-        write_html(graph, config.out_dir / "graph.html"),
+        write_html(graph, config.out_dir / "graph.html", cache=builder.cache.quiet()),
     ]
     builder.cache.save()
     return BuildResult(

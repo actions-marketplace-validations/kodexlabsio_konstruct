@@ -26,6 +26,8 @@ _JSON_ESCAPES = str.maketrans(
     {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026", "\u2028": "\\u2028", "\u2029": "\\u2029"}
 )
 
+VIEWER_FORMULA_LIMIT = 800
+
 _FONTS = (
     ("Manrope", 500, "manrope-latin-500-normal.woff2"),
     ("Manrope", 700, "manrope-latin-700-normal.woff2"),
@@ -62,21 +64,24 @@ def _embed_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).translate(_JSON_ESCAPES)
 
 
-def explanations(graph: Graph) -> dict[str, Any]:
-    """Column formulas and relation conditions for the viewer, or empty if they cannot be made."""
+def explanations(graph: Graph, cache: Any = None) -> dict[str, Any]:
+    """Column formulas and relation conditions for the viewer, or empty if they cannot be made.
+    ``cache`` is the build cache, so an update recomputes only the formulas that changed."""
     from kerplunk.explain import Explainer
 
     try:
-        return Explainer(graph).summaries()
+        # A formula longer than this is not readable at a glance; the panel points to
+        # `kerplunk explain` for the full composition.
+        return Explainer(graph, max_composed=VIEWER_FORMULA_LIMIT).summaries(cache=cache)
     except RecursionError:
         return {}
 
 
-def write_html(graph: Graph, path: Path) -> Path:
+def write_html(graph: Graph, path: Path, cache: Any = None) -> Path:
     """Write the interactive viewer for ``graph`` to ``path`` and return ``path``."""
     page = (
         template()
-        .replace(_EXPLAIN_PLACEHOLDER, _embed_json(explanations(graph)), 1)
+        .replace(_EXPLAIN_PLACEHOLDER, _embed_json(explanations(graph, cache)), 1)
         .replace(_DATA_PLACEHOLDER, _embed_json(graph.to_dict()), 1)
     )
     path.parent.mkdir(parents=True, exist_ok=True)

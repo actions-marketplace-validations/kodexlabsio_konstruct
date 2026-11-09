@@ -295,7 +295,10 @@ def _column_lineage(
         result.errors.append("column lineage failed: not a query")
         return
 
-    nodes = lineage(None, qualified, schema=schema, dialect=dialect, scope=scope, copy=False)
+    # trim_selects only tidies node labels, at the cost of copying the query for every node.
+    nodes = lineage(
+        None, qualified, schema=schema, dialect=dialect, scope=scope, copy=False, trim_selects=False
+    )
     if out_names is not None and len(out_names) != len(nodes):
         result.errors.append("INSERT column list does not match the SELECT list")
         out_names = None

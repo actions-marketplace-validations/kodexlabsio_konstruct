@@ -17,9 +17,10 @@ MODELS = 300
 COLUMNS = 15
 
 
-def make_project(root: Path) -> None:
-    """A dbt project of MODELS models in layers (each joins two earlier models), its manifest and
-    catalog, and Airflow DAGs that run it in groups."""
+def make_project(root: Path, models: int = MODELS, columns_per_model: int = COLUMNS) -> None:
+    """A dbt project of ``models`` models in layers (each joins two earlier models through CTEs),
+    its manifest and catalog, and Airflow DAGs that run it in groups of 50. Also used by
+    .kodex/scripts/benchmark.py."""
     (root / "models").mkdir(parents=True)
     (root / "dbt_project.yml").write_text("name: big\nprofile: big\n")
     nodes: dict[str, Any] = {}
@@ -28,10 +29,10 @@ def make_project(root: Path) -> None:
     def relation(name: str) -> str:
         return f'"wh"."analytics"."{name}"'
 
-    for index in range(MODELS):
+    for index in range(models):
         name = f"m{index:03}"
         unique_id = f"model.big.{name}"
-        columns = [f"c{j:02}" for j in range(COLUMNS)]
+        columns = [f"c{j:02}" for j in range(columns_per_model)]
         if index < 10:
             sql = f"select {', '.join(columns)} from {relation('raw_' + name)}"
             depends: list[str] = []
@@ -83,7 +84,7 @@ def make_project(root: Path) -> None:
     (target / "catalog.json").write_text(json.dumps({"nodes": catalog, "sources": {}}))
     dags = root / "dags"
     dags.mkdir()
-    for group in range(MODELS // 50):
+    for group in range(max(1, models // 50)):
         (dags / f"group{group}.py").write_text(
             "from airflow.sdk import DAG\n"
             "from airflow.providers.standard.operators.bash import BashOperator\n"

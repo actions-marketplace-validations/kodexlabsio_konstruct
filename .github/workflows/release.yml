@@ -1,14 +1,19 @@
 name: Create Release
 
-# Runs after Build and Test passes on a push to main, like the Kodex Labs website's release
-# workflow, but with semantic versions. commitizen reads the Conventional Commits since the last
-# tag. While the version is 0.x, features and fixes give a patch release and only a breaking
-# change (`feat!:` or a BREAKING CHANGE footer) gives the next minor, so the minor version means
-# something; from 1.0, fix gives a patch, feat a minor and breaking the major. It updates
-# pyproject.toml, the package's __init__.py, uv.lock and
-# CHANGELOG.md, commits "chore(release): Release X.Y.Z", tags vX.Y.Z and publishes a GitHub
-# release with the wheel and sdist. Pushes with nothing releasable (docs, ci, test, chore only)
-# make no release. It can also be run by hand to force an increment.
+# Runs after Build and Test passes on a push to main. main is protected, so nothing here pushes to
+# it: a release is a tag on the tested commit, or on a commit above it, and a GitHub release.
+#
+# - When the tested commit carries a version with no tag (a pull request ran
+#   .kodex/scripts/prepare_release.py), that commit is tagged and released.
+# - Otherwise, when main has releasable commits since the last tag (a Dependabot fix, or a pull
+#   request merged without preparing a release), the script writes the next version and changelog
+#   section on a detached commit above main, and that commit is tagged and released.
+# - A release left half done (its tag pushed but no GitHub release) is finished first.
+#
+# While the version is 0.x a release is a patch unless a change is marked breaking, which gives
+# the next minor. Any version outside 0.x is refused: moving to 1.0 is the owner's decision, made
+# by changing this workflow. Each release moves the v0 tag that action users pin and publishes the
+# changelog section, the wheel and the sdist.
 #
 # Publishing to PyPI is a separate job that stays off until the PUBLISH_TO_PYPI repository
 # variable is 'true' and a 'pypi' environment with trusted publishing exists.
@@ -18,12 +23,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-    inputs:
-      increment:
-        description: Version increment (auto reads the commits)
-        type: choice
-        default: auto
-        options: [auto, PATCH, MINOR, MAJOR]
 
 permissions:
   contents: write
@@ -43,8 +42,8 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
-      released: ${{ steps.bump.outputs.released }}
-      tag: ${{ steps.bump.outputs.tag }}
+      released: ${{ steps.plan.outputs.released }}
+      tag: ${{ steps.plan.outputs.tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -67,92 +66,40 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install dependencies
+      - name: Work out what to release
+        id: plan
         if: steps.current.outputs.stale != 'true'
-        run: uv sync
-
-      - name: Bump the version and changelog
-        id: bump
-        if: steps.current.outputs.stale != 'true'
-        env:
-          INCREMENT: ${{ inputs.increment || 'auto' }}
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          if [ -z "$(git tag --list 'v*')" ]; then
-            # First release: the version already in pyproject.toml, with every commit so far.
-            version="$(uv run cz version --project)"
-            uv run cz changelog --unreleased-version "v${version}"
-            git add CHANGELOG.md
-            git commit -m "chore(release): Release ${version}"
-            git tag "v${version}"
-          else
-            args=(--yes)
-            if [ "$INCREMENT" = "auto" ] && [ "$(uv run cz version --project | cut -d. -f1)" = "0" ]; then
-              # commitizen decides whether anything since the last tag calls for a release; the
-              # size is fixed here: a patch, unless a commit is marked breaking.
-              last="$(git describe --tags --abbrev=0 --match 'v*')"
-              if git log "${last}..HEAD" --format='%s%n%b' | grep -qE '^[a-z]+(\([^)]*\))?!: |^BREAKING[ -]CHANGE: '; then
-                INCREMENT=MINOR
-              else
-                INCREMENT=PATCH
-              fi
-              if ! uv run cz bump --dry-run --yes > /dev/null 2>&1; then
-                INCREMENT=none
-              fi
-            fi
-            if [ "$INCREMENT" = "none" ]; then
-              echo "Nothing to release"
-              echo "released=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            if [ "$INCREMENT" != "auto" ]; then args+=(--increment "$INCREMENT"); fi
-            set +e
-            uv run cz bump "${args[@]}"
-            status=$?
-            set -e
-            # 3: no commits since the last tag; 21: none of them calls for a release.
-            if [ "$status" -eq 3 ] || [ "$status" -eq 21 ]; then
-              echo "Nothing to release"
-              echo "released=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            [ "$status" -eq 0 ] || exit "$status"
-          fi
-          tag="v$(uv run cz version --project)"
-          uv run cz changelog "$tag" --dry-run > RELEASE_NOTES.md
-          echo "released=true" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-
-      # commitizen's tags are lightweight, which --follow-tags would not push, so push it by name.
-      - name: Push the release commit and tag
-        if: steps.bump.outputs.released == 'true'
-        run: |
-          git push origin HEAD:main
-          git push origin "${{ steps.bump.outputs.tag }}"
-          # GitHub Action users pin the major version (`uses: kodexlabsio/konstruct@v0`): move it.
-          tag="${{ steps.bump.outputs.tag }}"
-          major="${tag%%.*}"
-          git tag -f "$major" "$tag"
-          git push -f origin "refs/tags/${major}"
-
-      - name: Build the sdist and wheel
-        if: steps.bump.outputs.released == 'true'
-        run: uv build
-
-      - name: Create the GitHub release
-        if: steps.bump.outputs.released == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .kodex/scripts/plan_release.sh
+
+      - name: Build the sdist and wheel
+        if: steps.plan.outputs.released == 'true'
+        run: uv build
+
+      # Tags are pushed only once the build has succeeded; only tags are pushed, never main.
+      - name: Tag and publish the release
+        if: steps.plan.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.plan.outputs.tag }}
         run: |
-          gh release create "${{ steps.bump.outputs.tag }}" dist/* \
-              --title "${{ steps.bump.outputs.tag }}" \
-              --notes-file RELEASE_NOTES.md \
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" > /dev/null; then
+            git tag "$TAG"
+          fi
+          git push origin "refs/tags/${TAG}"
+          gh release create "$TAG" dist/* \
+              --title "$TAG" \
+              --notes-file "$RUNNER_TEMP/RELEASE_NOTES.md" \
               --verify-tag \
               --latest
+          # GitHub Action users pin the major version (`uses: kodexlabsio/konstruct@v0`): move it.
+          major="${TAG%%.*}"
+          git tag -f "$major" "$TAG"
+          git push -f origin "refs/tags/${major}"
 
       - name: Upload the distributions
-        if: steps.bump.outputs.released == 'true'
+        if: steps.plan.outputs.released == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: dist

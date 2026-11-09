@@ -1,6 +1,6 @@
 # Changelog
 
-Every release, generated from the commit history by commitizen.
+Every release, written from the Conventional Commits that went into it.
 
 ```{include} ../CHANGELOG.md
 ```

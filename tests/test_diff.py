@@ -205,6 +205,13 @@ def test_a_removed_column_still_read_downstream_is_breaking(
     captured = capsys.readouterr()
     assert "BREAKS report, which still reads it" in captured.out
     assert "older than" not in captured.err
+    # For CI: the markdown on stdout and the result as JSON beside it, so a script can tell a
+    # breaking change (status 1, breaking listed) from a failure (status 1, no file).
+    report = repo / "diff.json"
+    args = ["-q", "diff", "-C", str(repo), "--base", "HEAD", "--format", "markdown", "--fail-on-breaking"]
+    assert main([*args, "--json-file", str(report)]) == 1
+    assert json.loads(report.read_text())["breaking"][0]["column"] == "total"
+    assert "**Breaking changes**" in capsys.readouterr().out
     # Fixing the consumer in the same change makes it safe.
     (repo / "sql" / "report.sql").write_text(BASE_REPORT.replace("total", "revenue"))
     assert Project(repo).diff(base="HEAD").breaking == []
@@ -244,6 +251,8 @@ def test_new_and_deleted_files_and_formats(repo: Path, capsys: pytest.CaptureFix
     for fmt in ("text", "markdown", "json"):
         assert main(["--no-color", "-q", "diff", "-C", str(repo), "--base", "HEAD", "--format", fmt]) == 0
     out = capsys.readouterr().out
+    assert main(["-q", "diff", "-C", str(repo), "--base", "HEAD", "--format", "selector"]) == 0
+    assert capsys.readouterr().out.strip() == Project(repo).diff(base="HEAD").selection.selector
     assert "### kerplunk:" in out
     assert json.loads(out[out.index("{") :])["counts"]["added"] == 1
 

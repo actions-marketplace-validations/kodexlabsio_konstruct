@@ -373,6 +373,10 @@ class Diff:
             "head": self.head,
             "summary": self.summary(),
             "counts": self.counts(),
+            "breaking": [
+                {"relation": label, "column": change.column, "breaks": change.breaks}
+                for label, change in self.breaking
+            ],
             "files": self.files,
             "relations": [relation(r) for r in self.relations if r.changed or r.note],
             "dags": [d.__dict__ for d in self.dags],
@@ -494,7 +498,7 @@ class Diff:
         if self.selection.modified_plus:
             lines += [f"**dbt:** {self.selection.summary()}", "", f"```\n{self.selection.command()}\n```", ""]
         lines.append(
-            f"<sub>{c['files']} files compared between `{self.base}` and `{self.head}` by kerplunk. "
+            f"<sub>{c['files']} file{'s' if c['files'] != 1 else ''} compared between `{self.base}` and `{self.head}` by kerplunk. "
             "Expressions are compared with CTEs and aliases inlined, so formatting and renames do not count.</sub>"
         )
         return "\n".join(lines) + "\n"

@@ -295,6 +295,8 @@ def cmd_diff(args: argparse.Namespace, console: Console) -> int:
     except DiffError as error:
         console.error(str(error))
         return 1
+    if args.json_file:
+        Path(args.json_file).write_text(json.dumps(result.to_dict(), indent=2) + "\n", encoding="utf-8")
     if args.format == "json":
         console.print(json.dumps(result.to_dict(), indent=2))
     elif args.format == "markdown":
@@ -497,10 +499,11 @@ def parser() -> argparse.ArgumentParser:
     diff.add_argument("--head", metavar="REF", help="commit to compare (default: the working tree)")
     diff.add_argument(
         "--format",
-        choices=["text", "markdown", "json"],
+        choices=["text", "markdown", "json", "selector"],
         default="text",
-        help="markdown suits a pull request comment",
+        help="markdown suits a pull request comment; selector prints only the dbt --select",
     )
+    diff.add_argument("--json-file", metavar="FILE", help="also write the result as JSON to FILE (for CI)")
     diff.add_argument(
         "--fail-on-breaking", action="store_true", help="exit with status 1 on a breaking change"
     )

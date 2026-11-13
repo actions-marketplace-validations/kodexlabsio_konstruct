@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from importlib import resources
 from typing import Any, Literal
 
-import yaml
-
 from konstruct import __version__
 
 Target = Literal['install', 'plugin', 'prompt']
@@ -136,8 +134,11 @@ class Document:
 
 def split(document: str) -> Document:
     """Separate a skill's or command's frontmatter from its body."""
+    # Here, not at the top: the CLI imports this module for every command, to name the agents.
+    from konstruct.core import yamlio
+
     _, block, body = document.split('---\n', 2)
-    meta = yaml.safe_load(block)
+    meta = yamlio.load(block)
     if not isinstance(meta, dict):
         raise ValueError('frontmatter is not a mapping')
     return Document(meta, body.lstrip('\n'))

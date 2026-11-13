@@ -2,14 +2,16 @@
 
 An agent or an analyst writes SQL to answer a business question; this module reads it, without
 running it, and says where it disagrees with the project. Every finding must be one an analyst
-would accept: an agent told that its correct SQL is wrong will break it, so a check that cannot
-tell stays silent.
+would accept: an agent told that its correct SQL is wrong will break it. A check never claims a
+filter is applied unless it can show it is, and when it cannot show it, it reports the filter
+missing, and says so when what it cannot show is the graph's (one an earlier Konstruct built).
 
 The query is qualified once and read scope by scope. Each output column that aggregates is a
 *measure*: the aggregate that produces it (followed through CTEs, subqueries, wrappers such as
 ``ROUND`` or ``COALESCE(..., 0)``, each branch of a UNION and each scalar subquery), the rows it
 reads (the WHERE, ON and HAVING clauses on the way, the condition of a ``FILTER`` or ``CASE`` inside
-the aggregate, and the filters on the routes of the columns it reads in the graph) and its formula
+the aggregate, and the filters that hold on every source row of the columns it reads in the graph,
+as :meth:`Checker.held_filters` gives them) and its formula
 composed down to source columns, as :mod:`konstruct.analysis.conflicts` composes the graph's. The
 checks:
 
@@ -67,6 +69,7 @@ from konstruct.core.sql import (
     normal_condition,
     split_conjuncts,
     table_key,
+    without_readings,
 )
 from konstruct.inputs.usage import HistoryQuery, QueryHistory
 from konstruct.semantics.ontology import Relationship, derivation, entity_name, id_like, name_matches
@@ -424,9 +427,14 @@ class Checker:
         self._entities: dict[str, str | None] = {}
         self._virtual = 0
         self._conjuncts: dict[str, list[_Condition]] = {}
+        self._held: dict[str, dict[str, _Condition]] = {}
+        self._made: dict[str, bool] = {}
+        self._aligned: dict[tuple[str, str], bool] = {}
+        self._ended: dict[str, frozenset[str]] = {}
+        self._untold: dict[str, bool] = {}
         self._forms: dict[str, _Form] = {}
         self._keys: dict[str, list[frozenset[str]]] = {}
-        self._names: dict[str, list[Node]] | None = None
+        self._names: dict[str, list[tuple[int, Node]]] | None = None
         self._named: dict[str, list[Node]] = {}
         self._additive: set[str] | None = None
         measures = {m.name for m in self.ontology.measures if not m.expression}
@@ -519,13 +527,28 @@ class Checker:
         found = self._named.get(output)
         if found is None:
             if self._names is None:
+                # By name first: only the columns of a name an output has are asked for their
+                # edges, which the graph makes as they are asked for.
                 self._names = defaultdict(list)
-                for node in self.graph.nodes.values():
+                for position, node in enumerate(self.graph.nodes.values()):
                     if node.kind == 'column' and isinstance(node.attrs.get('expression'), str):
-                        edges = self.graph.out_edges(node.id, 'derived_from')
-                        if edges and any(e.attrs.get('transform') != 'direct' for e in edges):
-                            self._names[node.name.lower()].append(node)
-            found = [n for name, nodes in self._names.items() if name_matches(output, name) for n in nodes]
+                        self._names[node.name.lower()].append((position, node))
+            named = sorted(
+                (item for name, items in self._names.items() if name_matches(output, name) for item in items),
+                key=lambda item: item[0],
+            )
+            computed: list[Node] = []
+            for _, node in named:
+                edges = self.graph.out_edges(node.id, 'derived_from')
+                if edges and any(e.attrs.get('transform') != 'direct' for e in edges):
+                    computed.append(node)
+                    if len(computed) > _MOST_NAMED:
+                        break
+            # Each name's columns together, the names in the order their first columns come.
+            by_name: dict[str, list[Node]] = {}
+            for node in computed:
+                by_name.setdefault(node.name.lower(), []).append(node)
+            found = [n for nodes in by_name.values() for n in nodes]
             self._named[output] = found = found if len(found) <= _MOST_NAMED else []
         return found
 
@@ -561,9 +584,14 @@ class Checker:
         """The output columns ``relation`` groups by, when it is built by one grouped query whose
         grouping columns all pass through. Grouping by a unique key of a source and other columns
         of that same source is grouping by the key."""
-        groups = [
-            str(c) for c in relation.attrs.get('conditions', []) or [] if str(c).startswith('GROUP BY: ')
-        ]
+        # Two readings of a relation grouped by the same key group it by that key.
+        groups = sorted(
+            {
+                'GROUP BY: ' + without_readings(str(c).removeprefix('GROUP BY: '), self.sqlglot)
+                for c in relation.attrs.get('conditions', []) or []
+                if str(c).startswith('GROUP BY: ')
+            }
+        )
         if len(groups) != 1:
             return None
         tree = self.parse(f'SELECT 1 GROUP BY {groups[0].removeprefix("GROUP BY: ")}')
@@ -606,7 +634,7 @@ class Checker:
     def column_at(self, parts: list[str]) -> Node | None:
         """The graph column a fully qualified name (relation key, then column) refers to."""
         for split in range(len(parts) - 1, 0, -1):
-            relation = self.graph.node_for_relation('.'.join(parts[:split]).lower())
+            relation = self.graph.node_for_reading('.'.join(parts[:split]).lower())
             if relation is not None:
                 return self.graph.column(relation.id, parts[split])
         return None
@@ -734,53 +762,200 @@ class Checker:
 
     def required(self, term: _Term) -> list[_Condition]:
         """The filters a term requires, each resolved against the project."""
-        found = []
-        relations = [p for c in term.bound if (p := self.graph.parent_of(c)) is not None]
-        for text in term.node.attrs.get('filters', []) or []:
-            tree = self.parse(str(text))
-            if tree is None:
-                continue
-
-            def resolve(column: exp.Column) -> Node | None:
-                if column.table:
-                    matches = self.graph.resolve('.'.join(p.name for p in column.parts))
-                    return next((m for m in matches if m.kind == 'column'), None)
-                return next(
-                    (c for r in relations if (c := self.graph.column(r.id, column.name)) is not None), None
-                )
-
-            for part in split_conjuncts(tree, between=True):
-                made = self.condition(part, resolve, 'WHERE', f'term {term.name!r} ({term.where})')
-                if made is not None:
-                    made.text = part.sql(dialect=self.sqlglot)
-                    found.append(made)
-        return found
-
-    def relation_conjuncts(self, relation: Node) -> list[_Condition]:
-        """The filters of a relation's conditions, worked out once per relation."""
-        found = self._conjuncts.get(relation.id)
-        if found is None:
-            where = self.graph.label(relation) + (f' ({relation.path})' if relation.path else '')
-            found = [
-                part
-                for condition in relation.attrs.get('conditions', []) or []
-                for part in self.conjuncts(str(condition), where)
-                if part.label in _FILTER_LABELS
-            ]
-            self._conjuncts[relation.id] = found
-        return found
-
-    def route_filters(self, column: Node) -> list[_Condition]:
-        """The filters on ``column``'s route back to source, with the relation that applies each: a
-        filter on one side of an outer join only where the route reads that side."""
-        route = self.route(column)
-        reads = {r.id for r in route}
         return [
-            part
-            for relation in route
-            for part in self.relation_conjuncts(relation)
-            if not part.limited or part.limited & reads
+            c for text in term.node.attrs.get('filters', []) or [] for c in self._required(term, str(text))
         ]
+
+    def _required(self, term: _Term, text: str) -> list[_Condition]:
+        """The conjuncts of one filter ``term`` requires, each resolved against the project."""
+        tree = self.parse(text)
+        if tree is None:
+            return []
+        relations = [p for c in term.bound if (p := self.graph.parent_of(c)) is not None]
+
+        def resolve(column: exp.Column) -> Node | None:
+            if column.table:
+                matches = self.graph.resolve('.'.join(p.name for p in column.parts))
+                return next((m for m in matches if m.kind == 'column'), None)
+            return next(
+                (c for r in relations if (c := self.graph.column(r.id, column.name)) is not None), None
+            )
+
+        found = []
+        for part in split_conjuncts(tree, between=True):
+            made = self.condition(part, resolve, 'WHERE', f'term {term.name!r} ({term.where})')
+            if made is not None:
+                made.text = part.sql(dialect=self.sqlglot)
+                found.append(made)
+        return found
+
+    def applied_on_route(self, name: str, column: Node) -> dict[str, str]:
+        """Of the filters the term ``name`` requires, those that hold on every source row
+        ``column``'s value is computed from (:meth:`held_filters`), each as the term writes it, with
+        the relations that apply it: a column that holds an aggregate over filtered rows needs no
+        filter on the rows of its own relation."""
+        term = next((t for t in self.terms if t.name == name), None)
+        if term is None:
+            return {}
+        held = self.held_filters(column)
+        route: dict[str, str] = {}
+        for condition in held:
+            route.setdefault(condition.key, condition.source or '')
+        found = {}
+        for text in term.node.attrs.get('filters', []) or []:
+            parts = self._required(term, str(text))
+            if parts and all(p.key in route for p in parts):
+                found[str(text)] = ', '.join(sorted({route[p.key] for p in parts}))
+        return found
+
+    def held_filters(self, column: Node) -> list[_Condition]:
+        """The filters that hold on every source row ``column``'s value is computed from, each with
+        the relation that applies it: those of its own relation on the queries it is computed
+        through (``row_conditions``: not one in a CTE beside it, above a window or an aggregate
+        it reads, on one branch of a union, or on another alias than the one it is read through),
+        unless a value upstream was aggregated or windowed (``aggregates_rows``) from rows they
+        never saw, and only where each column they filter comes from the same rows as the value's
+        inputs or from another table (:meth:`aligned`); and those that hold on every column it is
+        derived from. A relation whose columns do
+        not say which of its conditions hold on them (a graph an earlier Konstruct built) gives
+        none: nothing is taken as applied that is not shown."""
+        return list(self._holds(column.id, set()).values())
+
+    def _holds(self, column_id: str, walking: set[str]) -> dict[str, _Condition]:
+        found = self._held.get(column_id)
+        if found is not None:
+            return found
+        if column_id in walking:
+            return {}  # a cycle: claim nothing
+        node = self.graph.nodes.get(column_id)
+        if node is None:
+            return {}
+        held: dict[str, _Condition] = {}
+        relation = self.graph.parent_of(node)
+        conditions = relation.attrs.get('conditions') if relation is not None else None
+        positions = node.attrs.get('row_conditions')
+        upstream = sorted({e.target for e in self.graph.out_edges(column_id, 'derived_from')})
+        # A value another relation aggregated or windowed was made from rows its filters never saw.
+        made_above = any(self._aggregated(u, set()) for u in upstream)
+        if relation is not None and conditions and isinstance(positions, list) and not made_above:
+            reads = {r.id for r in self.route(node)}
+            inputs = [n for u in upstream if (n := self.graph.nodes.get(u)) is not None]
+            where = self.graph.label(relation) + (f' ({relation.path})' if relation.path else '')
+            for position in positions:
+                if isinstance(position, int) and 0 <= position < len(conditions):
+                    text = str(conditions[position])
+                    parts = self._conjuncts.get(f'{where}\0{text}')
+                    if parts is None:
+                        parts = self._conjuncts[f'{where}\0{text}'] = self.conjuncts(text, where)
+                    for part in parts:
+                        if (
+                            part.label in _FILTER_LABELS
+                            and (not part.limited or part.limited & reads)
+                            and all(self.aligned(c, u) for c in part.columns.values() for u in inputs)
+                        ):
+                            held.setdefault(part.key, part)
+        below = [self._holds(u, walking | {column_id}) for u in upstream]
+        if below:
+            shared = set(below[0]).intersection(*below[1:])
+            for key in sorted(shared):
+                held.setdefault(key, below[0][key])
+        self._held[column_id] = held
+        return held
+
+    def aligned(self, one: Node, other: Node) -> bool:
+        """Whether the values of two columns of the rows a query reads come from the same rows, or
+        from different tables, so that a filter on one holds on the rows of the other: not when
+        they may come from two readings of one table, such as a column a model copies from the
+        order before each order (``row_reading``)."""
+        if one.id == other.id:
+            return True
+        cached = self._aligned.get((one.id, other.id))
+        if cached is not None:
+            return cached
+        self._aligned[one.id, other.id] = False  # a cycle: claim nothing
+        found = False
+        if one.parent == other.parent:
+            below = [self._derived(one), self._derived(other)]
+            reading = one.attrs.get('row_reading')
+            if not below[0] and not below[1]:
+                found = True  # the columns of one row of a table SQL does not write
+            elif reading is not None and reading == other.attrs.get('row_reading'):
+                found = all(self.aligned(a, b) for a in below[0] for b in below[1])
+        found = found or not (self._ends(one) & self._ends(other))
+        self._aligned[one.id, other.id] = found
+        return found
+
+    def _derived(self, column: Node) -> list[Node]:
+        return [
+            n
+            for e in self.graph.out_edges(column.id, 'derived_from')
+            if (n := self.graph.nodes.get(e.target))
+        ]
+
+    def _ends(self, column: Node) -> frozenset[str]:
+        """The relations no SQL writes that the column's value is read from, at the end of its lineage."""
+        found = self._ended.get(column.id)
+        if found is not None:
+            return found
+        self._ended[column.id] = frozenset()  # a cycle
+        upstream = self._derived(column)
+        found = (
+            frozenset(r for u in upstream for r in self._ends(u))
+            if upstream
+            else frozenset({column.parent or column.id})
+        )
+        self._ended[column.id] = found
+        return found
+
+    def _aggregated(self, column_id: str, walking: set[str]) -> bool:
+        """Whether the value of the column aggregates rows or computes a window over them, in its own
+        relation's SQL or in that of a column it is derived from."""
+        return self._anywhere(
+            column_id, lambda node: node.attrs.get('aggregates_rows') is True, self._made, walking
+        )
+
+    def unshown(self, column_id: str) -> bool:
+        """Whether the graph does not say which filters hold on the column's rows, or on those of a
+        column it is derived from: their relation has conditions and none of its columns
+        ``row_conditions``, as in a graph an earlier Konstruct built."""
+
+        def untold(node: Node) -> bool:
+            relation = self.graph.parent_of(node)
+            if relation is None or not relation.attrs.get('conditions'):
+                return False
+            return not any(
+                isinstance(c.attrs.get('row_conditions'), list) for c in self.graph.columns_of(relation.id)
+            )
+
+        return self._anywhere(column_id, untold, self._untold, set())
+
+    def _anywhere(
+        self, column_id: str, test: Callable[[Node], bool], memo: dict[str, bool], walking: set[str]
+    ) -> bool:
+        """Whether ``test`` holds of the column or of a column upstream of it; true on a cycle."""
+        found = memo.get(column_id)
+        if found is not None:
+            return found
+        if column_id in walking:
+            return True
+        node = self.graph.nodes.get(column_id)
+        found = node is not None and (
+            test(node)
+            or any(
+                self._anywhere(e.target, test, memo, walking | {column_id})
+                for e in self.graph.out_edges(column_id, 'derived_from')
+            )
+        )
+        memo[column_id] = found
+        return found
+
+    def held_on(self, columns: list[Node]) -> list[_Condition]:
+        """The filters that hold on the rows of every one of ``columns``."""
+        found = [{p.key: p for p in self.held_filters(c)} for c in columns]
+        if not found:
+            return []
+        shared = set(found[0]).intersection(*found[1:])
+        return [found[0][k] for k in sorted(shared)]
 
     # Formulas
 
@@ -1553,13 +1728,11 @@ class _Run:
                 if relation is None:
                     continue
                 found.tables.append((scope, alias, relation))
+                # The filters that hold on every row the measure reads here: on each of its
+                # columns, or on every column of the relation for a count of its rows.
                 nodes = [n for name in names if (n := self.graph.column(relation.id, name)) is not None]
-                routed = [p for n in nodes for p in checker.route_filters(n)]
-                every = (
-                    [p for p in checker.relation_conjuncts(relation) if not p.limited] if not names else []
-                )
-                for routed_part in routed or every:
-                    found.conditions.setdefault(routed_part.key, routed_part)
+                for held_part in checker.held_on(nodes or self.graph.columns_of(relation.id)):
+                    found.conditions.setdefault(held_part.key, held_part)
             elif isinstance(source, Scope):
                 found.merge(self.inner_rows(source, names or None, depth + 1))
         return found
@@ -1750,7 +1923,7 @@ class _Run:
         present = site.rows.conditions
         verdicts = []
         for candidate, theirs in same:
-            conditions = {p.key: p for p in [*checker.route_filters(candidate), *theirs.conditions]}
+            conditions = {p.key: p for p in [*checker.held_filters(candidate), *theirs.conditions]}
             missing = [p for k, p in conditions.items() if k not in present]
             extra = [p for k, p in present.items() if p.written and k not in conditions]
             verdicts.append((len(missing) + len(extra), graph.label(candidate), candidate, missing, extra))
@@ -1776,7 +1949,7 @@ class _Run:
 
         # A column the definition filters is one it has a view on; any other the query leaves rows
         # out by may be the question's own choice, so that is at most a warning.
-        defined = columns([*checker.route_filters(candidate), *(checker.required(term) if term else [])])
+        defined = columns([*checker.held_filters(candidate), *(checker.required(term) if term else [])])
         for condition in excluded:
             tested = columns([condition])
             if tested & columns(missing):
@@ -1881,7 +2054,24 @@ class _Run:
             and p.label in _FILTER_LABELS
             and origins & {checker.origin(n.id) for n in p.columns.values()}
         ]
-        if held is None:
+        unshown = next(
+            (
+                r
+                for _, _, r in site.rows.tables
+                if any(checker.unshown(c.id) for c in self.graph.columns_of(r.id))
+            ),
+            None,
+        )
+        if held is None and unshown is not None:
+            # Not a defect the SQL is shown to have: the graph does not say what the relation filters.
+            message = (
+                f'{name!r} requires {condition.text}, and the graph cannot show whether '
+                f'{self.graph.label(unshown)} applies it: it was built by an earlier Konstruct, which did '
+                "not record which filters hold on each column's rows"
+            )
+            evidence = [f'required by {condition.source}'] if condition.source else []
+            severity = _capped(severity)
+        elif held is None:
             message = f'{name!r} requires {condition.text}, which the query does not apply'
             evidence = [f'required by {condition.source}'] if condition.source else []
         else:
@@ -1900,6 +2090,8 @@ class _Run:
             severity = 'info'
         rewrite = self.place(condition, site) if condition.label == 'WHERE' and not similar else None
         fix = f'Add {condition.text} to the query.' if rewrite is None else f'Apply the filter: {rewrite}.'
+        if held is None and unshown is not None:
+            fix = f'Run konstruct build again, then check the query again. If it still reports this: {fix}'
         if held is not None:
             fix += f' Or read {checker.describe(held)}, which applies it.'
         self.add(

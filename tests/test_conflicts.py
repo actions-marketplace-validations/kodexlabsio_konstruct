@@ -204,6 +204,40 @@ def test_command_files_and_formats(tmp_path: Path, capsys: pytest.CaptureFixture
     assert json.loads(capsys.readouterr().out)['conflicts'] == []
 
 
+def test_the_page_shows_the_conflicts_without_composing_its_formulas_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """graph.html and explain.json from the build of this graph keep their formulas, SQL and
+    ontology, and gain the conflicts; a page of another graph is made again in full."""
+    from konstruct.outputs import html
+
+    project = make_shop(tmp_path)
+    out = tmp_path / 'konstruct-out'
+    built = json.loads((out / 'explain.json').read_text())
+    assert built['conflicts'] == {}
+
+    def composed(*args: object, **kwargs: object) -> dict[str, object]:
+        raise AssertionError('the formulas were composed again')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(html, 'explanations', composed)
+        project.conflicts(write=True)
+    shown = json.loads((out / 'explain.json').read_text())
+    assert shown['conflicts']['conflicts'][0]['idea'] == 'revenue'
+    assert {k: v for k, v in shown.items() if k != 'conflicts'} == {
+        k: v for k, v in built.items() if k != 'conflicts'
+    }
+    page = (out / 'graph.html').read_text()
+    assert html._embedded(out / 'graph.html', html._embed_json(project.graph.to_dict())) == shown
+    assert page == html._page(html._embed_json(shown), html._embed_json(project.graph.to_dict()))
+
+    html.write_html(Graph(), out / 'graph.html')
+    project.conflicts(write=True)
+    again = html.viewer_data(project.graph, out)
+    assert json.loads((out / 'explain.json').read_text()) == json.loads(json.dumps(again))
+    assert html._embedded(out / 'graph.html', html._embed_json(project.graph.to_dict())) is not None
+
+
 NET_FINANCE = """\
 create table finance.revenue as
 select order_date, sum(amount) - sum(discount) as net_revenue
@@ -440,3 +474,28 @@ def test_each_conflict_lists_the_copies_of_its_own_idea(tmp_path: Path) -> None:
     # Only the pairs of one column, as the gate compares them, give the same.
     [revenue] = find_conflicts(graph, touching={'table.main.other#revenue'}).conflicts
     assert revenue.a.carried_into == ['copy.revenue']
+
+
+JOINED_ON_TRUE = (
+    'create table main.pairs as select a.id, b.amount from raw.orders a left join raw.orders b on true '
+    'left join raw.orders c on c.customer_id = b.customer_id'
+)
+
+
+def _joined_on_true(root: Path) -> Path:
+    """A project whose model joins a reading on an ON that does not name it, which the build lists
+    once more naming the reading."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / 'konstruct.toml').write_text('dialect = "duckdb"\n')
+    (root / 'pairs.sql').write_text(JOINED_ON_TRUE)
+    assert main(['build', str(root), '--no-warehouse', '-q']) == 0
+    return root
+
+
+def test_a_join_named_for_its_reading_is_one_join(tmp_path: Path) -> None:
+    from konstruct.analysis.conflicts import _Finder
+
+    graph = Project(_joined_on_true(tmp_path / 'project')).graph
+    _, joins = _Finder(graph).conditions(graph.nodes['table.main.pairs'])
+    assert len(joins) == 2, joins
+    assert not any('"orders#1" ON' in text for _, text, _ in joins)

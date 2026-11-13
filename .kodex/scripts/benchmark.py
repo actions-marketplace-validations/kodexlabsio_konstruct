@@ -6,6 +6,8 @@ models through CTEs, with a manifest, a catalog and Airflow DAGs. For each size 
 * a cold build (no cache), which parses every model and writes graph.json, REPORT.md and
   graph.html (including every column's composed formula);
 * --update with nothing changed, and --update after editing one model in the middle;
+* discovery: the time to find every input's files in the project, as a build does it, over one
+  walk of the repository;
 * the median time of an impact, a trace and an explain on the deepest model;
 * the median time to render a large impact as text (``str()``, as a pipe gets it);
 * the coding agent hook (`konstruct hook post-edit`) after an edit that changes nothing and after
@@ -31,16 +33,26 @@ over every pair, and of the gate's checks after an edit to one measure of one ta
 It also measures SQL over relations whose columns no warehouse or catalog lists: the median time
 to analyse a chain of 20, 40 and 80 CTEs, each a ``SELECT *`` of the one before with a filter,
 over a relation with unknown columns, selecting 20 of its columns at the end; and a cold build and
-the best of three ``--update`` builds of a project of 400 SQL files with no warehouse.
+the best of three ``--update`` builds of a project of 400 SQL files with no warehouse. It times
+statements that read one relation twice the same way, and both those and the chains also in CPU
+time, the least of 25 runs (10 for a chain), which other work on the machine does not inflate.
 
 It also measures start-up: the CPU time of ``konstruct --help``, of ``konstruct status`` and of
 ``konstruct impact`` on a column on the largest project, each in a fresh process, and in the same way ``konstruct search`` with and
 without ``--meaning``, which reads the saved vectors.bin.
 
+With ``--yaml``, it measures YAML alone: the time to read the schema files of a project of that
+many models (20 columns each, as the scale test builds them) with the core's reader
+(``konstruct.core.yamlio.load``), with PyYAML's pure Python safe loader, and with libyaml's
+(``CSafeLoader``), which is the fastest reader of YAML for Python besides the core. ``--old-yamlio
+PATH`` adds a module to time as well: ``konstruct/core/yamlio.py`` as an earlier commit has it
+(``git show d08c73d:konstruct/core/yamlio.py``), which read through PyYAML's pure Python loader.
+
 Usage:
     uv run .kodex/scripts/benchmark.py                  # 100, 500, 1000 and 2000 models
     uv run .kodex/scripts/benchmark.py 300 3000 --json results.json
     uv run .kodex/scripts/benchmark.py --tables 100 400  # conflicts and the gate alone
+    uv run .kodex/scripts/benchmark.py --yaml 2000       # the schema files of 2,000 models
 """
 
 from __future__ import annotations
@@ -58,6 +70,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import orjson
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -67,6 +81,7 @@ from konstruct.analysis.conflicts import find_conflicts  # noqa: E402
 from konstruct.analysis.gate import gate  # noqa: E402
 from konstruct.analysis.identity import Formulas  # noqa: E402
 from konstruct.analysis.query import search  # noqa: E402
+from konstruct.core import jsonio  # noqa: E402
 from konstruct.core.graph import Graph  # noqa: E402
 from konstruct.interfaces import hook  # noqa: E402
 from tests.test_gate import git  # noqa: E402
@@ -74,6 +89,7 @@ from tests.test_scale import give_entities, make_measures, make_project  # noqa:
 
 COLUMNS = 20
 REPEAT = 5
+CPU_REPEAT = 25
 """Runs of each query; its median is reported."""
 
 
@@ -81,6 +97,17 @@ def timed(func: Any, *args: Any, **kwargs: Any) -> tuple[float, Any]:
     started = time.perf_counter()
     result = func(*args, **kwargs)
     return time.perf_counter() - started, result
+
+
+def least_cpu(func: Any, *args: Any, repeat: int = CPU_REPEAT) -> float:
+    """The least CPU time of ``repeat`` runs of ``func``: what it costs, apart from what else the
+    machine runs at the time."""
+    best = float('inf')
+    for _ in range(repeat):
+        started = time.process_time()
+        func(*args)
+        best = min(best, time.process_time() - started)
+    return best
 
 
 def median_time(func: Any, *args: Any, repeat: int = REPEAT) -> float:
@@ -111,8 +138,9 @@ def identity(graph: Graph) -> tuple[int, float, float]:
 def world_model(graph: Graph, models: int) -> dict[str, float]:
     """The world model's questions on ``graph`` once each model has an entity, a primary key on
     ``c00``, and a measure, a ``SUM`` around ``c02``: every metric (with a proposal from each
-    model), one entity, and how the middle model's entity relates to the 11th's, through the
-    joins of the models that read them."""
+    model), one entity, how the middle model's entity relates to the 11th's, through the joins of
+    the models that read them, and the middle model's measure compiled by a property of the 11th's."""
+    from konstruct.analysis.compile import OntologyQuery, compile_query
     from konstruct.semantics import world
     from konstruct.semantics.ontology import derive
 
@@ -121,6 +149,10 @@ def world_model(graph: Graph, models: int) -> dict[str, float]:
     last, eleventh = f'm{(models - 1) // 2:03}', f'm{min(10, models - 1):03}'
     metrics_s, found = timed(world.metrics, graph, None, ontology)
     named = f'{last}.c02'
+    asked = OntologyQuery(named, by=[f'{eleventh}.c05'])
+    compiled = compile_query(graph, asked, ontology=ontology)
+    # A refusal returns early: the time is of SQL written across the joins, or it measures nothing.
+    assert compiled.compiled and compiled.sql and len(compiled.path) > 1, compiled.refused
     return {
         'entities': len(ontology.entities),
         'relationships': len(ontology.relationships),
@@ -131,6 +163,8 @@ def world_model(graph: Graph, models: int) -> dict[str, float]:
         'entity_ms': round(1000 * median_time(world.entity, graph, last, ontology), 1),
         'relate_ms': round(1000 * median_time(world.relate, graph, last, eleventh, ontology), 1),
         'relate_hops': len(world.relate(graph, last, eleventh, ontology).hops),
+        'compile_ms': round(1000 * median_time(lambda: compile_query(graph, asked, ontology=ontology)), 1),
+        'compile_hops': len(compiled.path),
     }
 
 
@@ -166,6 +200,24 @@ def render_times(page_path: Path) -> tuple[float | None, float | None]:
     return statistics.median(opened), statistics.median(drawn)
 
 
+def discover_everything(config: Any) -> None:
+    """Every discovery a build makes, over the one walk it shares."""
+    from konstruct.engine import config as discovery
+
+    with config.shared_walk():
+        projects = discovery.dbt_projects(config)
+        discovery.discover_dag_files(config)
+        discovery.discover_dagster_files(config)
+        discovery.discover_spark_files(config)
+        discovery.discover_looker_files(config)
+        discovery.discover_powerbi_files(config)
+        discovery.discover_definitions_files(config)
+        discovery.discover_ossie_files(config)
+        discovery.discover_ingestion_files(config)
+        discovery.discover_sql_files(config, projects, set())
+        discovery.discover_warehouses(config, projects)
+
+
 def measure(models: int) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix='konstruct-bench-') as directory:
         root = Path(directory)
@@ -174,6 +226,7 @@ def measure(models: int) -> dict[str, Any]:
         cold, result = timed(project.build, run_dbt=False, warehouses=False)
         graph = result.graph
         unchanged, _ = timed(project.build, update=True, run_dbt=False, warehouses=False)
+        discovery = min(timed(discover_everything, project.config())[0] for _ in range(3))
         middle = root / 'models' / f'm{models // 2:03}.sql'
         middle.write_text(middle.read_text().replace('where b.c01 > 0', 'where b.c01 > 1'))
         manifest = root / 'target' / 'manifest.json'
@@ -186,6 +239,15 @@ def measure(models: int) -> dict[str, Any]:
         hook_unchanged, hook_edit = hook_latency(root, middle)
         deepest = f'm{models - 1:03}'
         load, loaded = timed(Graph.read, project.graph_path)
+        # The built graph, written again to a file beside the real one.
+        write = median_time(graph.write, root / 'rewritten.json')
+        # The way graph.json was written before the graph wrote itself: to_dict, then orjson.
+        options = orjson.OPT_NON_STR_KEYS | orjson.OPT_INDENT_2
+        baseline = median_time(
+            lambda: jsonio.write_text(
+                root / 'baseline.json', orjson.dumps(graph.to_dict(), option=options).decode() + '\n'
+            )
+        )
         first_impact, _ = timed(loaded.impact, loaded.resolve('m010.c01')[0])
         first_search, _ = timed(search, loaded, 'm010 c01')
         conflicts, _ = timed(project.conflicts)
@@ -208,6 +270,7 @@ def measure(models: int) -> dict[str, Any]:
             'warnings': len(graph.warnings),
             'cold_build_s': round(cold, 2),
             'update_unchanged_s': round(unchanged, 2),
+            'discovery_ms': round(1000 * discovery),
             'update_one_model_s': round(one_edit, 2),
             'hook_unchanged_s': round(hook_unchanged, 2),
             'hook_one_model_s': round(hook_edit, 2),
@@ -220,6 +283,8 @@ def measure(models: int) -> dict[str, Any]:
             'graph_json_mb': round((project.out_dir / 'graph.json').stat().st_size / 1e6, 1),
             'graph_html_mb': round((project.out_dir / 'graph.html').stat().st_size / 1e6, 1),
             'load_s': round(load, 3),
+            'write_s': round(write, 3),
+            'write_orjson_s': round(baseline, 3),
             'first_impact_ms': round(1000 * first_impact, 1),
             'first_search_ms': round(1000 * first_search, 1),
             'search_ms': round(1000 * median_time(project.search, 'm010 c01'), 1),
@@ -242,6 +307,85 @@ def measure(models: int) -> dict[str, Any]:
 
 
 SIZES: list[int] = []
+
+
+def schema_files(models: int, columns: int = COLUMNS) -> list[bytes]:
+    """The schema files of a dbt project of ``models`` models, one for each group of 50: the
+    shape people write, with descriptions in quotes and folded blocks, tests with arguments,
+    tags, metadata, and anchors for what models share."""
+    files = []
+    for group in range(0, models, 50):
+        lines = ['version: 2', '', 'x-owner: &owner', '  team: data-platform', '  oncall: "#data-oncall"', '']
+        lines += ['x-config: &config', '  materialized: table', '  tags: [daily, "pii: no"]', '']
+        lines += ['models:']
+        for index in range(group, min(group + 50, models)):
+            lines += [
+                f'  - name: m{index:03}',
+                f'    description: "Model {index} of group {group // 50}: one row per order, joined to its customer."',
+                '    config:',
+                '      <<: *config',
+                f'      alias: group{group // 50}',
+                '    meta:',
+                '      owner: *owner',
+                '      contains_pii: false',
+                '    columns:',
+            ]
+            for column in range(columns):
+                lines += [
+                    f'      - name: c{column:02}',
+                    '        description: >',
+                    f'          The value of column {column}, as the model above it lands it.',
+                    '          It is null before 2024-01-01 and never negative.',
+                    '        data_type: integer',
+                    '        data_tests:',
+                    '          - not_null',
+                    '          - unique' if column == 0 else '          - dbt_utils.accepted_range:',
+                ]
+                if column:
+                    lines += ['              min_value: 0', '              max_value: 1000000']
+        files.append(('\n'.join(lines) + '\n').encode())
+    return files
+
+
+def cpu_time(read: Any, files: list[bytes]) -> float:
+    began = time.process_time()
+    for data in files:
+        read(data)
+    return time.process_time() - began
+
+
+def measure_yaml(models: int, old: Path | None) -> dict[str, Any]:
+    """CPU seconds to read the schema files of ``models`` models with each reader, the best of
+    several runs, on the bytes of the files already read. CPU time, so that a busy machine
+    changes it little; each reader is one thread."""
+    import importlib.util
+
+    import yaml
+
+    from konstruct.core import yamlio
+
+    files = schema_files(models)
+    readers: dict[str, Any] = {
+        'yamlio.load (the core)': yamlio.load,
+        'PyYAML, SafeLoader': lambda data: yaml.load(data, yaml.SafeLoader),
+        'PyYAML, CSafeLoader (libyaml)': lambda data: yaml.load(data, yaml.CSafeLoader),
+    }
+    if old is not None:
+        spec = importlib.util.spec_from_file_location('old_yamlio', old)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        readers['yamlio.load before the core'] = module.load
+    expected = [yaml.load(data, yaml.CSafeLoader) for data in files]
+    size = sum(len(data) for data in files)
+    results: dict[str, Any] = {'models': models, 'files': len(files), 'megabytes': round(size / 1e6, 1)}
+    for name, read in readers.items():
+        assert [read(data) for data in files] == expected, name
+        # The readers in Python take seconds; one run of them is enough.
+        runs = 1 if name in {'PyYAML, SafeLoader', 'yamlio.load before the core'} else 5
+        best = min(cpu_time(read, files) for _ in range(runs))
+        results[name] = {'seconds': round(best, 3), 'mb_per_s': round(size / 1e6 / best, 1)}
+    return results
 
 
 def measure_measures(tables: int) -> dict[str, Any]:
@@ -344,16 +488,63 @@ def star_chain(length: int, width: int = 20) -> str:
     return f'with {", ".join(ctes)} select {columns} from c{length - 1}'
 
 
-def measure_star_chains() -> dict[int, float]:
-    """Milliseconds to analyse each chain of stars over unknown columns."""
+def measure_star_chains() -> tuple[dict[int, float], dict[int, float]]:
+    """Milliseconds to analyse each chain of stars over unknown columns: the median, and the least
+    CPU time."""
     from konstruct.core.sql import analyse
 
+    def run(sql: str) -> None:
+        analyse(sql, dialect='duckdb', schema={})
+
+    chains = {length: star_chain(length) for length in (20, 40, 80)}
+    return (
+        {length: round(1000 * median_time(run, sql), 1) for length, sql in chains.items()},
+        {length: round(1000 * least_cpu(run, sql, repeat=10), 1) for length, sql in chains.items()},
+    )
+
+
+def self_joins() -> dict[str, tuple[str, dict[str, dict[str, str]]]]:
+    """Statements that read one relation twice, with their schemas: the scale test's model template
+    over one model joined to itself, 400 columns of one table set against its parent row's, and
+    the same through a CTE that each side of a LEFT JOIN references, and through a CTE of a UNION
+    ALL of the table with itself."""
+    model = {f'c{j:02}': 'int' for j in range(COLUMNS)}
+    picks = ', '.join(
+        f'a.{c}' if j % 3 == 0 else (f'b.{c} * 2 as {c}' if j % 3 == 1 else f'coalesce(a.{c}, b.{c}) as {c}')
+        for j, c in enumerate(model)
+    )
+    template = (
+        'with a as (select * from wh.analytics.m), b as (select * from wh.analytics.m), '
+        f'joined as (select {picks} from a join b on a.c00 = b.c00 where b.c01 > 0) select * from joined'
+    )
+    wide = {'id': 'int', 'parent_id': 'int', **{f'c{j}': 'int' for j in range(400)}}
+    differences = ', '.join(f'a.c{j} - b.c{j} as d{j}' for j in range(400))
+    joined = f'select a.id, {differences} from r a left join r b on b.parent_id = a.id'
+    union = 'q as (select * from raw.wide union all select * from raw.wide), r as (select * from q)'
     return {
-        length: round(
-            1000 * median_time(lambda sql: analyse(sql, dialect='duckdb', schema={}), star_chain(length)), 1
-        )
-        for length in (20, 40, 80)
+        'template': (template, {'wh.analytics.m': model}),
+        'wide': (
+            f'select a.id, {differences} from raw.wide a join raw.wide b on b.parent_id = a.id',
+            {'raw.wide': wide},
+        ),
+        'cte': (f'with r as (select * from raw.wide) {joined}', {'raw.wide': wide}),
+        'union': (f'with {union} {joined}', {'raw.wide': wide}),
     }
+
+
+def measure_self_joins() -> tuple[dict[str, float], dict[str, float]]:
+    """Milliseconds to analyse each statement of :func:`self_joins`: the median, and the least CPU
+    time."""
+    from konstruct.core.sql import analyse
+
+    def run(sql: str, known: dict[str, dict[str, str]]) -> None:
+        analyse(sql, dialect='duckdb', schema=known)
+
+    statements = self_joins()
+    return (
+        {name: round(1000 * median_time(run, *statement), 1) for name, statement in statements.items()},
+        {name: round(1000 * least_cpu(run, *statement), 1) for name, statement in statements.items()},
+    )
 
 
 def sql_files_project(root: Path, files: int = 400) -> None:
@@ -401,13 +592,16 @@ def markdown(rows: list[dict[str, Any]]) -> str:
         )
     lines += [
         '',
-        '| Models | Load graph.json | First impact | First search | search | query | path | describe '
-        '| conflicts |',
-        '|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
+        '| Models | Load graph.json | Write graph.json | Write, to_dict and orjson | First impact '
+        '| First search | search | query | path '
+        '| describe | conflicts |',
+        '|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
     ]
     for r in rows:
         lines.append(
-            f'| {r["models"]:,} | {r["load_s"]} s | {r["first_impact_ms"]} ms | {r["first_search_ms"]} ms '
+            f'| {r["models"]:,} | {r["load_s"]} s | {r["write_s"]} s | {r["write_orjson_s"]} s '
+            f'| {r["first_impact_ms"]} ms '
+            f'| {r["first_search_ms"]} ms '
             f'| {r["search_ms"]} ms | {r["query_ms"]} ms | {r["path_ms"]} ms | {r["describe_ms"]} ms '
             f'| {r["conflicts_s"]} s |'
         )
@@ -442,15 +636,16 @@ def markdown(rows: list[dict[str, Any]]) -> str:
     lines += [
         '',
         '| Models | Entities | Relationships | Metrics | Ontology | Every metric | One metric | One entity '
-        '| relate |',
-        '|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
+        '| relate | compile-metric |',
+        '|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
     ]
     for r in rows:
         lines.append(
             f'| {r["models"]:,} | {r["world_entities"]:,} | {r["world_relationships"]:,} '
             f'| {r["world_metrics"]:,} | {r["world_ontology_s"]} s | {r["world_metrics_s"]} s '
             f'| {r["world_metric_ms"]} ms '
-            f'| {r["world_entity_ms"]} ms | {r["world_relate_ms"]} ms ({r["world_relate_hops"]} relationships) |'
+            f'| {r["world_entity_ms"]} ms | {r["world_relate_ms"]} ms ({r["world_relate_hops"]} relationships) '
+            f'| {r["world_compile_ms"]} ms ({r["world_compile_hops"]} relationships) |'
         )
     fresh = next((r for r in rows if 'meaning_cpu_ms' in r), None)
     if fresh:
@@ -468,23 +663,37 @@ def main() -> int:
     parser.add_argument(
         '--tables', nargs='+', type=int, default=[], help='also measure conflicts and the gate at these sizes'
     )
+    parser.add_argument(
+        '--yaml',
+        nargs='+',
+        type=int,
+        default=[],
+        help='also time reading the schema files of this many models',
+    )
+    parser.add_argument('--old-yamlio', type=Path, help='a yamlio.py to time beside the core with --yaml')
     parser.add_argument('--json', type=Path, help='also write the results as JSON')
     args = parser.parse_args()
-    # Without sizes, every size is measured, unless --tables asks for conflicts and the gate alone.
-    sizes = args.sizes or ([] if args.tables else [100, 500, 1000, 2000])
+    # Without sizes, every size is measured, unless --tables or --yaml ask for theirs alone.
+    sizes = args.sizes or ([] if args.tables or args.yaml else [100, 500, 1000, 2000])
     SIZES.extend(sizes)
     rows = []
     for size in sizes:
         row = measure(size)
         rows.append(row)
         print(f'{size} models: {row}', file=sys.stderr)
+    yaml_rows = []
+    for models in args.yaml:
+        row = measure_yaml(models, args.old_yamlio)
+        yaml_rows.append(row)
+        print(f'{models} models of YAML: {row}', file=sys.stderr)
     measured = []
     for tables in args.tables:
         row = measure_measures(tables)
         measured.append(row)
         print(f'{tables} tables: {row}', file=sys.stderr)
     # SQL over unknown columns is measured with the model sizes, as it was before --tables.
-    chains = measure_star_chains() if rows else {}
+    chains, chains_cpu = measure_star_chains() if rows else ({}, {})
+    joined, joined_cpu = measure_self_joins() if rows else ({}, {})
     sql_files = measure_sql_files() if rows else {}
     machine = (
         f'{platform.machine()}, {platform.system()} {platform.release()}, Python {platform.python_version()}'
@@ -499,9 +708,36 @@ def main() -> int:
             + '.'
         )
         print(
+            f'A model of the scale test joined to itself: {joined["template"]} ms; 400 columns of a table set '
+            f"against its parent row's: {joined['wide']} ms, through a CTE each side of a LEFT JOIN reads "
+            f'{joined["cte"]} ms, and through a CTE of a UNION ALL {joined["union"]} ms.'
+        )
+        print(
+            f'In CPU time, the least of {CPU_REPEAT} runs (10 for a chain): the model joined to itself '
+            f'{joined_cpu["template"]} ms, the 400 columns {joined_cpu["wide"]} ms, through a CTE '
+            f'{joined_cpu["cte"]} ms, through a CTE of a UNION ALL {joined_cpu["union"]} ms; '
+            + ', '.join(f'{length} CTEs {ms} ms' for length, ms in chains_cpu.items())
+            + '.'
+        )
+        print(
+            'Discovery of every input: '
+            + ', '.join(f'{r["models"]} models {r["discovery_ms"]} ms' for r in rows)
+            + '.'
+        )
+        print(
             f'{sql_files["sql_files"]} SQL files and no warehouse: cold build {sql_files["sql_cold_build_s"]} s, '
             f'`--update` {sql_files["sql_update_s"]} s.'
         )
+    for r in yaml_rows:
+        print(f'\nThe schema files of {r["models"]:,} models: {r["files"]} files, {r["megabytes"]} MB\n')
+        print('| Reader | CPU seconds | MB/s | Time, against the core |')
+        print('|---|---:|---:|---:|')
+        core = r['yamlio.load (the core)']['seconds']
+        for name, value in r.items():
+            if isinstance(value, dict):
+                print(
+                    f'| {name} | {value["seconds"]} | {value["mb_per_s"]} | {value["seconds"] / core:.1f}x |'
+                )
     if measured:
         print('\n| Tables | Conflicts | conflicts, CPU | Gate checks after one edit, CPU |')
         print('|---:|---:|---:|---:|')
@@ -516,7 +752,11 @@ def main() -> int:
             'machine': machine,
             'results': rows,
             'tables': measured,
+            'yaml': yaml_rows,
             'star_chains_ms': chains,
+            'self_joins_ms': joined,
+            'star_chains_cpu_ms': chains_cpu,
+            'self_joins_cpu_ms': joined_cpu,
             **sql_files,
         }
         args.json.write_text(json.dumps(data, indent=1))

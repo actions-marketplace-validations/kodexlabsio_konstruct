@@ -11,13 +11,13 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from konstruct import __version__
+from konstruct._core import file_identity as identity
+from konstruct._core import files_under, folder_files
 from konstruct.core import jsonio
-from konstruct.core.files import digest, identity, listing, regular_files, stated
 from konstruct.core.graph import RELATION_KINDS, Edge, Graph, Node, relation_key
 from konstruct.core.sql import (
     PARSE_ERRORS,
@@ -30,7 +30,6 @@ from konstruct.core.sql import (
     strip_templating,
 )
 from konstruct.engine.config import (
-    FINDS,
     Config,
     ConfigError,
     Found,
@@ -47,9 +46,9 @@ from konstruct.engine.config import (
     discover_warehouses,
     how_found,
     load_config,
-    relative_text,
     repository_profiles,
 )
+from konstruct.engine.watch import seen_files, watched_files
 from konstruct.inputs import airflow, dagster, dbt
 from konstruct.inputs.warehouse import MissingDriver, RelationMeta
 from konstruct.plugins.api import briefly, json_problem, one_line
@@ -85,6 +84,10 @@ def _small_file(path: Path, limit: int) -> bool:
         return False
 
 
+_NOTHING = hashlib.blake2b(digest_size=8).hexdigest()
+"""The digest of the listing of a folder with no files, which one that cannot be listed has."""
+
+
 class Cache:
     """Results of the expensive steps (SQL lineage, DAG parsing), keyed by a hash of their inputs."""
 
@@ -114,8 +117,15 @@ class Cache:
         else:
             self.misses += count
             value = compute()
+            # Kept for any later build that shares this cache, such as the next commit's.
+            self.entries[key] = value
         self.used[key] = value
         return value
+
+    def extend(self, entries: Mapping[str, Any]) -> None:
+        """Add ``entries`` (another cache's), keeping this cache's value for a key both hold."""
+        for key, value in entries.items():
+            self.entries.setdefault(key, value)
 
     def quiet(self) -> _QuietCache:
         """The same cache for derived outputs (the viewer's formulas), which are not counted
@@ -179,8 +189,41 @@ class RelationIndex:
         return None
 
 
+@dataclass
+class _Shape:
+    """What the statements that write a relation hold, together: every one's conditions, and for
+    each column those that hold in all of them, its reading where all agree, and the columns some
+    aggregate."""
+
+    conditions: set[str]
+    held: dict[str, set[str]]
+    readings: dict[str, str | None]
+    aggregates: set[str] = field(default_factory=set)
+    # Where each statement reads the relations it reads, as every statement writes some rows: a
+    # relation read on the nullable side of an outer join or before a window or LIMIT in one
+    # statement is read there, and one a star passes on whole in one passes on every column but
+    # those every such star leaves out. Two statements that read one relation on different sides
+    # keep the first side; each side is of an outer join, which is what the readers ask.
+    nullable: dict[str, str] = field(default_factory=dict)
+    read_before: dict[str, list[str]] = field(default_factory=dict)
+    star_reads: dict[str, list[str]] = field(default_factory=dict)
+
+    def read(self, statement: StatementLineage) -> None:
+        for key, side in statement.nullable.items():
+            self.nullable.setdefault(key, side)
+        for key, steps in statement.read_before.items():
+            kept = self.read_before.setdefault(key, [])
+            kept += [step for step in steps if step not in kept]
+        for key, left in statement.star_reads.items():
+            passed = self.star_reads.get(key)
+            self.star_reads[key] = list(left) if passed is None else [c for c in passed if c in left]
+
+
 class Builder:
-    def __init__(self, config: Config, *, update: bool) -> None:
+    def __init__(self, config: Config, *, update: bool, cache: Cache | None = None) -> None:
+        """A build of ``config``. ``cache`` is the analysis cache to use, such as one shared by
+        the builds of several commits; by default ``cache.json`` in the output directory, read only
+        with ``update``."""
         self.config = config
         self.graph = Graph()
         self.graph.meta = {
@@ -188,7 +231,7 @@ class Builder:
             'root': str(config.root),
             'generated_at': datetime.now(UTC).isoformat(timespec='seconds'),
         }
-        self.cache = Cache(config.out_dir / 'cache.json', enabled=update)
+        self.cache = cache if cache is not None else Cache(config.out_dir / 'cache.json', enabled=update)
         self.vocabulary_files: set[str] = set()
         self.workers = _Workers()
         self.index = RelationIndex(self.graph)
@@ -199,13 +242,13 @@ class Builder:
         # One entry per input, for the build summary and `konstruct status`.
         self.sources: list[dict[str, str]] = []
         # The inputs the build reads, files or directories, relative to the root; and each file in
-        # them as the build found it just before reading it (konstruct.core.files.identity).
+        # them as the build found it just before reading it (konstruct._core.file_identity).
         self.watched: set[str] = set()
         self.seen: dict[str, list[int]] = {}
         # The files beside each file read with its extension, by its folder (relative to the root),
         # extension and the rule discovery found it by: a digest of the folder's files with that
-        # extension (konstruct.core.files.listing), and each name with a digest of it as it was
-        # found (konstruct.core.files.identity), enough to see a name appear, or any rewrite of a
+        # extension (konstruct._core.folder_files), and each name with a digest of it as it was
+        # found (konstruct._core.file_identity), enough to see a name appear, or any rewrite of a
         # file that may have made it an input (one written into a file created empty, say),
         # without reading it.
         self.siblings: dict[tuple[str, str, Found], tuple[str, dict[str, str]]] = {}
@@ -220,6 +263,8 @@ class Builder:
         # The relations whose columns a dbt catalog or the SQL that writes them lists in full (the
         # warehouse's are marked in_warehouse); the others may have columns the graph does not list.
         self.complete: set[str] = set()
+        # What the statements that wrote each relation so far hold, by the relation's id.
+        self.written: dict[str, _Shape] = {}
 
     # Shared helpers
 
@@ -233,7 +278,7 @@ class Builder:
         ``found`` is the rule discovery found the files by (:func:`how_found`): the files beside
         each with its extension are noted too, as discovery would see them (under its exclude
         patterns if it applied them, never in the output folder), each by its name and a digest
-        of :func:`konstruct.core.files.identity` only, as the build may not read them. A new one, or
+        of :func:`konstruct._core.file_identity` only, as the build may not read them. A new one, or
         one no longer as found, is judged by the same rule, so a file there that becomes an input
         counts as a change.
         Files the build is told where to find (dbt's artefacts, profiles) have no such rule."""
@@ -241,8 +286,8 @@ class Builder:
             if path.is_dir():
                 name = self.rel_path(path)
                 self.watched.add(name)
-                for file in path.rglob('*'):
-                    self._seen(str(Path(name) / file.relative_to(path)), identity(file))
+                for relative, found_file in files_under(path):
+                    self._seen(str(Path(name) / relative), found_file)
                 continue
             self.watch_read(path, identity(path))
             folder = path.parent
@@ -253,15 +298,14 @@ class Builder:
                 continue
             # Listed as changed_inputs lists them, so both find each file the same on every system.
             try:
-                files = list(regular_files(folder, path.suffix))
+                whole, files = folder_files(folder, path.suffix)
             except OSError:
-                files = []
-            whole = listing(files)
+                whole, files = _NOTHING, []
             self.siblings[key] = (
                 whole,
                 {
-                    name: digest(stated(status))
-                    for name, status in files
+                    name: hashed
+                    for name, _, hashed in files
                     if not (found.exclude and self.config.excluded(folder / name))
                 },
             )
@@ -358,6 +402,59 @@ class Builder:
             )
         )
 
+    def conditions(self, target: Node, statement: StatementLineage) -> None:
+        """The joins, filters and grouping that shape the relation's rows, in terms of physical
+        columns, and for each column which of them hold on the rows its value is computed from,
+        the reading of a table it is read from, and whether it aggregates rows or computes a window
+        over them. A relation more than one statement writes has the conditions of every one of
+        them, and a column holds only those that hold in every one (an unfiltered INSERT adds rows a
+        CREATE's filter never saw), has a reading only where all agree, and aggregates where any
+        does."""
+        held = {
+            name: {statement.conditions[i] for i in positions}
+            for name, positions in statement.row_conditions.items()
+        }
+        readings = {name: statement.readings.get(name) for name in statement.columns}
+        shape = self.written.get(target.id)
+        if shape is None:
+            shape = self.written[target.id] = _Shape(set(statement.conditions), held, readings)
+        else:
+            shape.conditions |= set(statement.conditions)
+            # A column one of the statements does not write holds nothing on the rows of that one.
+            shape.held = {n: shape.held.get(n, set()) & held.get(n, set()) for n in {*shape.held, *held}}
+            shape.readings = {
+                n: shape.readings.get(n) if shape.readings.get(n) == readings.get(n) else None
+                for n in {*shape.readings, *readings}
+            }
+        shape.aggregates |= set(statement.aggregated)
+        shape.read(statement)
+        # Where the relations it reads sit, which decides where their own conditions apply.
+        for key, value in (
+            ('nullable', shape.nullable),
+            ('read_before', shape.read_before),
+            ('star_reads', shape.star_reads),
+        ):
+            if value:
+                target.attrs[key] = dict(value)
+            else:
+                target.attrs.pop(key, None)
+        conditions = sorted(shape.conditions)
+        if conditions:
+            target.attrs['conditions'] = conditions
+        else:
+            target.attrs.pop('conditions', None)
+        for column in self.graph.columns_of(target.id):
+            for attr in ('row_conditions', 'row_reading', 'aggregates_rows'):
+                column.attrs.pop(attr, None)
+            reading = shape.readings.get(column.name)
+            if reading:
+                column.attrs['row_reading'] = reading
+            if column.name in shape.aggregates:
+                column.attrs['aggregates_rows'] = True
+            if conditions and column.name in shape.held:
+                found = shape.held[column.name]
+                column.attrs['row_conditions'] = [i for i, text in enumerate(conditions) if text in found]
+
     def apply(
         self,
         statement: StatementLineage,
@@ -395,17 +492,6 @@ class Builder:
             target.attrs.setdefault('table_type', 'view')
             if statement.kind == 'create_materialized_view':
                 target.attrs['materialized_view'] = True
-        if statement.conditions:
-            # Joins, filters and grouping, in terms of physical columns: what shapes the rows.
-            target.attrs['conditions'] = statement.conditions
-        # Where the relations it reads sit, which decides where their own conditions apply.
-        for key, value in (
-            ('nullable', statement.nullable),
-            ('read_before', statement.read_before),
-            ('star_reads', statement.star_reads),
-        ):
-            if value:
-                target.attrs[key] = value
         # A query that writes the relation lists all its columns; an INSERT or MERGE may write some.
         if (
             statement.kind in WRITES_ALL
@@ -415,6 +501,9 @@ class Builder:
             self.complete.add(target.id)
         for name, sources in statement.columns.items():
             out = self.column(target, name, origin)
+            # The SQL gives the column, so it is the model's own and not only in its YAML, whether
+            # or not a dbt catalog lists it (one generated before the model was).
+            out.attrs.pop('documented_only', None)
             expression = statement.expressions.get(name)
             if expression and not expression.endswith('.*'):
                 # The column as SQL over physical columns, with CTEs and aliases inlined.
@@ -426,6 +515,7 @@ class Builder:
                         out.id, upstream.id, 'derived_from', transform=item.transform, **attrs
                     )
                 )
+        self.conditions(target, statement)
         for relation, column in statement.references:
             used = self.column(self.relation(relation, origin), column, origin)
             record(self.graph.add_edge(used.id, target.id, 'feeds', role='reference', **attrs))
@@ -522,7 +612,7 @@ class Builder:
         self.graph.meta['inputs'] = self.inputs
         self.graph.meta['sources'] = self.sources
         self.graph.meta['watched'] = sorted(self.watched)
-        self.graph.meta['watched_files'] = _found(self.seen)
+        self.graph.meta['watched_files'] = watched_files(self.seen)
         self.graph.meta['watched_siblings'] = [
             {
                 'root': '.',
@@ -1103,13 +1193,15 @@ class Builder:
 
     def dbt_lineage(self) -> None:
         count = 0
-        prepared: dict[str, tuple[str, Any]] = {}
+        # Each model analysed early: the key it was analysed with, its analysis, and whether a
+        # worker made it.
+        prepared: dict[str, tuple[str, Any, bool]] = {}
         try:
             for loaded in self.loads:
                 ordered = _topological(loaded.models)
                 ids = {m.node_id for m in ordered}
                 applied: set[str] = set()
-                considered: set[str] = set()
+                considered = self.prepare_levels(ordered, ids, loaded, prepared)
                 for index, model in enumerate(ordered):
                     if model.node_id not in considered:
                         # Every later model whose upstream models are all applied can be analysed
@@ -1133,11 +1225,11 @@ class Builder:
                         guessed: list[str] = guessed,
                         dialect: str | None = dialect,
                         loaded: dbt.DbtLoad = loaded,
-                        early: tuple[str, Any] | None = early,
+                        early: tuple[str, Any, bool] | None = early,
                         key: str = key,
                     ) -> Any:
                         if early is not None and early[0] == key:
-                            self.workers.used += 1
+                            self.workers.used += early[2]
                             return early[1]
                         return _analyse_model(
                             (
@@ -1181,39 +1273,104 @@ class Builder:
         )
         return key, schema, guessed, loaded.dialect or self.dialect
 
+    def prepare_levels(
+        self,
+        ordered: list[dbt.ModelSql],
+        ids: set[str],
+        loaded: dbt.DbtLoad,
+        prepared: dict[str, tuple[str, Any, bool]],
+    ) -> set[str]:
+        """Analyse early, a level of the DAG at a time, every model whose upstream models' columns
+        are known before they are applied, and return the models it looked at. A model's columns
+        are known when a dbt catalog or the warehouse lists them all and its own SQL, when it was
+        analysed a level before, gives it no other (see :meth:`keeps_columns`): then they are what
+        its readers will be analysed with, whatever order the manifest lists the models in and the
+        build applies them in. A level of fewer models than starting the workers repays is
+        analysed here, so that the readers of a model whose SQL adds columns wait for it.
+
+        A model not looked at (an upstream model's columns are not known) counts as keeping the
+        columns its catalog lists in a build with nothing cached, so that its readers are analysed
+        side by side all the same; in a build with a cache only the models judged count, a cached
+        one by its cached analysis, so that an update analyses what it would one by one."""
+        if len(ordered) < PARALLEL_MINIMUM or _workers() < 2 or self.workers.failed:
+            return set()
+        depth: dict[str, int] = {}
+        levels: list[list[dbt.ModelSql]] = []
+        for model in ordered:
+            level = 1 + max((depth[u] for u in model.upstream if u in depth), default=-1)
+            depth[model.node_id] = level
+            if level == len(levels):
+                levels.append([])
+            levels[level].append(model)
+        known: set[str] = set()
+        looked: set[str] = set()
+        for models in levels:
+            ready = [m for m in models if all(u not in ids or u in known for u in m.upstream)]
+            looked.update(m.node_id for m in ready)
+            found = self.prepare_models(ready, loaded, prepared, everything=True)
+            judged = ready if self.cache.entries else models
+            known.update(m.node_id for m in judged if self.keeps_columns(m, found.get(m.node_id)))
+        return looked
+
+    def keeps_columns(self, model: dbt.ModelSql, result: Any) -> bool:
+        """Whether a model's columns, when it is applied, stay as a catalog or the warehouse lists
+        them all: they are listed so, and ``result``, its analysis when it is made already, gives
+        it no other. A model whose catalog is out of date is caught at its readers' turns, by
+        their keys."""
+        node = self.graph.nodes[model.node_id]
+        if node.id not in self.complete and not node.attrs.get('in_warehouse'):
+            return False
+        statements = [StatementLineage.from_dict(s) for s in result or []]
+        selects = [s for s in statements if s.kind in ('select', 'unparsed')]
+        return all(self.graph.column(node.id, name) is not None for s in selects[-1:] for name in s.columns)
+
     def prepare_models(
-        self, models: list[dbt.ModelSql], loaded: dbt.DbtLoad, prepared: dict[str, tuple[str, Any]]
-    ) -> None:
+        self,
+        models: list[dbt.ModelSql],
+        loaded: dbt.DbtLoad,
+        prepared: dict[str, tuple[str, Any, bool]],
+        *,
+        everything: bool = False,
+    ) -> dict[str, Any]:
         """Analyse the models that are not cached in worker processes, when there are enough of
-        them to repay starting the workers."""
-        if len(models) < PARALLEL_MINIMUM or _workers() < 2 or self.workers.failed:
-            return
+        them to repay starting the workers, and with ``everything`` the rest in this process.
+        Returns each model's analysis known now: made here, or cached, which this leaves unused."""
+        if not everything and (len(models) < PARALLEL_MINIMUM or _workers() < 2 or self.workers.failed):
+            return {}
+        found: dict[str, Any] = {}
         work = []
         for model in models:
             key, schema, guessed, dialect = self.model_key(model, loaded)
-            if key not in self.cache.entries:
-                work.append(
+            if key in self.cache.entries:
+                found[model.node_id] = self.cache.entries.get(key)
+                continue
+            work.append(
+                (
+                    model.node_id,
+                    key,
                     (
-                        model.node_id,
-                        key,
-                        (
-                            model.sql,
-                            dialect,
-                            schema,
-                            loaded.default_catalog,
-                            loaded.default_schema,
-                            model.relation,
-                            guessed,
-                        ),
-                    )
+                        model.sql,
+                        dialect,
+                        schema,
+                        loaded.default_catalog,
+                        loaded.default_schema,
+                        model.relation,
+                        guessed,
+                    ),
                 )
-        if len(work) < PARALLEL_MINIMUM:
-            return
-        results = self.workers.map([list(w[2]) for w in work])
+            )
+        workers = len(work) >= PARALLEL_MINIMUM
+        if not workers and not everything:
+            return found
+        results = (
+            self.workers.map([list(w[2]) for w in work]) if workers else [_analyse_model(w[2]) for w in work]
+        )
         if results is None:
-            return
+            return found
         for (node_id, key, _), result in zip(work, results, strict=True):
-            prepared[node_id] = (key, result)
+            prepared[node_id] = (key, result, workers)
+            found[node_id] = result
+        return found
 
     def warehouse_view_lineage(self) -> None:
         for node in list(self.graph.relations()):
@@ -2504,140 +2661,6 @@ def _selected_assets(
     return list(dict.fromkeys(chosen))
 
 
-IDENTITY = ('size', 'mtime_ns', 'ctime_ns', 'device', 'inode')
-"""The fields of each ``watched_files`` entry besides its path, in the order of
-:func:`konstruct.core.files.identity`."""
-
-
-def _found(seen: dict[str, list[int]]) -> list[dict[str, Any]]:
-    """``watched_files`` as graph.json holds it: each file, as the build found it."""
-    return [{'path': path, **dict(zip(IDENTITY, found, strict=True))} for path, found in sorted(seen.items())]
-
-
-def _seen(meta: dict[str, Any]) -> dict[str, list[Any]] | None:
-    """The files a graph's build found, by path, as :func:`konstruct.core.files.identity` gives
-    them; None for a graph from before builds recorded them."""
-    found = meta.get('watched_files')
-    if not isinstance(found, list):
-        return None
-    return {str(f.get('path')): [f.get(k) for k in IDENTITY] for f in found if isinstance(f, dict)}
-
-
-Verdicts = dict[str, tuple[list[int], bool]]
-"""Each file in a folder beside an input that is no longer as the build found it, by its name: the
-file as it was judged (:func:`konstruct.core.files.identity`) and whether it would now be an
-input."""
-
-Judged = dict[tuple[str, str, str, tuple[str, ...], tuple[str, ...], str, str], tuple[str, Verdicts]]
-"""What :func:`changed_inputs` concluded of the folders beside an input whose files are not all
-as the build found them: by the folder, the extension, the test, its patterns, the exclude
-patterns, the repository's root and the digest the build recorded of the folder's listing, the
-digest of the listing when it was judged (:func:`konstruct.core.files.listing`) and the
-:data:`Verdicts` on its changed files. A folder listed as it was then is not looked at file by
-file again, and a file as it was then is not read again, so files that are no inputs and start no
-build (helper modules a branch switch rewrote) cost one hash of their folder at each check, as
-they would unchanged. A folder whose files are all as the build found them adds nothing."""
-
-
-def _new_siblings(meta: dict[str, Any], root: Path, out_dir: Path, judged: Judged) -> list[str]:
-    """The files beside those a build read, with their extension, that discovery would now take
-    and that are new or no longer as the build found them: judged by the rule discovery found
-    their neighbour by (:data:`konstruct.engine.config.FINDS`), under that repository's own
-    exclude patterns if discovery applied them, and never in the output folder. A folder is
-    looked at file by file only when its listing's digest is neither the one the build recorded
-    nor the one ``judged`` holds, and a file is read only when ``judged`` does not hold it as it
-    is now; ``judged`` keeps what this check found, and nothing else."""
-    new = []
-    kept: Judged = {}
-    for entry in meta.get('watched_siblings', []):
-        if not isinstance(entry, dict) or entry.get('test') not in FINDS:
-            continue
-        name = str(entry['test'])
-        base = root / str(entry.get('root', '.'))
-        folder, extension = root / str(entry.get('folder')), str(entry.get('extension'))
-        if folder.resolve() == out_dir:
-            continue
-        try:
-            listed = listing(regular_files(folder, extension))
-        except OSError:
-            continue
-        recorded = str(entry.get('digest'))
-        if listed == recorded:
-            continue  # every file there as the build found it
-        patterns = tuple(str(p) for p in entry.get('patterns', []))
-        exclude = tuple(str(p) for p in entry.get('exclude', []))
-        key = (str(folder), extension, name, patterns, exclude, str(base), recorded)
-        before = judged.get(key)
-        if before is not None and before[0] == listed:
-            verdicts = before[1]
-        else:
-            try:
-                files = list(regular_files(folder, extension))
-            except OSError:
-                continue
-            known = dict(zip(entry.get('names', []), entry.get('found', []), strict=False))
-            earlier = before[1] if before is not None else {}
-            verdicts = {}
-            for file_name, status in files:
-                now = stated(status)
-                verdict = earlier.get(file_name)
-                if verdict is None or verdict[0] != now:
-                    if known.get(file_name) == digest(now):
-                        continue
-                    file = folder / file_name
-                    relative = relative_text(file, base)
-                    excluded = any(fnmatch(relative, pattern) for pattern in exclude)
-                    verdict = (now, not excluded and FINDS[name](file, relative, patterns))
-                verdicts[file_name] = verdict
-        kept[key] = (listed, verdicts)
-        new += [os.path.relpath(folder / n, root) for n, (_, taken) in verdicts.items() if taken]
-    judged.clear()
-    judged.update(kept)
-    return new
-
-
-def changed_inputs(graph_path: Path, graph: Graph, judged: Judged | None = None) -> list[str]:
-    """Files the last build read that have changed since it read them, relative to the project
-    root: each file it recorded (``watched_files`` in the graph's meta) that is no longer as it
-    was just before it was read (:func:`konstruct.core.files.identity`: its size, times, device
-    or inode differ, or it is gone), each file it did not find in a directory it read, and each
-    file beside a file it read with that file's extension (``watched_siblings``), new or no
-    longer as the build found it, that discovery would now take (not excluded, not in the output
-    folder): a new SQL file or DAG beside one it read, or a helper rewritten as a DAG. A file
-    changed while the build ran, after it was read, is one the graph does not reflect, whenever
-    graph.json was written. A graph from before builds recorded what they found is compared with
-    graph.json's own time, as it always was.
-
-    ``judged`` is kept from one check to the next by a caller that checks again (see
-    :data:`Judged`), so a file beside an input is read once for each change to it."""
-    try:
-        written = graph_path.stat().st_mtime_ns
-    except OSError:
-        return []
-    seen = _seen(graph.meta)
-    root = Path(str(graph.meta.get('root', graph_path.parent.parent)))
-    changed = []
-    if seen is not None:
-        changed = [name for name, found in seen.items() if identity(root / name) != found]
-        changed += _new_siblings(
-            graph.meta, root, graph_path.parent.resolve(), {} if judged is None else judged
-        )
-    for name in graph.meta.get('watched', []):
-        path = root / name
-        for candidate in path.rglob('*') if path.is_dir() else [path]:
-            relative = os.path.relpath(candidate, root)
-            if seen is not None:
-                if relative not in seen and identity(candidate) is not None:
-                    changed.append(relative)
-                continue
-            try:
-                if candidate.is_file() and candidate.stat().st_mtime_ns > written:
-                    changed.append(relative)
-            except OSError:
-                continue
-    return sorted(set(changed))
-
-
 PARALLEL_MINIMUM = 64
 """Fewer models than this to analyse are analysed in the build's own process."""
 
@@ -2956,10 +2979,10 @@ def merge_repository(
     graph.meta['watched'] = sorted(
         {*graph.meta.get('watched', []), *(moved(w) for w in other.meta.get('watched', []))}
     )
-    seen = _seen(graph.meta) or {}
-    for file, found in (_seen(other.meta) or {}).items():
+    seen = seen_files(graph.meta) or {}
+    for file, found in (seen_files(other.meta) or {}).items():
         seen.setdefault(moved(file), found)
-    graph.meta['watched_files'] = _found(seen)
+    graph.meta['watched_files'] = watched_files(seen)
     # Each repository's folders under the main root; its exclude patterns stay its own, matched
     # from its own root.
     graph.meta['watched_siblings'] = sorted(
@@ -3058,23 +3081,8 @@ def build(config: Config, *, update: bool = False) -> BuildResult:
     from konstruct.semantics.ontology import derive as derive_ontology
 
     started = time.perf_counter()
-    builder = Builder(config, update=update)
-    graph = builder.run()
-    names: list[str] = []
-    others: list[Builder] = []
-    wheres: dict[str, str] = {}
-    for repository in config.repositories:
-        names.append(repository_name(config, repository, names))
-        merged = merge_repository(graph, config, repository, names[-1], update=update, terms=wheres)
-        if merged is not None:
-            others.append(merged)
-    if config.repositories:
-        link_shared_relations(graph)
-        bind_across_repositories(graph, wheres)
-    # Packs bind once, to the merged graph, so repositories that share a warehouse share its terms.
-    builder.bind_ontology_packs()
+    graph, builder, others = build_graph(config, update=update)
     log.info('deriving the ontology')
-    graph.meta['dialect'] = builder.dialect or dialect_for(None)
     config.out_dir.mkdir(parents=True, exist_ok=True)
     graph_path = config.out_dir / 'graph.json'
     governed = config.governance_from or graph_path
@@ -3111,12 +3119,24 @@ def build(config: Config, *, update: bool = False) -> BuildResult:
     graph.meta['build_seconds'] = round(time.perf_counter() - started, 2)
     log.info('writing graph.json, REPORT.md, graph.html, ontology.yml and explain.json')
     graph.write(graph_path)
-    outputs = [graph_path, write_report(graph, config.out_dir / 'REPORT.md')]
+    outputs = [graph_path]
+    if config.report:
+        outputs.append(write_report(graph, config.out_dir / 'REPORT.md'))
     if data is not None:
         outputs.append(write_html(graph, config.out_dir / 'graph.html', data=data))
-    outputs.append(ontology.write(config.out_dir / 'ontology.yml'))
+    if config.report:
+        outputs.append(ontology.write(config.out_dir / 'ontology.yml'))
     if explain_path is not None:
         outputs.append(explain_path)
+    # An output this build does not write, left by an earlier one, would describe another graph.
+    for name, written in (
+        ('REPORT.md', config.report),
+        ('ontology.yml', config.report),
+        ('graph.html', config.html),
+        ('explain.json', config.html),
+    ):
+        if not written:
+            (config.out_dir / name).unlink(missing_ok=True)
     builder.cache.save()
     return BuildResult(
         graph=graph,
@@ -3126,6 +3146,33 @@ def build(config: Config, *, update: bool = False) -> BuildResult:
         cache_misses=builder.cache.misses + sum(o.cache.misses for o in others),
         inputs=_total_inputs([builder, *others]),
     )
+
+
+def build_graph(
+    config: Config, *, update: bool = False, cache: Cache | None = None
+) -> tuple[Graph, Builder, list[Builder]]:
+    """The graph of ``config``, with every repository it lists merged in and the ontology packs
+    bound, before the ontology is derived and anything is written; the builder of this project and
+    those of the other repositories. ``cache`` is this project's analysis cache (see
+    :class:`Builder`)."""
+    builder = Builder(config, update=update, cache=cache)
+    with config.shared_walk():
+        graph = builder.run()
+    names: list[str] = []
+    others: list[Builder] = []
+    wheres: dict[str, str] = {}
+    for repository in config.repositories:
+        names.append(repository_name(config, repository, names))
+        merged = merge_repository(graph, config, repository, names[-1], update=update, terms=wheres)
+        if merged is not None:
+            others.append(merged)
+    if config.repositories:
+        link_shared_relations(graph)
+        bind_across_repositories(graph, wheres)
+    # Packs bind once, to the merged graph, so repositories that share a warehouse share its terms.
+    builder.bind_ontology_packs()
+    graph.meta['dialect'] = builder.dialect or dialect_for(None)
+    return graph, builder, others
 
 
 def _total_inputs(builders: list[Builder]) -> dict[str, int]:

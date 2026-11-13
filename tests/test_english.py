@@ -815,3 +815,102 @@ def test_no_two_columns_share_a_wording(sql: str) -> None:
     names = Names(column_keys([tree]))
     wordings = [n.wording for n in names.legend()]
     assert len(wordings) == len(set(wordings)) == len(set(column_keys([tree])))
+
+
+JOINED_ON_TRUE = (
+    'create table main.pairs as select a.id, b.amount from raw.orders a left join raw.orders b on true '
+    'left join raw.orders c on c.customer_id = b.customer_id'
+)
+
+
+def _joined_on_true(root: Path) -> Path:
+    """A project whose model joins a reading on an ON that does not name it, which the build lists
+    once more naming the reading."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / 'konstruct.toml').write_text('dialect = "duckdb"\n')
+    (root / 'pairs.sql').write_text(JOINED_ON_TRUE)
+    assert main(['build', str(root), '--no-warehouse', '-q']) == 0
+    return root
+
+
+def test_a_join_named_for_its_reading_has_a_wording(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _joined_on_true(tmp_path / 'project')
+    capsys.readouterr()
+    assert main(['--no-color', '-C', str(root), 'explain', 'pairs.amount', '--english']) == 0
+    out = capsys.readouterr().out
+    assert (
+        'the rows of the first reading of orders are joined where true, keeping every row of the left side'
+        in out
+    ), out
+    assert 'Quoted as SQL' not in out
+
+
+@pytest.mark.parametrize(
+    ('name', 'wording'),
+    [
+        ('raw.orders', 'raw.orders'),
+        ('orders#2', 'the second reading of orders'),
+        ('orders#12', 'the 12th reading of orders'),
+        ('orders#22', 'the 22nd reading of orders'),
+        ('orders#2/1', 'the second reading of orders, through the first reference to its CTE'),
+        (
+            'orders#1/1/2',
+            'the first reading of orders, through the first reference to one CTE, then the second to another',
+        ),
+        (
+            'orders#3/2/1/1',
+            'the third reading of orders, through the second reference to one CTE, then the first to another, '
+            'then the first to another',
+        ),
+        ('orders#(base#1)', 'orders, as read through the first reading of base'),
+        ('orders#1(main.m)', 'the first reading of orders, as read through main.m'),
+        ('events##2', 'events#2'),
+        ('events##2#3', 'the third reading of events#2'),
+        ('orders#x', 'orders (reading x)'),
+    ],
+)
+def test_a_reading_of_a_relation_is_named_in_words(name: str, wording: str) -> None:
+    from konstruct.analysis.english import reading_words
+
+    assert reading_words(name) == wording
+
+
+def test_a_set_operations_column_is_worded_by_its_branches() -> None:
+    from konstruct.analysis.english import Names, Wording, column_keys
+
+    for sql, wording in (
+        ('UNION(a.amount, b.amount * 2)', '[amount (a)] or, in the other branch, ([amount (b)] times 2)'),
+        (
+            'UNION(a.x, b.x, c.x)',
+            '[x (a)] or, in another branch, [x (b)] or, in another branch, [x (c)]',
+        ),
+    ):
+        tree = sqlglot.parse_one(sql, read='duckdb')
+        assert Wording('duckdb', Names(column_keys([tree]))).sentence(tree) == wording
+
+
+NESTED = (
+    'create table main.pairs as with base as (select id, parent_id, amount from raw.orders), '
+    'twice as (select a.id, b.amount from base a left join base b on b.id = a.parent_id) '
+    'select x.id, x.amount + y.amount as total from twice x join twice y on y.id = x.id '
+    'union all select id, amount from raw.orders'
+)
+
+
+def test_a_nested_cte_read_twice_is_worded_without_sql(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A CTE read twice that reads another CTE twice names its readings through two references,
+    and a union's column is worded by its branches: none of it is quoted as SQL."""
+    root = tmp_path / 'project'
+    root.mkdir()
+    (root / 'konstruct.toml').write_text('dialect = "duckdb"\n')
+    (root / 'pairs.sql').write_text(NESTED)
+    assert main(['build', str(root), '--no-warehouse', '-q']) == 0
+    capsys.readouterr()
+    assert main(['--no-color', '-C', str(root), 'explain', 'pairs.total', '--english']) == 0
+    out = capsys.readouterr().out
+    assert 'or, in the other branch,' in out and 'then the' in out and 'reference to one CTE' in out, out
+    assert '(reading ' not in out and 'Quoted as SQL' not in out, out

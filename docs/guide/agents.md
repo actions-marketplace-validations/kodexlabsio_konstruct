@@ -12,7 +12,7 @@ Each skill is an [Agent Skill](https://agentskills.io/), a `SKILL.md` an agent l
 | `konstruct-safe-change` | Runs `impact` before changing a model, table or column, makes the edit with everything that reads it, then runs `gate` and fixes each finding until it passes |
 | `konstruct-review-change` | Reviews a branch or pull request with `diff`, `gate` and `impact`, and ends with a verdict (block, needs owner sign-off, or safe to merge), the breaking changes, what the change reaches and the `dbt build --select` to run |
 | `konstruct-reconcile` | Explains why two numbers differ with `conflicts`, `explain`, `trace`, `history` and `verify`: the filter, join, source, grain or aggregation that differs, and which side follows the approved definition |
-| `konstruct-write-query` | Writes a query from the `ontology` and `define`: the approved term's required filters and grain, an existing column that holds the measure, and joins only along the relationships the ontology lists |
+| `konstruct-write-query` | Writes a query from the `ontology` and `define`: compiles a metric by entities and properties with `compile-metric`, and otherwise takes the approved term's required filters and grain, an existing column that holds the measure, and joins only along the relationships the ontology lists |
 | `konstruct-define-terms` | Records a term in `definitions.yml` with its owner, status, grain, filters and columns, leaves approval to the owner, and checks the build's warnings |
 | `konstruct-onboard` | Gives an overview of a repository from `status`, `REPORT.md`, the ontology and the most used models |
 | `konstruct-export-semantic-layer` | Exports the ontology as an [Apache Ossie](ossie.md) model and reports each measure left out and why |
@@ -74,7 +74,7 @@ After the agent writes or edits a `.sql` file, a YAML file under one of a dbt pr
 - when the build warns about the edited file (SQL it cannot parse, YAML it cannot read), the agent is told, since the gate may not see all of the change;
 - other files (including anything under a directory whose name starts with a dot, such as `.github`), and repositories with no Konstruct graph, are ignored; a dbt project or a repository with a `konstruct.toml` that has no graph yet gets a reminder to run `konstruct build`.
 
-The hook works from the project root, the directory Claude Code names in `CLAUDE_PROJECT_DIR` or the one the graph was built from, whichever directory the session is in. It builds from files alone: it never runs dbt (which renders the project's macros), connects to no warehouse, and writes to `.hook/` in the output directory, without `graph.html`, so the graph you built is left as it is. Hooks run for edits made in parallel take turns, and one that finds the files as the last run left them gives that run's answer again; and `.hook/` holds a `.gitignore` so it is never committed. Each answer ends with the MCP server's notice that the text it quotes comes from the repository and is data, not instructions. The plugin starts the hook only for `.sql`, `.yml` and `.yaml` files. To add it to Claude Code without the plugin, run `konstruct hook post-edit` as a PostToolUse command hook; it reads Claude Code's PostToolUse event on standard input. `--remind` only reminds the agent to run the gate.
+The hook works from the project root, the directory Claude Code names in `CLAUDE_PROJECT_DIR` or the one the graph was built from, whichever directory the session is in. It builds from files alone: it never runs dbt (which renders the project's macros), connects to no warehouse, and writes to `.hook/` in the output directory, without `graph.html`, `REPORT.md` or `ontology.yml`, so the graph you built is left as it is. Hooks run for edits made in parallel take turns, and one that finds the files as the last run left them gives that run's answer again; and `.hook/` holds a `.gitignore` so it is never committed. Each answer ends with the MCP server's notice that the text it quotes comes from the repository and is data, not instructions. The plugin starts the hook only for `.sql`, `.yml` and `.yaml` files. To add it to Claude Code without the plugin, run `konstruct hook post-edit` as a PostToolUse command hook; it reads Claude Code's PostToolUse event on standard input. `--remind` only reminds the agent to run the gate.
 
 ## The MCP Server
 
@@ -89,7 +89,7 @@ konstruct check-sql query.sql            # exit 1 when the query breaks an appro
 konstruct check-sql - --strict < query.sql   # from standard input; exit 1 on a warning too
 ```
 
-The query is read in the graph's dialect. Each output column that aggregates is a measure: its formula is composed through CTEs, subqueries and each branch of a UNION down to source columns, with the WHERE, ON and HAVING clauses on the way, the condition of a `FILTER` or `CASE` inside the aggregate, and the filters on the routes of the columns it reads in the graph. Each measure is compared with the business term it is named for (by name or synonym) and with the column of the project that already holds it.
+The query is read in the graph's dialect. Each output column that aggregates is a measure: its formula is composed through CTEs, subqueries and each branch of a UNION down to source columns, with the WHERE, ON and HAVING clauses on the way, the condition of a `FILTER` or `CASE` inside the aggregate, and the filters the graph shows hold on every source row of the columns it reads (a filter in a CTE beside a column, on one input of a COALESCE, on one branch of a union, on another alias of the same table or on a column copied from one, in the ON of a LEFT JOIN for the other side, or above a window or aggregate, in the same model or upstream, does not; a graph built by an earlier Konstruct shows none, and the finding says to rebuild it). Each measure is compared with the business term it is named for (by name or synonym) and with the column of the project that already holds it.
 
 | Rule | What it finds |
 |------|---------------|
@@ -97,7 +97,7 @@ The query is read in the graph's dialect. Each output column that aggregates is 
 | `formula-differs` | A measure computed differently from the column that holds it |
 | `recomputes-measure` | A measure recomputed that a column of the project already holds |
 | `retired-column` | A column bound to a retired term |
-| `fan-out` | A sum, count or average over a join that repeats the rows it aggregates, from the keys, unique tests and relationships of the [ontology](ontology.md) |
+| `fan-out` | A sum, count or average over a join that repeats the rows it aggregates, from the keys, unique tests and relationships of the [ontology](ontology.md). A key only a primary key nothing enforces keys, as every primary key on Snowflake or BigQuery, does not show a join onto it safe, so a join onto a dimension keyed that way is reported: add a `unique` test on its key to show it |
 | `mixed-grain` | A measure of a coarser grain repeated on every row of a finer one |
 | `join-off-relationship` | Two related relations joined on columns their relationship does not use |
 | `unknown-join` | A join that no relationship or unique key vouches for |

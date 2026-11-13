@@ -1,5 +1,6 @@
 //! The parts of Konstruct that run natively: graph traversal, name resolution, search, formula
-//! identity, the topic routing of Kafka Connect configuration and `konstruct serve`.
+//! identity, the topic routing of Kafka Connect configuration, the readers of Airflow DAG files
+//! and Dagster definitions, and `konstruct serve`.
 //!
 //! The Python package `konstruct` keeps its whole API; these modules hold the work that is
 //! faster as compiled code, and the `python` feature exposes them as `konstruct._core`. Without
@@ -23,19 +24,28 @@ macro_rules! routine {
     };
 }
 
+pub mod airflow;
+pub mod dagster;
+pub mod discover;
 pub mod fnv;
 pub mod graph;
 pub mod identity;
 pub mod json;
 pub mod keys;
 pub mod load;
+#[cfg(feature = "python")]
+pub(crate) mod model;
 pub mod names;
+pub mod pysyntax;
 pub mod route;
+pub mod scan;
 pub mod search;
 pub mod serve;
 pub mod substring;
 pub mod vector;
 pub mod words;
+pub mod write;
+pub mod yaml;
 
 #[cfg(test)]
 mod testing;

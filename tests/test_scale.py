@@ -101,11 +101,12 @@ def make_project(root: Path, models: int = MODELS, columns_per_model: int = COLU
 
 def give_entities(graph: Graph) -> None:
     """Give each model of a project from :func:`make_project` an entity, with a primary key on
-    ``c00``, and a measure, a ``SUM`` around ``c02``: the generated projects have neither. Used by
-    .kodex/scripts/benchmark.py and map_benchmark.py."""
+    ``c00`` under an enforced contract, and a measure, a ``SUM`` around ``c02``: the generated
+    projects have neither. Used by .kodex/scripts/benchmark.py and map_benchmark.py."""
     for node in graph.nodes.values():
         if node.kind == 'model':
             node.attrs['primary_key'] = ['c00']
+            node.attrs['primary_key_enforced'] = True
             column = graph.column(node.id, 'c02')
             if column is not None and isinstance(column.attrs.get('expression'), str):
                 column.attrs['expression'] = f'SUM({column.attrs["expression"]})'
@@ -144,8 +145,8 @@ def test_large_project(tmp_path: Path) -> None:
 
 
 def test_the_world_model_at_scale(tmp_path: Path) -> None:
-    """Every metric, one entity and a relate on the generated project, once each model has an
-    entity and a measure (as .kodex/scripts/benchmark.py gives them)."""
+    """Every metric, one entity, a relate and a compiled metric on the generated project, once each
+    model has an entity and a measure (as .kodex/scripts/benchmark.py gives them)."""
     import importlib.util
 
     script = Path(__file__).resolve().parents[1] / '.kodex' / 'scripts' / 'benchmark.py'
@@ -159,7 +160,31 @@ def test_the_world_model_at_scale(tmp_path: Path) -> None:
     assert found['entities'] == MODELS and found['metrics'] == 2 * MODELS
     assert found['relate_hops'] > 1
     assert found['metrics_s'] < 10 and found['entity_ms'] < 1000 and found['relate_ms'] < 500, found
+    assert found['compile_hops'] > 1 and found['compile_ms'] < 2000, found
     print(f'\n{MODELS} models: {found}')
+
+
+def test_graph_json_is_written_and_read_back_fast(tmp_path: Path) -> None:
+    """The graph of 2,000 models (23 MB of JSON) is written in a fraction of a second, by
+    the native core, to the same bytes whether the graph was built or read from graph.json."""
+    from konstruct.core.graph import Graph
+
+    make_project(tmp_path, models=2000, columns_per_model=15)
+    built = Project(tmp_path).build(run_dbt=False, warehouses=False).graph
+    path = tmp_path / 'konstruct-out' / 'graph.json'
+    written = tmp_path / 'again.json'
+    timings = []
+    for _ in range(3):
+        started = time.perf_counter()
+        built.write(written)
+        timings.append(time.perf_counter() - started)
+    assert written.read_bytes() == path.read_bytes()
+    read = Graph.read(path)
+    read.write(written)
+    assert written.read_bytes() == path.read_bytes()
+    size = path.stat().st_size / 1e6
+    assert min(timings) < 0.6, f'writing {size:.1f} MB took {min(timings):.2f}s'
+    print(f'\n2000 models: {size:.1f} MB of graph.json written in {min(timings):.2f}s')
 
 
 def _graph(root: Path) -> str:
@@ -204,6 +229,109 @@ def test_models_analysed_in_workers_give_the_same_graph(
             graphs.append(_graph(root))
         assert graphs[0] == graphs[1]
     assert used[1] > 0 and used[3] > 0  # the three-worker builds used results from workers
+
+
+def _count_analyses(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Every analysis of a model a build makes: the batches given to workers, the results from
+    workers it used, and those made in its own process."""
+    from konstruct.engine import build
+
+    monkeypatch.setattr(build, 'PARALLEL_MINIMUM', 4)
+    counts: dict[str, Any] = {'batches': [], 'used': [], 'here': 0}
+    real_map, real_close, real_analyse = build._Workers.map, build._Workers.close, build._analyse_model
+
+    def map_(self: Any, jobs: list[Any]) -> Any:
+        counts['batches'].append(len(jobs))
+        return real_map(self, jobs)
+
+    def close(self: Any) -> None:
+        counts['used'].append(self.used)
+        real_close(self)
+
+    def analyse(job: Any) -> Any:
+        counts['here'] += 1
+        return real_analyse(job)
+
+    monkeypatch.setattr(build._Workers, 'map', map_)
+    monkeypatch.setattr(build._Workers, 'close', close)
+    monkeypatch.setattr(build, '_analyse_model', analyse)
+    return counts
+
+
+def _reversed_project(root: Path, *, stale: str | list[str] | None = None) -> None:
+    """make_project's 80 models with the manifest's nodes in reverse, as dbt lists them in no
+    particular order; with ``stale``, models whose catalog lacks a column their SQL gives them."""
+    make_project(root, 80, 6)
+    manifest_path = root / 'target' / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    manifest['nodes'] = dict(reversed(manifest['nodes'].items()))
+    manifest_path.write_text(json.dumps(manifest))
+    if stale:
+        catalog_path = root / 'target' / 'catalog.json'
+        catalog = json.loads(catalog_path.read_text())
+        for name in [stale] if isinstance(stale, str) else stale:
+            del catalog['nodes'][f'model.big.{name}']['columns']['c05']
+        catalog_path.write_text(json.dumps(catalog))
+
+
+def test_an_update_with_a_stale_catalog_analyses_what_one_worker_would(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With every tenth model's catalog out of date, an --update with nothing changed analyses
+    nothing, and one after an edit to two models analyses what a build in one process does: the
+    cached analyses say which models' columns their SQL changes."""
+    counts = _count_analyses(monkeypatch)
+    analysed: dict[str, list[int]] = {}
+    for workers in ('1', '2'):
+        monkeypatch.setenv('KONSTRUCT_WORKERS', workers)
+        root = tmp_path / workers
+        root.mkdir()
+        _reversed_project(root, stale=[f'm{i:03}' for i in range(0, 80, 10)])
+        Project(root).build(warehouses=False, run_dbt=False)
+        found = analysed.setdefault(workers, [])
+        for edit in (False, True):
+            if edit:
+                manifest_path = root / 'target' / 'manifest.json'
+                manifest = json.loads(manifest_path.read_text())
+                for name in ('m030', 'm055'):
+                    node = manifest['nodes'][f'model.big.{name}']
+                    node['compiled_code'] = node['raw_code'] = node['raw_code'].replace(
+                        'b.c01 > 0', 'b.c01 > 1'
+                    )
+                    node['checksum'] = {'checksum': f'{name}-edited'}
+                manifest_path.write_text(json.dumps(manifest))
+            counts['here'], counts['batches'] = 0, []
+            Project(root).build(update=True, warehouses=False, run_dbt=False)
+            found.append(counts['here'] + sum(counts['batches']))
+    assert analysed['2'] == analysed['1'] and analysed['1'][0] == 0 and analysed['1'][1] >= 2
+
+
+@pytest.mark.parametrize('stale', [None, 'm010'])
+def test_catalogued_models_are_analysed_in_workers_in_any_manifest_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stale: str | None
+) -> None:
+    """dbt writes a manifest's nodes in no particular order, so models are applied deepest chain
+    first; models whose upstream columns a catalog lists are still analysed in workers, a level
+    at a time, and each model once. Those that read a model whose SQL gives it a column its
+    catalog does not list wait for it, rather than being analysed again."""
+    counts = _count_analyses(monkeypatch)
+    graphs = []
+    for workers in ('1', '2'):
+        monkeypatch.setenv('KONSTRUCT_WORKERS', workers)
+        root = tmp_path / workers
+        root.mkdir()
+        _reversed_project(root, stale=stale)
+        Project(root).build(warehouses=False, run_dbt=False)
+        graphs.append(_graph(root))
+        if workers == '1':
+            assert counts['here'] == 80 and counts['batches'] == []
+            counts['here'] = 0
+    assert graphs[0] == graphs[1]
+    # Two workers: no model analysed twice, and most in the workers.
+    assert sum(counts['batches']) + counts['here'] == 80
+    assert counts['used'][1] == sum(counts['batches']) >= 60
+    readers = {'m020', 'm021', 'm030', 'm031', 'm032'}
+    assert len(counts['batches']) > 1 and (stale is None or sum(counts['batches']) <= 80 - len(readers))
 
 
 def test_workers_import_nothing_from_the_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,6 +419,177 @@ def test_workers_keep_their_directory_off_the_path() -> None:
     finally:
         workers.close()
     assert directory is not None and not Path(directory).exists()
+
+
+DAG_TEMPLATE = '''"""Load and model the {name} feed."""
+
+from datetime import datetime
+
+from airflow import DAG
+from airflow.decorators import task
+from airflow.operators.bash import BashOperator
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
+
+SCHEMA = "analytics"
+
+with DAG(
+    dag_id="feed_{index}",
+    schedule="@daily",
+    start_date=datetime(2024, 1, 1),
+    tags=["feeds", "group{group}"],
+    description=f"The {name} feed, loaded into {{SCHEMA}}",
+) as dag:
+    seed = BashOperator(task_id="seed", bash_command="cd /opt/shop && dbt seed --select {name}")
+    staged = BashOperator(
+        task_id="staged",
+        bash_command="dbt run --select staging.{name}+ --exclude tag:slow && dbt test --select {name}",
+    )
+    summary = SQLExecuteQueryOperator(
+        task_id="summary",
+        sql=(
+            f"insert into {{SCHEMA}}.{name}_daily "
+            "select day, count(*) as events, sum(amount) as revenue "
+            f"from {{SCHEMA}}.{name}_events group by day"
+        ),
+    )
+
+    @task
+    def notify():
+        """Tell the owners the {name} feed is loaded."""
+        return "done"
+
+    check = BashOperator(task_id="check", bash_command="echo ok")
+    publish = BashOperator(task_id="publish", bash_command="echo ok")
+
+    seed >> staged >> summary >> notify()
+    summary >> check >> publish
+'''
+
+OTHER_TEMPLATE = '''"""A helper module of the {name} service."""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+{mention}
+
+@dataclass
+class {name}Record:
+    key: str
+    values: dict[str, int] = field(default_factory=dict)
+
+    def total(self) -> int:
+        return sum(self.values.values())
+
+
+def load(path: Path) -> list[{name}Record]:
+    """Read the records saved at ``path``."""
+    found = []
+    for line in path.read_text().splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        item = json.loads(line)
+        found.append({name}Record(key=item["key"], values=item.get("values", {{}})))
+    log.info("read %d records from %s", len(found), path)
+    return found
+
+
+def merge(left: {name}Record, right: {name}Record) -> {name}Record:
+    values = dict(left.values)
+    for key, count in right.values.items():
+        values[key] = values.get(key, 0) + count
+    return {name}Record(key=left.key, values=values)
+
+
+class {name}Service:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.records: dict[str, {name}Record] = {{}}
+
+    def refresh(self) -> int:
+        for path in sorted(self.root.glob("*.jsonl")):
+            for record in load(path):
+                known = self.records.get(record.key)
+                self.records[record.key] = merge(known, record) if known else record
+        return len(self.records)
+'''
+
+ASSETS_TEMPLATE = '''from dagster import AssetKey, Definitions, asset, define_asset_job
+
+
+@asset(group_name="feeds")
+def raw_{index}():
+    """The raw {index} feed."""
+    return []
+
+
+@asset(group_name="feeds", deps=[AssetKey("source_{index}")])
+def cleaned_{index}(raw_{index}):
+    return raw_{index}
+
+
+feeds_{index} = define_asset_job("feeds_{index}", selection="cleaned_{index}")
+defs = Definitions(assets=[raw_{index}, cleaned_{index}], jobs=[feeds_{index}])
+'''
+
+
+def make_orchestrator_repo(root: Path, dags: int, others: int, assets: int = 0) -> None:
+    """A repository of ``dags`` Airflow DAG files, ``assets`` Dagster definition files and
+    ``others`` Python files that are neither (one in twenty mentions Airflow without defining a
+    DAG), in directories of 100. Also used by .kodex/scripts/orchestrator_benchmark.py."""
+    for kind, count in (('dags', dags), ('assets', assets), ('lib', others)):
+        for index in range(count):
+            directory = root / kind / f'part{index // 100:03}'
+            directory.mkdir(parents=True, exist_ok=True)
+            name = f'feed{index}'
+            if kind == 'dags':
+                text = DAG_TEMPLATE.format(name=name, index=index, group=index % 7)
+            elif kind == 'assets':
+                text = ASSETS_TEMPLATE.format(index=index)
+            else:
+                mention = '# Scheduled by the airflow deployment.\n' if index % 20 == 0 else ''
+                text = OTHER_TEMPLATE.format(name=name.capitalize(), mention=mention)
+            (directory / f'{name}.py').write_text(text)
+
+
+def test_orchestrator_files_are_found_and_read_at_scale(tmp_path: Path) -> None:
+    """Finding the DAG and Dagster files among thousands of Python files, and reading each DAG
+    file, take seconds of wall time at most, and find exactly the generated files."""
+    from konstruct.engine.config import discover_dag_files, discover_dagster_files, load_config
+    from konstruct.inputs.airflow import parse_file
+
+    dags, assets, others = 400, 100, 1000
+    make_orchestrator_repo(tmp_path, dags, others, assets)
+    config = load_config(tmp_path)
+    started = time.perf_counter()
+    found_dags = discover_dag_files(config)
+    found_assets = discover_dagster_files(config)
+    discovery = time.perf_counter() - started
+    assert len(found_dags) == dags
+    assert {p.parent.parent.name for p in found_dags} == {'dags'}
+    assert len(found_assets) == assets
+    started = time.perf_counter()
+    parsed = [parse_file(path) for path in found_dags]
+    reading = time.perf_counter() - started
+    assert all(len(d) == 1 and len(d[0].tasks) == 6 and d[0].warnings == [] for d in parsed)
+    seven = {d[0].dag_id: d[0] for d in parsed}['feed_7']
+    assert seven.dependencies == [
+        ('seed', 'staged'),
+        ('staged', 'summary'),
+        ('summary', 'notify'),
+        ('summary', 'check'),
+        ('check', 'publish'),
+    ]
+    assert discovery < 30, f'finding the files took {discovery:.1f}s'
+    assert reading < 30, f'reading {dags} DAG files took {reading:.1f}s'
+    print(
+        f'\n{dags + assets + others} files: discovery {discovery:.2f}s, '
+        f'reading {dags} DAG files {reading:.2f}s'
+    )
 
 
 MEASURES = 5

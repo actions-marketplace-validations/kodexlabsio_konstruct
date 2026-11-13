@@ -26,6 +26,7 @@ from konstruct.core.graph import Graph
 
 if TYPE_CHECKING:
     from konstruct.analysis.checksql import HistoryCheck, SqlCheck
+    from konstruct.analysis.compile import Compiled
     from konstruct.analysis.conflicts import Conflicts
     from konstruct.analysis.diff import Diff
     from konstruct.analysis.english import English
@@ -39,11 +40,13 @@ if TYPE_CHECKING:
     from konstruct.analysis.receipts import Receipt, ReceiptCheck
     from konstruct.analysis.release_notes import ReleaseNotes
     from konstruct.analysis.sensitivity import Sensitivity, Settings
+    from konstruct.analysis.timeline import Timeline
     from konstruct.analysis.verify import Engine, Verification
     from konstruct.analysis.why import Why
-    from konstruct.engine.build import BuildResult, Judged
+    from konstruct.engine.build import BuildResult
     from konstruct.engine.config import Config
     from konstruct.engine.trust import Trust
+    from konstruct.engine.watch import Judged
     from konstruct.plugins.registry import Plugins
     from konstruct.semantics.ontology import Ontology
     from konstruct.semantics.world import Connection, EntityDetail, Metrics
@@ -259,7 +262,7 @@ class Project:
         Returns:
             Paths relative to the project root; empty when the graph is up to date or not built.
         """
-        from konstruct.engine.build import changed_inputs
+        from konstruct.engine.watch import changed_inputs
 
         return changed_inputs(self.graph_path, self.graph, self._judged) if self.has_graph() else []
 
@@ -417,21 +420,16 @@ class Project:
 
         result = find_conflicts(self.graph, limit)
         if write:
-            from konstruct.outputs.html import graph_fingerprint, viewer_data, write_html, write_viewer_data
+            from konstruct.outputs.html import graph_fingerprint, show_conflicts
 
             jsonio.write_text(self.out_dir / 'CONFLICTS.md', result.markdown())
             # The fingerprint says which graph these are true of, so graph.html shows them only
             # while the graph is unchanged.
-            data = {**document(result), 'graph': graph_fingerprint(self.graph)}
+            graph_data = self.graph.to_dict()
+            fingerprint = graph_fingerprint(self.graph, graph_data)
+            data = {**document(result), 'graph': fingerprint}
             jsonio.write_text(self.out_dir / 'conflicts.json', json.dumps(data, indent=1) + '\n')
-            page, explain = self.out_dir / 'graph.html', self.out_dir / 'explain.json'
-            if page.is_file() or explain.is_file():
-                # explain.json too: `konstruct serve` reloads it when it changes.
-                shown = viewer_data(self.graph, self.out_dir)
-                if explain.is_file():
-                    write_viewer_data(shown, explain)
-                if page.is_file():
-                    write_html(self.graph, page, data=shown)
+            show_conflicts(self.graph, self.out_dir, graph_data, fingerprint)
         return result
 
     def check_sql(self, sql: str) -> SqlCheck:
@@ -701,6 +699,62 @@ class Project:
         from konstruct.analysis.sensitivity import Settings
 
         return Settings.read(self.config().sections.get('sensitivity'))
+
+    def compile_metric(
+        self,
+        metric: str,
+        *,
+        by: Sequence[str] = (),
+        where: Sequence[str] = (),
+        since: str | None = None,
+        until: str | None = None,
+        time: str | None = None,
+        dialect: str | None = None,
+    ) -> Compiled:
+        """A metric, grouped and filtered by the business's entities and properties, compiled to
+        SQL without running it.
+
+        The SQL reads the metric from the relation that holds it and joins only along relationships the
+        project shows many-to-one or one-to-one, each onto a key a test, a primary key something
+        enforces or ``konstruct verify`` shows unique; it refuses to add up a value its lineage shows
+        copied from another grain, and it always applies the filters the metric's definition requires.
+        What it rests on is what the project states and Konstruct reads: a key that repeats despite its
+        test can still repeat rows. The result lists every fact it rests on with its confidence, and
+        flags those that are only inferred, and a ``where`` condition on a joined property, which leaves
+        out the rows that find no match. A query whose joins could repeat rows, that rests on a check
+        ``konstruct verify`` failed, or that asks for what cannot be placed is refused, with the reason
+        and the link, and has no SQL; so is a condition that is not one SQL condition, a date that is
+        not ``YYYY-MM-DD`` and a dialect sqlglot does not know.
+
+        Args:
+            metric: The metric's name or synonym, or a column holding it, as :meth:`metric` takes it.
+            by: Entities (``customer``, for its key), properties (``customer.first_name``, or
+                ``first_name`` when one entity reached has it) and time grains (``month``, or
+                ``order_date:month``) to group by.
+            where: Conditions on properties, as SQL (``customer.first_name = 'Michael'``).
+            since: The first date covered, ``YYYY-MM-DD``.
+            until: The date after the last one covered.
+            time: The property that dates the metric, for a grain or a range; by default the one
+                date or time column of the metric's relation.
+            dialect: The SQL dialect to write, by default the project's.
+
+        Returns:
+            The SQL, the relationships its joins follow, the required filters it added, the facts
+            with their confidence, the flags and anything refused.
+
+        Raises:
+            konstruct.QueryError: ``metric`` finds no metric.
+
+        Example::
+
+            result = project.compile_metric('lifetime value', by=['customer.first_name'])
+            print(result.sql)
+            result.confidence, result.flags, result.refused
+        """
+        from konstruct.analysis.compile import OntologyQuery, compile_query
+
+        asked = OntologyQuery(metric, list(by), list(where), since, until, time)
+        return compile_query(self.graph, asked, dialect=dialect, ontology=self._world())
 
     def define(self, ref: str) -> query.Definitions:
         """The business definition of a term, or the terms that define a column.
@@ -1244,6 +1298,103 @@ class Project:
         except DiffError as error:
             raise query.QueryError(str(error)) from error
 
+    def timeline(
+        self,
+        since: str | None = None,
+        *,
+        until: str | None = None,
+        paths: Sequence[str] = (),
+        limit: int = 50,
+    ) -> Timeline:
+        """How the business's meaning changed, commit by commit.
+
+        Builds the world (entities, relationships, properties and metrics) at each commit from that
+        commit's own files and compares it with the world at the commit before: what was added,
+        removed, renamed or changed, a formula or the rows a metric is computed over, required
+        filters, trust, and each definition's status, owner and approval date, with the commit's
+        author, co-authors and date and in plain English. A commit that changes none of that, such
+        as one that only reformats SQL, has no entry. dbt models are rendered with each commit's
+        macros and today's manifest; nothing runs dbt or connects to a warehouse. Each commit's
+        world is kept in the user's cache directory, so a second call builds only new commits.
+
+        Args:
+            since: A commit, tag or date (``2026-10-01``) the range starts after; by default the
+                whole history.
+            until: A commit, tag or date the range ends at (default HEAD).
+            paths: Only commits that changed these files or directories, relative to the project.
+            limit: The most commits read, the most recent.
+
+        Returns:
+            The entries, oldest first; ``release_notes()`` gives a sentence for each metric change
+            and ``markdown()`` the whole as Markdown to post.
+
+        Raises:
+            konstruct.QueryError: ``since`` or ``until`` is not a commit, tag or date, the project is
+                not in a git repository, or ``limit`` is below 1.
+
+        Example::
+
+            timeline = project.timeline('v1.4')
+            [(e.commit.author, [c.headline() for c in e.changes]) for e in timeline.entries]
+            timeline.release_notes()
+        """
+        from konstruct.analysis.diff import DiffError
+        from konstruct.analysis.timeline import timeline
+
+        if limit < 1:
+            raise query.QueryError('the limit must be at least 1 commit')
+        try:
+            return timeline(self.root, since=since, until=until, paths=paths, limit=limit, graph=self.graph)
+        except DiffError as error:
+            raise query.QueryError(str(error)) from error
+
+    def timeline_effect(
+        self,
+        since: str | None = None,
+        *,
+        until: str | None = None,
+        paths: Sequence[str] = (),
+        limit: int = 50,
+        warehouse: str | Path | None = None,
+        max_rows: int = 1_000_000,
+    ) -> Timeline:
+        """The timeline, with what each change to a metric's formula or rows does on today's data.
+
+        For each such change, the change in the same commit to one of the metric's columns or
+        relations, or to one upstream of them, is run as it was before the commit and as it was
+        after on the same data, as :meth:`effect` runs it: read-only in verify's engines, the tables
+        it reads copied, nothing written to the warehouse.
+
+        Args:
+            since: As for :meth:`timeline`.
+            until: As for :meth:`timeline`.
+            paths: As for :meth:`timeline`.
+            limit: As for :meth:`timeline`.
+            warehouse: As for :meth:`verify`.
+            max_rows: The most rows copied from any table.
+
+        Returns:
+            The timeline, each metric change of formula or rows with its ``effect``, and its release
+            notes saying what the change does on today's data.
+
+        Raises:
+            konstruct.QueryError: As for :meth:`timeline`, or no warehouse is found.
+
+        Example::
+
+            timeline = project.timeline_effect('v1.4')
+            timeline.release_notes()
+        """
+        from konstruct.analysis.timeline import effects
+
+        result = self.timeline(since, until=until, paths=paths, limit=limit)
+        if not any({'formula', 'rows'} & set(c.fields) for _, c in result.changes('metric')):
+            return result  # nothing to run, so no warehouse is opened
+        target = self._target(warehouse)
+        effects(result, self.graph, self.root, target, max_rows=max_rows, ontology=self.ontology())
+        result.warehouse = self._shown(target, result.warehouse or '')
+        return result
+
     def effect(
         self,
         since: str | None = None,
@@ -1595,8 +1746,9 @@ class Project:
                 for finding in result.findings:
                     print(finding.rule, finding.message, finding.fix)
         """
-        from konstruct.analysis.gate import gate, plugins_at
+        from konstruct.analysis.gate import gate
         from konstruct.analysis.laws import recorded
+        from konstruct.engine.config import plugins_at
         from konstruct.plugins.registry import Plugins
 
         # The plugins the base enables run too, its inputs in the update and its checks in the

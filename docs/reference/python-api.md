@@ -28,14 +28,16 @@ and a `graph.json` written by a newer Konstruct raises {class}`konstruct.FormatE
 
 | Package | Modules |
 |---------|---------|
-| `konstruct.core` | `graph` (the graph and its traversal), `sql` (column lineage from SQL), `mutate` (mutants of a query), `jsonio` |
-| `konstruct.inputs` | `dbt`, `jinja`, `airflow`, `dagster`, `spark`, `looker`, `powerbi`, `loaders`, `ingestion`, `hcl`, `warehouse`, `usage` |
-| `konstruct.engine` | `build`, `config`, `worker` |
-| `konstruct.semantics` | `definitions`, `vocabulary`, `ontology`, `world`, `ossie`, `rows` (whether a composed formula counts its column's rows), `registry` |
-| `konstruct.analysis` | `query`, `semantic`, `explain`, `english`, `conflicts`, `diff`, `gate`, `verify`, `integrity`, `mutation`, `why`, `release_notes`, `effect`, `laws`, `history`, `receipts`, `lock`, `sensitivity`, `erasure` |
+| `konstruct.core` | `graph` (the graph and its traversal), `sql` (column lineage from SQL), `mutate` (mutants of a query), `jsonio`, `yamlio` (YAML read by the core) |
+| `konstruct.inputs` | `dbt`, `dbt_commit` (a dbt manifest as a commit's files are), `jinja`, `airflow`, `dagster`, `spark`, `looker`, `powerbi`, `loaders`, `ingestion`, `hcl`, `warehouse`, `usage` |
+| `konstruct.engine` | `build`, `config`, `worker`, `snapshot` (a commit's files, and the user's private cache) |
+| `konstruct.semantics` | `definitions`, `vocabulary`, `ontology`, `world`, `world_facts` (the world as facts to compare), `ossie`, `rows` (whether a composed formula counts its column's rows), `registry` |
+| `konstruct.analysis` | `query`, `semantic`, `explain`, `english`, `conflicts`, `diff`, `gate`, `verify`, `integrity`, `mutation`, `why`, `release_notes`, `effect`, `timeline`, `laws`, `history`, `receipts`, `lock`, `sensitivity`, `erasure` |
 | `konstruct.outputs` | `report`, `html`, `export`, `compiled` (the ontology as tables, relationships and metrics for the platform exports), `owl`, `semantic_view`, `metric_view` |
 | `konstruct.interfaces` | `cli`, `project`, `mcp_server`, `skill`, `console`, `status` |
 | `konstruct.plugins` | `api` (the plugin API: protocols and types), `registry` (finding, enabling and loading plugins) |
+
+`konstruct.core.yamlio` has `load(text, loader=None, *, lines=False)`, `load_all` and `read(path, loader=None, *, lines=False)`. They read as PyYAML's safe loader reads, YAML 1.1: `loader` may be `yaml.SafeLoader`, `yaml.CSafeLoader` or None, and any other, a subclass of them too, raises `TypeError`; text that cannot be read, or a source that is not `str` or `bytes`, raises a `yaml.YAMLError`; with `lines` every mapping is a dict of string keys that holds its line as `__line__`.
 
 ## Opening and Building a Project
 
@@ -142,6 +144,7 @@ print(ontology.measure('customer lifetime value').columns[0].formula)
 .. automethod:: konstruct.Project.relate
 .. automethod:: konstruct.Project.sensitivity
 .. automethod:: konstruct.Project.erasure
+.. automethod:: konstruct.Project.compile_metric
 ```
 
 ## Checking SQL
@@ -188,6 +191,10 @@ print(notes.markdown())
 effects = project.effect('v1.4', models=['customers'])
 print([(c.headline(), c.effect.summary()) for c in effects.changes if c.effect])
 
+timeline = project.timeline('v1.4')  # how the business's meaning changed, commit by commit
+print([(e.commit.by, [c.headline() for c in e.changes]) for e in timeline.entries])
+print(project.timeline_effect('v1.4').release_notes())
+
 receipt = project.receipt(['customer_ltv.lifetime_value'], question='LTV of customer 3?')
 print(receipt.citation)
 print([(r.id, r.status) for r in project.check_receipts().receipts])
@@ -210,6 +217,8 @@ for pinned in pins.changes:
 .. automethod:: konstruct.Project.why
 .. automethod:: konstruct.Project.release_notes
 .. automethod:: konstruct.Project.effect
+.. automethod:: konstruct.Project.timeline
+.. automethod:: konstruct.Project.timeline_effect
 .. automethod:: konstruct.Project.receipt
 .. automethod:: konstruct.Project.receipts
 .. automethod:: konstruct.Project.check_receipts
@@ -334,6 +343,21 @@ for pinned in pins.changes:
    :members:
 
 .. autoclass:: konstruct.semantics.world.Hop
+   :members:
+
+.. autoclass:: konstruct.analysis.compile.Compiled
+   :members:
+
+.. autoclass:: konstruct.analysis.compile.OntologyQuery
+   :members:
+
+.. autoclass:: konstruct.analysis.compile.Fact
+   :members:
+
+.. autoclass:: konstruct.analysis.compile.RequiredFilter
+   :members:
+
+.. autoclass:: konstruct.analysis.compile.Refusal
    :members:
 
 .. autoclass:: konstruct.semantics.ontology.Rule
@@ -609,7 +633,7 @@ for pinned in pins.changes:
 ## The Graph
 
 `project.graph` is the {class}`konstruct.Graph` behind every answer, for anything the questions
-above do not cover. Nodes and edges are plain dataclasses; the edge kinds and their directions are
+above do not cover. Nodes and edges are dataclasses (`dataclasses.fields`, `asdict` and `replace` work on them; `vars(node)` is empty, as their fields are not in a `__dict__`); the edge kinds and their directions are
 listed in [Outputs and the Graph Format](outputs.md).
 
 ```python
@@ -670,6 +694,24 @@ These are stable enough to build on, but `Project` is the supported entry point.
 
 .. autoclass:: konstruct.analysis.effect.ColumnEffect
    :members:
+```
+
+### Timeline
+
+```{eval-rst}
+.. autoclass:: konstruct.analysis.timeline.Timeline
+   :members:
+
+.. autoclass:: konstruct.analysis.timeline.Entry
+   :members:
+
+.. autoclass:: konstruct.semantics.world_facts.WorldChange
+   :members:
+
+.. autoclass:: konstruct.semantics.world_facts.World
+   :members:
+
+.. autofunction:: konstruct.semantics.world_facts.world_diff
 ```
 
 ### Search by Meaning

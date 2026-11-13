@@ -743,7 +743,7 @@ def test_tools_that_fail_are_left_out(
 
 
 def pack_plugin(
-    site: Path, *, manifest: str | None = 'api_version = 1\n', pack: str = 'name: helpdesk\n'
+    site: Path, *, manifest: str | None = 'api_version = 1\n', pack: str | bytes = 'name: helpdesk\n'
 ) -> None:
     package = site / 'packs_only'
     (package / 'packs').mkdir(parents=True)
@@ -751,7 +751,7 @@ def pack_plugin(
     (package / '__init__.py').write_text("raise RuntimeError('a data-only plugin was imported')\n")
     if manifest is not None:
         (package / 'packs' / 'plugin.toml').write_text(manifest)
-    (package / 'packs' / 'helpdesk.yml').write_text(pack)
+    (package / 'packs' / 'helpdesk.yml').write_bytes(pack.encode() if isinstance(pack, str) else pack)
     install(site, 'konstruct-packs-only', '1.0', {'konstruct.packs': {'helpdesk': 'packs_only.packs'}})
 
 
@@ -782,6 +782,10 @@ def test_a_data_only_pack_is_read_without_running_code(site: Path, tmp_path: Pat
         ),
         ({'pack': 'name: stripe\n'}, "pack 'stripe' is already provided by konstruct"),
         ({'pack': 'name: [unclosed\n'}, 'cannot read helpdesk.yml'),
+        ({'pack': 'name: "\\U00110000"\n'}, 'cannot read helpdesk.yml'),
+        ({'pack': 'name: "\\UFFFFFFFF"\n'}, 'cannot read helpdesk.yml'),
+        ({'pack': 'name: !!bool maybe\n'}, 'cannot read helpdesk.yml'),
+        ({'pack': b'name: caf\xe9\n'}, 'cannot read helpdesk.yml'),
     ],
 )
 def test_a_pack_plugin_that_cannot_be_used_is_reported(
@@ -1012,7 +1016,7 @@ def test_a_change_cannot_turn_off_the_checks_that_judge_it(example: Path, tmp_pa
 
 
 def test_plugins_enabled_at_a_base_that_cannot_be_read_are_none(tmp_path: Path) -> None:
-    from konstruct.analysis.gate import plugins_at
+    from konstruct.engine.config import plugins_at
 
     assert plugins_at(tmp_path, 'HEAD') == []
     root = tmp_path / 'repo'
@@ -1858,6 +1862,7 @@ def test_tool_listings_a_plugin_gets_wrong_leave_the_rest_served(
     assert [t for t in tools if '_' in t] == [
         'check_sql',
         'check_history',
+        'compile_metric',
         'release_notes',
         'mutation_test',
         'definition_effect',
@@ -2290,14 +2295,55 @@ def test_konstruct_reads_no_attribute_it_does_not_reserve(
             read.add(key)
             return super().setdefault(key, default)
 
-    for cls in (graph_module.Node, graph_module.Edge):
-        original = cls.__init__
+    for name in ('Node', 'Edge'):
+        cls = getattr(graph_module, name)
 
-        def init(self: Any, *args: Any, __original: Any = original, **kwargs: Any) -> None:
-            __original(self, *args, **kwargs)
+        def init(self: Any, *args: Any, __base: Any = cls.__init__, **kwargs: Any) -> None:
+            # The native class sets its fields in __init__; this records its attributes after.
+            __base(self, *args, **kwargs)
             self.attrs = Recording(self.attrs)
 
-        monkeypatch.setattr(cls, '__init__', init)
+        recorded = type(name, (cls,), {'__init__': init})
+        # Every module that built nodes and edges by name builds these instead.
+        for module in list(sys.modules.values()):
+            if getattr(module, name, None) is cls:
+                monkeypatch.setattr(module, name, recorded)
+
+    def recorded_graph(graph: Any) -> Any:
+        for node in graph.nodes.values():
+            node.attrs = Recording(node.attrs)
+        for edge in graph.edges:
+            edge.attrs = Recording(edge.attrs)
+        return graph
+
+    base = graph_module.Graph
+
+    class Graph(base):  # type: ignore[misc, valid-type]
+        # A graph read from graph.json holds plain dicts: every command's reads are recorded.
+        @classmethod
+        def read(cls, path: Any) -> Any:
+            return recorded_graph(super().read(path))
+
+        @classmethod
+        def from_json(cls, data: bytes, source: str = 'the graph') -> Any:
+            return recorded_graph(super().from_json(data, source))
+
+        # The graph makes the edges and columns that `add_edge` and `add_column` return.
+        def add_edge(self, *args: Any, **kwargs: Any) -> Any:
+            edge = super().add_edge(*args, **kwargs)
+            if edge is not None and not isinstance(edge.attrs, Recording):
+                edge.attrs = Recording(edge.attrs)
+            return edge
+
+        def add_column(self, *args: Any, **kwargs: Any) -> Any:
+            node = super().add_column(*args, **kwargs)
+            if not isinstance(node.attrs, Recording):
+                node.attrs = Recording(node.attrs)
+            return node
+
+    for module in list(sys.modules.values()):
+        if getattr(module, 'Graph', None) is base:
+            monkeypatch.setattr(module, 'Graph', Graph)
     root = str(jaffle)
     assert main(['build', root, '-q']) == 0
     for command in (

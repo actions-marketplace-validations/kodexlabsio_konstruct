@@ -30,6 +30,7 @@ still needs the breaking marks, as the commit check counts the fields gone with 
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
 import dataclasses
 import importlib.util
@@ -49,7 +50,7 @@ import yaml
 from mcp import Client
 
 import konstruct
-from konstruct import Project
+from konstruct import Project, _core
 from konstruct.interfaces import cli
 from konstruct.interfaces.cli import main, parser
 from konstruct.interfaces.mcp_server import build_server
@@ -216,14 +217,15 @@ def small(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def changed_jaffle(jaffle_built_graph: Path, tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The built example in git, with a history and a change to review.
 
-    The commits change stg_payments.amount, break and then mend stg_payments.sql (a formula
-    that cannot be worked out), change the owner of the lifetime value term and add a dbt
-    source. The working tree renames stg_payments.payment_method, which orders still reads,
-    changes the lifetime value formula, adds a filter to orders and drops one from the DAG's SQL,
-    changes a DAG task, tests, a description, an exposure and the source, adds, changes and
-    removes terms, and changes a file Konstruct does not analyse. The broken version is tagged
-    ``broken``, and the lifetime value term is taken back to agreed and then approved again in
-    new words, so its history changes each field from a value to another."""
+    The commits change stg_payments.amount, break and then mend stg_payments.sql (a formula that
+    cannot be worked out) and exposures.yml (YAML that cannot be read), change the owner of the
+    lifetime value term and add a dbt source. The working tree renames
+    stg_payments.payment_method, which orders still reads, changes the lifetime value formula,
+    adds a filter to orders and drops one from the DAG's SQL, changes a DAG task, tests, a
+    description, an exposure and the source, adds, changes and removes terms, and changes a file
+    Konstruct does not analyse. The broken version is tagged ``broken``, and the lifetime value
+    term is taken back to agreed and then approved again in new words, so its history changes
+    each field from a value to another."""
     root = tmp_path_factory.mktemp('interfaces') / 'jaffle_shop'
     shutil.copytree(jaffle_built_graph, root)
     graph = root / 'konstruct-out' / 'graph.json'
@@ -234,23 +236,59 @@ def changed_jaffle(jaffle_built_graph: Path, tmp_path_factory: pytest.TempPathFa
     _git(root, 'commit', '-qm', 'Add the project')
     payments = root / 'models' / 'staging' / 'stg_payments.sql'
     _edit(payments, 'amount / 100', 'amount / 100.0')
-    _git(root, 'commit', '-qam', 'Divide exactly')
+    _git(
+        root,
+        'commit',
+        '-qa',
+        '-m',
+        'Divide exactly',
+        '-m',
+        'Co-authored-by: Grace Hopper <grace@example.com>',
+    )
     working = payments.read_text()
     payments.write_text('select from where')
-    _git(root, 'commit', '-qam', 'Break the payments model')
+    exposures = root / 'models' / 'exposures.yml'
+    exposures_text = exposures.read_text()
+    exposures.write_text(exposures_text + 'broken: [\n')
+    _git(
+        root,
+        'commit',
+        '-qa',
+        '-m',
+        'Break the payments model and the exposures',
+        '-m',
+        'Co-authored-by: Grace Hopper <grace@example.com>',
+    )
     _git(root, 'tag', 'broken')
     payments.write_text(working)
-    _git(root, 'commit', '-qam', 'Mend the payments model')
+    exposures.write_text(exposures_text)
+    _git(root, 'commit', '-qam', 'Mend the payments model and the exposures')
     definitions = root / 'definitions.yml'
     _edit(
         definitions, 'owner: {name: Priya Shah, role: Head of Finance}', 'owner: {name: Ada, role: Analyst}'
     )
-    _git(root, 'commit', '-qam', 'Hand the lifetime value term over')
+    _git(
+        root,
+        'commit',
+        '-qa',
+        '-m',
+        'Hand the lifetime value term over',
+        '-m',
+        'Co-authored-by: Grace Hopper <grace@example.com>',
+    )
     _edit(definitions, 'status: approved\n    approved: 2026-10-30\n', 'status: agreed\n')
     _git(root, 'commit', '-qam', 'Take the lifetime value term back to agreed')
     _edit(definitions, 'Total value of every payment', 'Total value of all the payments')
     _edit(definitions, 'status: agreed\n', 'status: approved\n    approved: 2026-11-02\n')
-    _git(root, 'commit', '-qam', 'Approve the lifetime value term in new words')
+    _git(
+        root,
+        'commit',
+        '-qa',
+        '-m',
+        'Approve the lifetime value term in new words',
+        '-m',
+        'Co-authored-by: Grace Hopper <grace@example.com>',
+    )
     sources = root / 'models' / 'sources.yml'
     sources.write_text('version: 2\nsources:\n  - name: events\n    tables:\n      - name: raw_events\n')
     _git(root, 'add', '-A')
@@ -537,6 +575,18 @@ CHECKED_QUERIES = {
 }
 
 
+COMPLETED_ORDER_AMOUNT = """\
+  - name: Completed order amount
+    kind: measure
+    definition: What the customer was charged for an order they received and kept.
+    status: approved
+    owner: {name: Ana Ruiz, role: Finance}
+    approved: 2026-10-01
+    columns: [orders.amount]
+    filters: ["orders.status = 'completed'"]
+"""
+
+
 @pytest.fixture(scope='module')
 def checked(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A shop with business terms and a query file for each outcome of check-sql: one that passes,
@@ -636,6 +686,13 @@ def test_exit_statuses(
         'path finds no connection': status('-C', str(small), 'path', 'orders', 'refunds'),
         'entity matches nothing': status('-C', str(small), 'entity', 'no such entity'),
         'relate finds no connection': status('-C', str(apart), 'relate', 'store', 'region'),
+        'compile-metric compiles': status(
+            '-C', str(jaffle_built_graph), 'compile-metric', 'lifetime value', '--by', 'customer'
+        ),
+        'compile-metric refuses a join that repeats rows': status(
+            '-C', str(jaffle_built_graph), 'compile-metric', 'lifetime value', '--by', 'order.status'
+        ),
+        'compile-metric matches nothing': status('-C', str(small), 'compile-metric', 'no such metric'),
         'metric matches nothing': status('-C', str(small), 'metric', 'no such metric'),
         'define matches nothing': status('-C', str(small), 'define', 'no such term'),
         'define finds no term on a column': status('-C', str(small), 'define', 'orders.amount'),
@@ -829,6 +886,23 @@ QUESTIONS: dict[str, list[list[str]]] = {
     'entity': [['entity', 'customer'], ['entity', 'order']],
     'metric': [['metric'], ['metric', 'lifetime', 'value']],
     'relate': [['relate', 'customer', 'payment'], ['relate', 'payment', 'customer']],
+    'compile-metric': [
+        ['compile-metric', 'lifetime', 'value', '--by', 'customer'],
+        ['compile-metric', 'lifetime', 'value', '--by', 'order.status'],
+        [
+            'compile-metric',
+            'payment',
+            'amount',
+            '--by',
+            'customer.first_name',
+            '--by',
+            'order.order_date:month',
+            '--where',
+            "payment_method = 'coupon'",
+            '--since',
+            '2018-01-01',
+        ],
+    ],
     'explain': [
         ['explain', 'customers.customer_lifetime_value'],
         ['explain', 'customer_ltv.lifetime_value'],
@@ -877,9 +951,41 @@ EMPTY: dict[str, str] = {
 }
 # Fields the projects only ever fill with null, each with why; every other field must show the
 # type it holds, or a change to that type would pass.
+_COMMIT = 'a commit shows its co-authors in .entries[].commit.co_authors; this one has none'
+_EFFECT = 'the effect is the same document as release-notes .changes[].effect, filled there'
+EMPTY.update(
+    {
+        f'json timeline {path}.co_authors': _COMMIT
+        for path in ('.entries[].changes[].approval', '.entries[].compared_with', '.start', '.unknown[]')
+    }
+)
+EMPTY.update(
+    {
+        'json timeline .entries[].changes[].before.synonyms': 'synonyms are added, as .after.synonyms shows',
+        'json timeline .entries[].changes[].effect.key': _EFFECT,
+        'json timeline .notes': 'the projects build at every commit with nothing to note (tests/test_timeline.py)',
+    }
+)
 UNFILLED: dict[str, str] = {
     'json release-notes .changes[].effect': 'release-notes runs no SQL; verify --effect fills it',
     'json release-notes .warehouse': 'release-notes runs no SQL; verify --effect fills it',
+    **{
+        f'json timeline .entries[].changes[].{side}.{fact}': (
+            "only verify's checks of keys and relationships fill it"
+            if fact == 'check'
+            else "the business terms that name the projects' entities change in no commit (tests/test_timeline.py)"
+        )
+        for side in ('before', 'after')
+        for fact in ('check', 'term', 'description')
+    },
+    **{
+        f'json timeline .entries[].changes[].before.{fact}': 'it is added, as .after shows'
+        for fact in ('unit', 'currency')
+    },
+    **{
+        f'json timeline .entries[].changes[].effect.{path}': _EFFECT
+        for path in ('columns[].changed', 'columns[].matched', 'gained', 'lost', 'skipped')
+    },
     'json lock --check .consumer': (
         "only the gate checks a consumer's lockfile from its producer; `lock --check` checks the project's own"
     ),
@@ -986,6 +1092,23 @@ def test_json_documents(
     add('verify', '-C', str(noisy.root), 'verify', '--json')  # a model verify skips, and why
     add('verify', '-C', str(emptied), 'verify', '--json')  # keys and relationships it cannot check
     add('metric', '-C', str(measured), 'metric', '--json')
+    from tests import test_checksql
+
+    filtered = tmp_path / 'filtered'
+    filtered.mkdir()
+    test_checksql.make_shop(filtered, definitions=test_checksql.DEFINITIONS + COMPLETED_ORDER_AMOUNT)
+    # A required filter the query applies, and one the metric's own column already applies.
+    add(
+        'compile-metric',
+        '-C',
+        str(filtered),
+        'compile-metric',
+        'completed order amount',
+        '--by',
+        'order',
+        '--json',
+    )
+    add('compile-metric', '-C', str(filtered), 'compile-metric', 'net revenue', '--by', 'region', '--json')
     for root in (copy, small, revenue, unexplained, landed, measured):
         documents.setdefault('graph.json', []).append(
             json.loads((root / 'konstruct-out' / 'graph.json').read_text())
@@ -1009,11 +1132,50 @@ def test_json_documents(
     (shop / 'lifetime.sql').write_text(
         'create table main.ltv as select customer_id, sum(amount) * 2 as total from raw.orders group by customer_id'
     )
-    commit_to(shop, 'Move lifetime value and double it', 'Ada', '2026-07-01T10:00:00+00:00')
+    commit_to(
+        shop,
+        'Move lifetime value and double it\n\nCo-authored-by: Grace Hopper <grace@example.com>',
+        'Ada',
+        '2026-07-01T10:00:00+00:00',
+    )
     Project(shop).build()
     released = ['-C', str(shop)]
     add('release-notes', *released, 'release-notes', '--json')
     add('verify', *released, 'verify', '--effect', '--json')
+    # verify --effect --timeline prints the timeline's document, with each change's effect.
+    add('timeline', *released, 'verify', '--effect', '--timeline', '--json')
+    from tests.test_timeline import _definitions, _files
+    from tests.test_timeline import make_shop as make_timeline_shop
+
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'user-cache'))
+    meaning = make_timeline_shop(tmp_path / 'timeline' / 'shop')
+    (meaning / 'konstruct.toml').write_text('not toml = = =\n')
+    commit_to(meaning, 'Break the configuration', 'Linus', '2026-04-01T10:00:00+00:00')
+    (meaning / 'konstruct.toml').unlink()
+    required = _definitions(filters=True, name='Customer lifetime value', status='approved')
+    _files(
+        meaning,
+        **{
+            'definitions.yml': required.replace(
+                '    grain: one row per order\n',
+                '    grain: one row per order\n    synonyms: [sales]\n    unit: currency\n    currency: GBP\n',
+            )
+        },
+    )
+    commit_to(
+        meaning,
+        'Require the filter again\n\nCo-authored-by: Grace Hopper <grace@example.com>',
+        'Sam',
+        '2026-04-02T10:00:00+00:00',
+    )
+    # A business term renamed: the properties bound to it name another term.
+    definitions = meaning / 'definitions.yml'
+    renamed = definitions.read_text().replace('- name: Customer lifetime value', '- name: Customer value')
+    definitions.write_text(renamed)
+    commit_to(meaning, 'Rename customer lifetime value', 'Priya', '2026-04-03T10:00:00+00:00')
+    timed = ['-C', str(meaning)]
+    add('timeline', *timed, 'timeline', '--json')  # from the first commit, with every kind of change
+    add('timeline', *timed, 'timeline', '--since', 'v0', '--file', 'definitions.yml', '--json')
     add('diff', *git, 'diff', '--base', 'HEAD', '--format', 'json')
     add('diff', *git, 'diff', '--base', 'broken', '--format', 'json')  # a version that does not parse
     add('gate', *git, 'gate', '--base', 'HEAD', '--no-update', '--format', 'json')
@@ -1200,6 +1362,69 @@ def _signature(prefix: str, function: Any, entries: dict[str, str]) -> None:
         entries[f'{prefix} ->'] = str(signature.return_annotation)
 
 
+STUBS = ROOT / 'konstruct' / '_core.pyi'
+
+
+def _stub_signature(prefix: str, function: ast.FunctionDef, entries: dict[str, str]) -> None:
+    """``_signature`` for a function of the native core's stub, which is where the types of what
+    the core exports are written: a parameter's position, annotation and default."""
+    arguments = function.args
+    positional = [*arguments.posonlyargs, *arguments.args]
+    positional = [a for a in positional if a.arg not in ('self', 'cls')]
+    defaults = [None] * (len(positional) - len(arguments.defaults)) + list(arguments.defaults)
+    entries_for: list[tuple[ast.arg, ast.expr | None, str]] = [
+        (a, d, 'positional') for a, d in zip(positional, defaults, strict=True)
+    ]
+    entries_for += [
+        (a, d, 'keyword') for a, d in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
+    ]
+    position = 0
+    for argument, default, kind in entries_for:
+        value = ast.unparse(argument.annotation) if argument.annotation is not None else 'any'
+        if kind == 'positional':
+            value = f'#{position} {value}'
+            position += 1
+        else:
+            value = f'keyword {value}'
+        value += f' = {ast.literal_eval(default)!r}' if default is not None else ', required'
+        entries[f'{prefix} {argument.arg}'] = value
+    if arguments.kwarg is not None:
+        annotation = ast.unparse(arguments.kwarg.annotation) if arguments.kwarg.annotation else 'any'
+        entries[f'{prefix} {arguments.kwarg.arg}'] = f'{annotation}, variadic keyword'
+    if function.returns is not None:
+        entries[f'{prefix} ->'] = ast.unparse(function.returns)
+
+
+def _stub_entries(prefix: str, name: str, entries: dict[str, str]) -> None:
+    """What ``python_entries`` records of a class the native core exports, from its stub: the
+    fields of a record, ``__init__`` for anything else, and the methods and properties."""
+    tree = ast.parse(STUBS.read_text(encoding='utf-8'))
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == name)
+    record = name in ('Node', 'Edge', 'Step')
+    for item in cls.body:
+        if isinstance(item, ast.AnnAssign) and record and not ast.unparse(item.target).startswith('__'):
+            entries[f'{prefix}.{ast.unparse(item.target)}'] = f'field {ast.unparse(item.annotation)}'
+    for item in cls.body:
+        if not isinstance(item, ast.FunctionDef):
+            continue
+        decorators = {ast.unparse(d) for d in item.decorator_list}
+        if item.name == '__init__':
+            if not record:
+                _stub_signature(prefix, item, entries)
+        elif item.name.startswith('_'):
+            continue
+        elif 'property' in decorators:
+            entries[f'{prefix}.{item.name}'] = (
+                f'property {ast.unparse(item.returns) if item.returns else "any"}'
+            )
+        elif 'classmethod' in decorators:
+            entries[f'{prefix}.{item.name}'] = 'classmethod'
+            _stub_signature(f'{prefix}.{item.name}', item, entries)
+        else:
+            entries[f'{prefix}.{item.name}'] = 'method'
+            _stub_signature(f'{prefix}.{item.name}', item, entries)
+
+
 def python_entries() -> dict[str, str]:
     entries: dict[str, str] = {}
     for name in sorted(konstruct.__all__):
@@ -1210,6 +1435,9 @@ def python_entries() -> dict[str, str]:
             continue
         entries[prefix] = 'exception' if issubclass(value, BaseException) else 'class'
         if issubclass(value, BaseException):
+            continue
+        if getattr(_core, name, None) is value:
+            _stub_entries(prefix, name, entries)
             continue
         if dataclasses.is_dataclass(value):
             for item in dataclasses.fields(value):

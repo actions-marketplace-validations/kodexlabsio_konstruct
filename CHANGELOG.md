@@ -1,3 +1,81 @@
+## v0.13.23 (2026-11-12)
+
+### Fix
+
+- **sql**: Report failed lineage for a relation whose name holds a semicolon
+
+### Perf
+
+- **query**: Answer an unchanged hook without loading the MCP SDK or sqlglot
+- **query**: Import sqlglot in verify only where a query is read
+- **build**: Read every YAML file through the core and drop the PyYAML reader
+- **build**: Read YAML in the Rust core as PyYAML's safe loader reads it
+
+## v0.13.22 (2026-11-12)
+
+### Feat
+
+- **cli**: Show how the business's meaning changed with konstruct timeline
+- **mcp**: Compile a metric query over MCP with the compile_metric tool
+- **cli**: Compile a metric query from the command line with konstruct compile-metric
+- **query**: Compile a metric by entities and properties to SQL that joins onto unique keys only
+- **lineage**: Record which of a relation's conditions hold on each column's rows
+
+### Fix
+
+- **definitions**: Say the limit was reached only when commits were left unread
+- **sql**: Word each reading of a relation a query reads more than once
+- **lineage**: Give var() the values that vars in dbt_project.yml sets
+- **dbt**: Read the generic tests dbt's YAML declares with one parser
+- **lineage**: Keep the columns a model's SQL gives when the dbt catalog does not list it
+- **query**: Count a filter in check-sql only where it holds on every row the measure reads
+- **query**: Join relate's path onto another relation of an entity only on a key shown unique
+- **lineage**: Take no entity key from a unique test that holds only on the rows its where selects
+- **definitions**: Take no key from a unique test or primary key that does not hold on every row
+
+### Perf
+
+- **html**: Keep the page's formulas when conflicts shows what it found
+- **query**: Ask only the columns of a matching name for their edges in check-sql
+- **query**: Check a graph's inputs without loading the build
+- **dbt**: Match dbt selectors against an index of the dbt nodes
+- **build**: Analyse dbt models in workers a level of the DAG at a time
+
+## v0.13.21 (2026-11-12)
+
+### Fix
+
+- **lineage**: Place each reading through a CTE on its own side of a join
+
+## v0.13.20 (2026-11-12)
+
+### Perf
+
+- **graph**: Move the graph model and graph.json writing into the native core
+
+## v0.13.19 (2026-11-12)
+
+### Perf
+
+- **build**: Find files in one native walk and record what a build read in Rust
+
+## v0.13.18 (2026-11-12)
+
+### Fix
+
+- **build**: Report YAML that PyYAML cannot read in every reader instead of raising
+
+### Perf
+
+- **dagster**: Read Dagster definitions in the Rust core
+- **airflow**: Read Airflow DAG files in the Rust core
+
+## v0.13.17 (2026-11-12)
+
+### Fix
+
+- **sql**: Name each reading of a relation a query reads more than once
+
 ## v0.13.16 (2026-11-11)
 
 ### Fix

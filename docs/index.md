@@ -48,9 +48,11 @@ guide/search
 guide/verify
 guide/reviewing-changes
 guide/release-notes
+guide/timeline
 guide/github-action
 guide/definitions
 guide/ontology
+guide/metric-queries
 guide/ontology-packs
 guide/ossie
 guide/conflicts

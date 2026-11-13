@@ -123,11 +123,6 @@ pub(crate) struct GraphIndex {
 }
 
 impl GraphIndex {
-    /// The index `inner`, shared with whatever else holds it (a loaded `GraphFile`).
-    pub(crate) fn shared(inner: Arc<graph::GraphIndex>) -> Self {
-        Self { inner }
-    }
-
     fn ordinals(&self, ids: &[Key]) -> Vec<u32> {
         ids.iter().filter_map(|id| self.inner.node(id)).collect()
     }
@@ -572,7 +567,7 @@ impl Router {
 }
 
 /// Konstruct's native core: graph traversal, name resolution, search, search by meaning,
-/// formula identity, topic routing and the server.
+/// formula identity, topic routing, the readers of Airflow and Dagster files and the server.
 #[pymodule(name = "_core")]
 mod core_module {
     use pyo3::exceptions::PyImportError;
@@ -585,18 +580,56 @@ mod core_module {
     #[pymodule_export]
     use super::{GraphIndex, RelationNames, Router, SearchIndex, Server, graph_version, openapi};
     #[pymodule_export]
+    use crate::airflow::python::{
+        DagInfo, DbtInvocation, TaskInfo, looks_like_dag_file, parse_dag_file, parse_dag_source,
+        parse_dbt_commands,
+    };
+    #[pymodule_export]
+    use crate::dagster::python::{
+        AssetInfo, DagsterFile, JobInfo, OpCall, OpInfo, SensorInfo, looks_like_dagster_file,
+        parse_dagster_file, parse_dagster_source,
+    };
+    #[pymodule_export]
+    use crate::discover::python::{
+        Tree, file_digest, file_identity, files_under, folder_digest, folder_files, name_accepts,
+    };
+    #[pymodule_export]
     use crate::identity::python::FormulaSet;
     #[pymodule_export]
-    use crate::load::python::GraphFile;
+    use crate::model::{
+        Edge, Graph, Node, Step, column_id, reading_key, relation_key, split_reading,
+    };
+    #[pymodule_export]
+    use crate::scan::python::scan_python_files;
     #[pymodule_export]
     use crate::vector::python::{VectorIndex, concept, terms};
+    #[pymodule_export]
+    use crate::write::files::{real_directory, write_text};
+    #[pymodule_export]
+    use crate::yaml::python::{yaml_load, yaml_load_all};
 
-    /// Refuses to load on a processor the routines cannot run on, before anything calls them.
+    /// Refuses to load on a processor the routines cannot run on, before anything calls them,
+    /// and adds the node kinds that are relations, and the order SQL that names a relation
+    /// resolves them in when several nodes describe it.
     #[pymodule_init]
-    fn init(_module: &Bound<'_, PyModule>) -> PyResult<()> {
-        match crate::unsupported_processor() {
-            Some(reason) => Err(PyImportError::new_err(reason)),
-            None => Ok(()),
+    fn init(module: &Bound<'_, PyModule>) -> PyResult<()> {
+        if let Some(reason) = crate::unsupported_processor() {
+            return Err(PyImportError::new_err(reason));
         }
+        crate::write::files::read_umask();
+        let py = module.py();
+        module.add(
+            "RELATION_KINDS",
+            pyo3::types::PyFrozenSet::new(py, crate::model::RELATION_KINDS)?,
+        )?;
+        let order = pyo3::types::PyDict::new(py);
+        for kind in ["source", "model", "snapshot", "seed", "table"] {
+            order.set_item(kind, crate::model::priority(kind))?;
+        }
+        module.add("RELATION_PRIORITY", order)?;
+        crate::model::install_dataclass_metadata(py, module)?;
+        crate::airflow::python::add_tables(module)?;
+        crate::dagster::python::add_tables(module)?;
+        crate::yaml::python::add_exceptions(module)
     }
 }

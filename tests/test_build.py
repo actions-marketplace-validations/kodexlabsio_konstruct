@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -11,6 +12,7 @@ import duckdb
 import pytest
 
 from konstruct.analysis.diff import Context
+from konstruct.analysis.explain import Explainer
 from konstruct.analysis.lock import Pinner
 from konstruct.core.graph import Graph, Node
 from konstruct.engine.build import Cache, RelationIndex, build
@@ -268,6 +270,81 @@ def test_an_insert_of_some_columns_leaves_the_relations_columns_guessed(tmp_path
     graph = build(load_config(tmp_path)).graph
     assert 'main.t' in graph.guessed_relations()
     assert 'table.main.t#region' in {e.target for e in graph.out_edges('table.main.u#region', 'derived_from')}
+
+
+@pytest.mark.parametrize('order', [('a.sql', 'b.sql'), ('b.sql', 'a.sql')])
+def test_a_relation_two_statements_write_has_both_conditions_and_its_columns_hold_neither(
+    tmp_path: Path, order: tuple[str, str]
+) -> None:
+    """An unfiltered INSERT adds rows the CREATE's filter never saw: the relation has the
+    conditions of both statements, and each of its columns holds only those both hold."""
+    statements = {
+        'a.sql': "create table main.t as select id, amount from raw.src where status <> 'returned'",
+        'b.sql': 'insert into main.t select id, amount from raw.src',
+    }
+    first, second = order
+    (tmp_path / first).write_text(statements['a.sql'] if first == 'a.sql' else statements['b.sql'])
+    (tmp_path / second).write_text(statements['a.sql'] if second == 'a.sql' else statements['b.sql'])
+    one = tmp_path / 'one'
+    one.mkdir()
+    (one / 'both.sql').write_text(';\n'.join(statements.values()))
+    for root in (tmp_path, one):
+        graph = build(load_config(root)).graph
+        table = graph.nodes['table.main.t']
+        assert table.attrs['conditions'] == ["WHERE: raw.src.status <> 'returned'"]
+        for column in graph.columns_of(table.id):
+            assert column.attrs['row_conditions'] == [], (root, column.name)
+            held = [table.attrs.get('conditions', [])[i] for i in column.attrs.get('row_conditions', [])]
+            assert not any("status <> 'returned'" in c for c in held), (root, column.name)
+
+
+@pytest.mark.parametrize('order', [('a.sql', 'b.sql'), ('b.sql', 'a.sql')])
+def test_a_relation_two_statements_write_says_where_either_reads_its_relations(
+    tmp_path: Path, order: tuple[str, str]
+) -> None:
+    """Each statement reads a relation on the side of a LEFT JOIN that can find no row, before a
+    LIMIT, and another through a star it cannot expand: the relation records what each statement
+    reads where, whichever comes last, as either writes its rows."""
+    statements = {
+        'a.sql': (
+            'create table main.t as select e.*, r.amount from raw.extra e '
+            'left join (select * from raw.refunds limit 10) r on r.order_id = e.id'
+        ),
+        'b.sql': (
+            'insert into main.t select f.*, c.amount from raw.further f '
+            'left join (select * from raw.credits limit 5) c on c.order_id = f.id'
+        ),
+    }
+    for name in order:
+        (tmp_path / name).write_text(statements[name])
+    table = build(load_config(tmp_path)).graph.nodes['table.main.t']
+    assert {'raw.refunds', 'raw.credits'} <= set(table.attrs['nullable'])
+    assert table.attrs['read_before']['raw.refunds'] == table.attrs['read_before']['raw.credits'] == ['LIMIT']
+    assert {'raw.extra', 'raw.further'} <= set(table.attrs['star_reads'])
+
+
+@pytest.mark.parametrize('order', [('a.sql', 'b.sql'), ('b.sql', 'a.sql')])
+def test_a_column_says_its_value_aggregates_rows_where_any_statement_writing_it_does(
+    tmp_path: Path, order: tuple[str, str]
+) -> None:
+    """A filter in another relation that reads an aggregate or a window chooses among values made
+    from rows it never saw: the graph marks the column whose SQL makes such a value, in any of the
+    statements that write it, and not a column that only passes it on."""
+    statements = {
+        'a.sql': 'create table main.t as select id, sum(amount) over (partition by id) as total, amount from raw.src',
+        'b.sql': 'insert into main.t select id, amount, amount from raw.src',
+    }
+    for name, sql in zip(order, (statements[order[0]], statements[order[1]]), strict=True):
+        (tmp_path / name).write_text(sql)
+    (tmp_path / 'c.sql').write_text('create table main.u as select id, total, amount from main.t')
+    graph = build(load_config(tmp_path)).graph
+    assert graph.nodes['table.main.t#total'].attrs.get('aggregates_rows') is True
+    assert 'aggregates_rows' not in graph.nodes['table.main.t#amount'].attrs
+    assert 'aggregates_rows' not in graph.nodes['table.main.u#total'].attrs
+    # A column both statements write is read from the one reading of raw.src in each, named as
+    # canonical text names it.
+    assert graph.nodes['table.main.t#amount'].attrs['row_reading'] == 'raw.src'
+    assert graph.nodes['table.main.u#total'].attrs['row_reading'] == 'main.t'
 
 
 def test_an_update_reanalyses_sql_when_the_columns_it_reads_change(tmp_path: Path) -> None:
@@ -667,7 +744,7 @@ def test_an_input_changed_while_the_build_runs_is_reported_changed(
 
 def test_what_counts_as_a_changed_input(tmp_path: Path) -> None:
     from konstruct import Project
-    from konstruct.engine.build import changed_inputs
+    from konstruct.engine.watch import changed_inputs
 
     (tmp_path / 'jobs').mkdir()
     sql = tmp_path / 'jobs' / 'users.sql'
@@ -697,7 +774,7 @@ def _jobs_project(root: Path) -> Path:
 
 @pytest.mark.parametrize('change', ['delete', 'rename', 'same size, time put back', 'atomic save', 'chmod'])
 def test_every_change_to_a_file_read_counts(change: str, tmp_path: Path) -> None:
-    """The rule the viewer's SQL uses (konstruct.core.files.identity): size, both times, device
+    """The rule the viewer's SQL uses (konstruct._core.file_identity): size, both times, device
     and inode, and a file that is gone."""
     from konstruct import Project
 
@@ -1062,7 +1139,7 @@ def test_removing_an_exclude_pattern_is_a_change(tmp_path: Path) -> None:
 
 def test_a_helper_rewritten_as_a_dag_of_the_same_size_counts(tmp_path: Path) -> None:
     """Block K of the review: a file beside an input is kept as the build found it, by the rule
-    for every file (konstruct.core.files.identity), not by its size alone."""
+    for every file (konstruct._core.file_identity), not by its size alone."""
     from konstruct import Project
 
     dags = _dags_project(tmp_path)
@@ -1152,24 +1229,24 @@ def test_a_folder_as_the_build_found_it_is_seen_in_one_hash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A check with nothing changed lists each folder beside an input and hashes the listing
-    once, digesting no file and keeping nothing; after a change it keeps only the changed file."""
+    once, listing no file and keeping nothing; after a change it keeps only the changed file."""
     from konstruct import Project
-    from konstruct.core.files import digest
+    from konstruct._core import folder_files
 
     dags = _dags_project(tmp_path)
     for number in range(100):
         (dags / f'h{number:02}.py').write_text('X = 1\n')
     project = Project(tmp_path)
     project.build()
-    digested: list[list[int]] = []
+    listed: list[str] = []
 
-    def counted(found: list[int]) -> str:
-        digested.append(found)
-        return digest(found)
+    def counted(folder: str, extension: str) -> object:
+        listed.append(str(folder))
+        return folder_files(folder, extension)
 
-    monkeypatch.setattr('konstruct.engine.build.digest', counted)
+    monkeypatch.setattr('konstruct.engine.build.folder_files', counted)
     assert project.changed_inputs() == [] and Project(tmp_path).changed_inputs() == []
-    assert digested == [] and project._judged == {}
+    assert listed == [] and project._judged == {}
     (dags / 'h03.py').write_text('X = 2\n')
     assert project.changed_inputs() == []
     assert [list(verdicts) for _, verdicts in project._judged.values()] == [['h03.py']]
@@ -1207,3 +1284,32 @@ def test_a_file_beside_an_input_is_read_again_only_when_it_changes_again(
     (dags / 'h07.py').write_text(DAG_TEXT.format(name='h07'))
     assert project.changed_inputs() == ['dags/h07.py']
     assert judged == ['dags/h07.py']
+
+
+def test_a_relation_named_with_a_hash_keeps_its_own_lineage(tmp_path: Path) -> None:
+    """A relation named ``events#2`` is that relation wherever it is named, never a reading of
+    ``events``."""
+    (tmp_path / 'a.sql').write_text(
+        'create table main.events as select id, kind from raw.web;\n'
+        'create table main."events#2" as select id, kind from raw.app;\n'
+    )
+    (tmp_path / 'b.sql').write_text('create table main.r as select e.kind from main."events#2" e')
+    graph = build(load_config(tmp_path)).graph
+    events = graph.node_for_relation('main.events#2')
+    assert events is not None and events.relation == 'main.events#2'
+    assert graph.node_for_relation('main.events#3') is None
+    [edge] = graph.out_edges('table.main.r#kind', 'derived_from')
+    assert graph.parent_of(graph.nodes[edge.target]) is events
+    assert Explainer(graph).explain(graph.nodes['table.main.r#kind']).sources == ['app.kind']
+
+
+def test_the_example_names_each_reading_of_a_cte_two_others_read(jaffle_graph: Graph) -> None:
+    """customers reads stg_orders through one CTE that two others read, each joined to customers:
+    its conditions name each reading through that CTE, as moving a filter from one to the other
+    changes its rows."""
+    customers = jaffle_graph.nodes['model.jaffle_shop.customers']
+    texts = [str(c) for c in customers.attrs['conditions']] + [
+        str(c.attrs.get('expression', '')) for c in jaffle_graph.columns_of(customers.id)
+    ]
+    readings = {m for t in texts for m in re.findall(r'stg_orders#[\d/]+', t)}
+    assert len(readings) == 2, texts

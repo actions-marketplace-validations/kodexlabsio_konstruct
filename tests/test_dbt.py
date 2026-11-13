@@ -133,6 +133,52 @@ def test_select_nodes(
     assert {n.name for n in dbt.select_nodes(graph, selectors, excludes)} == expected
 
 
+def test_selectors_match_as_every_node_compared_would(loaded: tuple[Graph, dbt.DbtLoad]) -> None:
+    """The index of what selectors name finds the nodes that comparing each node with the selector
+    finds, for parts of names, paths and fqns, any case and wildcards."""
+    graph, _ = loaded
+    graph.nodes['model.jaffle_shop.orders'].attrs['tags'] = ['Nightly', 'finance']
+    graph.changed()
+    nodes = [
+        n for n in graph.nodes.values() if 'dbt' in n.origins and n.kind in ('model', 'seed', 'snapshot')
+    ]
+    values = [
+        'orders', 'ORDERS', 'stg', 'stg_*', 'staging', 'jaffle_shop', 'jaffle_shop.staging',
+        'jaffle_shop.staging.stg_orders', 'staging.stg_orders', 'models', 'models/', 'models/sta',
+        'models/staging', 'staging/stg_orders.sql', 'stg_orders.sql', 'seeds/raw_orders.csv', 'mod',
+        'stg_orders', 's?g_orders', '[sr]*', 'nightly', 'Nightly', 'night*', 'finance', 'seed', 'model',
+        'view', 'table', '', '/', 'models/staging/', 'jaffle_shop.*',
+    ]  # fmt: skip
+    methods = ['default', 'fqn', 'tag', 'path', 'resource_type', 'package', 'config.materialized', 'other']
+    for method in methods:
+        for value in values:
+            selector = value if method == 'default' else f'{method}:{value}'
+            expected = {n.id for n in nodes if dbt._matches(method, value, n)}
+            assert {n.id for n in dbt.select_nodes(graph, [selector], [])} == expected, selector
+
+
+def test_selection_sees_nodes_added_after_it(loaded: tuple[Graph, dbt.DbtLoad]) -> None:
+    graph, _ = loaded
+    assert dbt.select_nodes(graph, ['late'], []) == []
+    graph.add_node(Node(id='model.jaffle_shop.late', kind='model', name='late', origins=['dbt']))
+    assert [n.id for n in dbt.select_nodes(graph, ['late'], [])] == ['model.jaffle_shop.late']
+
+
+def test_selection_sees_a_path_given_in_place_after_it() -> None:
+    """A build sets a node's path where it had none (a SQL file that writes it), without adding
+    a node: selectors by path match it from then on."""
+    graph = Graph()
+    late = graph.add_node(Node('model.shop.late', 'model', 'late', origins=['dbt']))
+    graph.add_node(Node('model.shop.early', 'model', 'early', origins=['dbt'], path='models/early.sql'))
+    assert [n.id for n in dbt.select_nodes(graph, ['path:models'], [])] == ['model.shop.early']
+    late.path = 'models/late.sql'
+    assert sorted(n.id for n in dbt.select_nodes(graph, ['path:models'], [])) == [
+        'model.shop.early',
+        'model.shop.late',
+    ]
+    assert [n.id for n in dbt.select_nodes(graph, ['models/late.sql'], [])] == ['model.shop.late']
+
+
 def test_select_nothing_means_everything(loaded: tuple[Graph, dbt.DbtLoad]) -> None:
     graph, _ = loaded
     assert len(dbt.select_nodes(graph, [], [])) == 8
@@ -296,6 +342,68 @@ def test_parse_relation_name() -> None:
     assert dbt.parse_relation_name(None, None) is None
 
 
+MALFORMED = [
+    {'tags': None},
+    {'tags': [1]},
+    {'tags': [None, 'nightly']},
+    {'tags': 'nightly'},
+    {'fqn': [None]},
+    {'fqn': None},
+    {'fqn': ['big', None, 'odd']},
+    {'fqn': [['big'], 'odd']},
+    {'materialized': ['table']},
+    {'materialized': {'kind': 'table'}},
+    {'package': ['big']},
+    {'dbt_name': 7},
+]
+
+
+@pytest.mark.parametrize('attrs', MALFORMED)
+def test_a_node_with_an_attribute_that_is_not_a_name_is_skipped_by_selectors(attrs: dict[str, Any]) -> None:
+    """A manifest can hold anything (``"tags": null``, a number for a tag): what a selector does
+    not compare as a name it does not match, and the build does not fail on it."""
+    graph = Graph()
+    graph.add_node(
+        Node('model.big.odd', 'model', 'odd', origins=['dbt'], path='models/odd.sql', attrs=dict(attrs))
+    )
+    fine = {'tags': ['nightly'], 'fqn': ['big', 'fine'], 'materialized': 'table', 'package': 'big'}
+    graph.add_node(
+        Node('model.big.fine', 'model', 'fine', origins=['dbt'], path='models/fine.sql', attrs=fine)
+    )
+    nodes = list(graph.nodes.values())
+    for selector in [
+        'odd', 'fine', 'big', 'big.odd', 'big.fine', 'fqn:big.*', 'tag:nightly', 'tag:night*', '*',
+        'config.materialized:table', 'package:big', 'path:models', 'models/odd.sql', 'resource_type:model',
+    ]:  # fmt: skip
+        method, _, value = selector.rpartition(':')
+        expected = {n.id for n in nodes if dbt._matches(method or 'default', value, n)}
+        assert {n.id for n in dbt.select_nodes(graph, [selector], [])} == expected, selector
+        assert 'model.big.fine' in expected or selector in ('odd', 'big.odd', 'models/odd.sql'), selector
+
+
+def test_a_manifest_with_null_tags_builds_and_its_dag_runs_its_models(
+    jaffle_with_artefacts: Path, tmp_path: Path
+) -> None:
+    import shutil
+
+    from konstruct import Project
+
+    jaffle = tmp_path / 'jaffle_shop'
+    shutil.copytree(jaffle_with_artefacts, jaffle)
+    manifest_path = jaffle / 'target' / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    for node in manifest['nodes'].values():
+        node['tags'] = None
+    manifest_path.write_text(json.dumps(manifest))
+    graph = Project(jaffle).build(run_dbt=False, warehouses=False).graph
+    staging = [e.target for e in graph.edges if e.kind == 'runs' and e.source.endswith('dbt_run_staging')]
+    assert sorted(staging) == [
+        'model.jaffle_shop.stg_customers',
+        'model.jaffle_shop.stg_orders',
+        'model.jaffle_shop.stg_payments',
+    ]
+
+
 def test_select_nodes_ignores_non_dbt_nodes() -> None:
     graph = Graph()
     graph.add_node(Node('table.x', 'table', 'x'))
@@ -379,3 +487,209 @@ def test_dbt_semantic_layer_metrics_are_read_from_the_manifest() -> None:
         },
     ]
     assert dbt.semantic_metrics({}, lambda item: None) == []
+
+
+def test_yaml_tests_read_every_form_dbt_declares() -> None:
+    import yaml
+
+    from konstruct.inputs.dbt import yaml_tests
+
+    data = yaml.safe_load("""
+models:
+  - name: orders
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [order_id, line]}
+          config: {severity: warn}
+    columns:
+      - name: order_id
+        tests:
+          - unique
+          - not_null: {where: "order_id > 0"}
+          - name: order_key_present
+            test_name: not_null
+            severity: error
+          - relationships: {name: orders_have_customers, to: "ref('customers')", field: id}
+          - 7
+          - {}
+sources:
+  - name: raw
+    tables:
+      - name: payments
+        data_tests: [unique_payment]
+        columns: [{name: id, data_tests: [unique]}]
+seeds: [{name: codes, columns: [{name: code, data_tests: [unique]}]}, not-a-model]
+""")
+    found = [
+        (t.resource, t.owner, t.column, t.label, t.short, t.package, t.kwargs, t.config)
+        for t in yaml_tests(data)
+    ]
+    assert found == [
+        (
+            'model',
+            'orders',
+            None,
+            'dbt_utils.unique_combination_of_columns',
+            'unique_combination_of_columns',
+            'dbt_utils',
+            {'combination_of_columns': ['order_id', 'line']},
+            {'severity': 'warn'},
+        ),
+        ('model', 'orders', 'order_id', 'unique', 'unique', None, {}, {}),
+        ('model', 'orders', 'order_id', 'not_null', 'not_null', None, {}, {'where': 'order_id > 0'}),
+        (
+            'model',
+            'orders',
+            'order_id',
+            'not_null (order_key_present)',
+            'not_null',
+            None,
+            {},
+            {'severity': 'error'},
+        ),
+        (
+            'model',
+            'orders',
+            'order_id',
+            'relationships (orders_have_customers)',
+            'relationships',
+            None,
+            {'to': "ref('customers')", 'field': 'id'},
+            {},
+        ),
+        ('seed', 'codes', 'code', 'unique', 'unique', None, {}, {}),
+        ('source', 'raw.payments', None, 'unique_payment', 'unique_payment', None, {}, {}),
+        ('source', 'raw.payments', 'id', 'unique', 'unique', None, {}, {}),
+    ]
+    assert yaml_tests(['not', 'a', 'mapping']) == []
+
+
+def test_a_model_the_catalog_does_not_list_keeps_its_columns_for_sql_that_reads_it(tmp_path: Path) -> None:
+    """A model built after the catalog was generated is in the manifest but not the catalog: its
+    documented columns are its SQL's own, and SQL that reads it still has their lineage."""
+    from konstruct import Project
+
+    (tmp_path / 'models').mkdir()
+    (tmp_path / 'dbt_project.yml').write_text('name: shop\nprofile: shop\n')
+    sql = "select id as customer_id, name as customer_name, 'new' as segment from raw.customers"
+    (tmp_path / 'models' / 'customers.sql').write_text(sql)
+    model = {
+        'unique_id': 'model.shop.customers',
+        'resource_type': 'model',
+        'name': 'customers',
+        'alias': 'customers',
+        'package_name': 'shop',
+        'database': 'wh',
+        'schema': 'main',
+        'relation_name': '"wh"."main"."customers"',
+        'original_file_path': 'models/customers.sql',
+        'raw_code': sql,
+        'compiled_code': sql,
+        'language': 'sql',
+        'depends_on': {'nodes': []},
+        'columns': {'customer_id': {'name': 'customer_id'}, 'customer_name': {'name': 'customer_name'}},
+    }
+    (tmp_path / 'target').mkdir()
+    (tmp_path / 'target' / 'manifest.json').write_text(
+        json.dumps(
+            {'metadata': {'adapter_type': 'duckdb'}, 'nodes': {model['unique_id']: model}, 'sources': {}}
+        )
+    )
+    (tmp_path / 'target' / 'catalog.json').write_text(json.dumps({'nodes': {}, 'sources': {}}))
+    (tmp_path / 'report.sql').write_text(
+        'create table wh.main.report as select c.customer_id, c.segment from wh.main.customers as c'
+    )
+    graph = Project(tmp_path).build(run_dbt=False, warehouses=False).graph
+    assert not [w for w in graph.warnings if 'lineage failed' in w]
+    report = next(n for n in graph.relations() if n.name == 'report')
+    column = graph.column(report.id, 'customer_id')
+    assert column is not None
+    assert [e.target for e in graph.out_edges(column.id, 'derived_from')] == [
+        'model.shop.customers#customer_id'
+    ]
+
+
+def test_a_var_dbt_would_render_is_not_known(tmp_path: Path) -> None:
+    """A var whose value is itself a template is rendered by dbt, with what only dbt has (the
+    environment, the target): it is not known here, so var() gives the call's default."""
+    from konstruct import Project
+    from konstruct.inputs.jinja import project_vars
+
+    (tmp_path / 'models').mkdir()
+    (tmp_path / 'dbt_project.yml').write_text(
+        "name: shop\nprofile: shop\nvars:\n  start: \"{{ env_var('START_DATE', '2020-01-01') }}\"\n"
+        '  dates: ["{% if target.name == \'prod\' %}2021{% endif %}"]\n  rate: 2\n'
+    )
+    assert project_vars(tmp_path) == {'rate': 2}
+    sql = "select id as order_id, amount * {{ var('rate') }} as amount from raw.orders\nwhere ordered_at >= '{{ var('start', '2020-01-01') }}'"
+    (tmp_path / 'models' / 'orders.sql').write_text(sql)
+    model = {
+        'unique_id': 'model.shop.orders',
+        'resource_type': 'model',
+        'name': 'orders',
+        'alias': 'orders',
+        'package_name': 'shop',
+        'database': 'wh',
+        'schema': 'main',
+        'relation_name': '"wh"."main"."orders"',
+        'original_file_path': 'models/orders.sql',
+        'raw_code': sql,
+        'language': 'sql',
+        'depends_on': {'nodes': []},
+        'columns': {},
+    }
+    (tmp_path / 'target').mkdir()
+    (tmp_path / 'target' / 'manifest.json').write_text(
+        json.dumps(
+            {'metadata': {'adapter_type': 'duckdb'}, 'nodes': {model['unique_id']: model}, 'sources': {}}
+        )
+    )
+    graph = Project(tmp_path).build(run_dbt=False, warehouses=False).graph
+    assert not [w for w in graph.warnings if 'lineage failed' in w or 'Invalid expression' in w]
+    assert [c.name for c in graph.columns_of('model.shop.orders')] == ['order_id', 'amount']
+
+
+def test_a_vars_block_under_a_packages_name_is_no_var(tmp_path: Path) -> None:
+    """A vars block under a package's name is that package's, not a var named after it. dbt picks
+    a var by the package of the model it compiles, and Konstruct renders only the project's own
+    models: every macro, a package's too, sees the global vars with the project's block over them."""
+    from konstruct.inputs.jinja import Renderer, project_vars
+
+    (tmp_path / 'dbt_project.yml').write_text(
+        'name: shop\nvars:\n  rate: 2\n  region: all\n  shop:\n    region: eu\n'
+        '  dbt_utils:\n    region: us\n  settings:\n    tax: 0.2\n'
+    )
+    macros = tmp_path / 'dbt_packages' / 'dbt_utils' / 'macros'
+    macros.mkdir(parents=True)
+    (macros / 'where.sql').write_text(
+        "{% macro region() %}'{{ var('region') }}' as region, {{ var('rate') }} as rate{% endmacro %}"
+    )
+    (tmp_path / 'macros').mkdir()
+    (tmp_path / 'macros' / 'own.sql').write_text(
+        "{% macro own_region() %}'{{ var('region') }}'{% endmacro %}"
+    )
+    assert project_vars(tmp_path, packages={'dbt_utils'}) == {
+        'rate': 2,
+        'region': 'eu',
+        'settings': {'tax': 0.2},
+    }
+    renderer = Renderer(tmp_path, {'metadata': {'project_name': 'shop'}})
+    assert renderer.render(
+        "select {{ dbt_utils.region() }}, {{ own_region() }}, '{{ var('dbt_utils', 'none') }}'"
+    ) == ("select 'eu' as region, 2 as rate, 'eu', 'none'")
+
+
+def test_var_takes_its_value_from_dbt_project_yml(tmp_path: Path) -> None:
+    from konstruct.inputs.jinja import Renderer, project_vars
+
+    (tmp_path / 'dbt_project.yml').write_text(
+        'name: shop\nvars:\n  rate: 2\n  shop:\n    region: eu\n  other_package:\n    region: us\n'
+    )
+    assert project_vars(tmp_path) == {'rate': 2, 'other_package': {'region': 'us'}, 'region': 'eu'}
+    renderer = Renderer(tmp_path, {'metadata': {'project_name': 'shop'}})
+    assert renderer.render("select {{ var('rate') }}, '{{ var('region') }}', {{ var('missing', 7) }}") == (
+        "select 2, 'eu', 7"
+    )
+    (tmp_path / 'dbt_project.yml').write_text('vars: [not, a, mapping]\n')
+    assert project_vars(tmp_path) == {}
+    assert project_vars(tmp_path / 'missing') == {}

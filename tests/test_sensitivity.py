@@ -15,7 +15,6 @@ from hypothesis import strategies as st
 
 from konstruct import Project
 from konstruct.analysis import sensitivity as analysis
-from konstruct.analysis.diff import DiffError
 from konstruct.analysis.erasure import erasure
 from konstruct.analysis.query import QueryError
 from konstruct.analysis.sensitivity import (
@@ -28,7 +27,7 @@ from konstruct.analysis.sensitivity import (
     sensitivity,
     settings_at,
 )
-from konstruct.core.graph import Graph
+from konstruct.core.graph import Graph, Node
 from konstruct.engine.config import ConfigError
 from konstruct.interfaces.cli import main
 
@@ -268,6 +267,30 @@ def test_a_large_group_stops_it(tmp_path: Path) -> None:
     project = build(tmp_path, {'models.sql': sql + LINK, 'definitions.yml': PAY})
     assert 'out.s' not in labels(project)
     assert [s.by for s in project.sensitivity().sanitised] == ['SUM over groups of at least 10 distinct keys']
+
+
+@pytest.mark.parametrize('where', [None, 'is_current'])
+def test_a_unique_test_on_some_rows_keys_no_entity_whose_distinct_values_count_people(
+    tmp_path: Path, where: str | None
+) -> None:
+    """users keeps a row per version, its id unique only where is_current: the id keys no entity,
+    so the payments' user_id is no foreign key to people, and its distinct values prove no group
+    of k people."""
+    sql = (
+        'create table m.out as select p.dept, sum(p.salary) as s from raw.pay p group by p.dept '
+        'having count(distinct p.user_id) >= 10;\n'
+    )
+    pay = PAY.split('  - name: User')[0]
+    graph = build(tmp_path, {'models.sql': sql + LINK, 'definitions.yml': pay}).graph
+    test = graph.add_node(Node('test.shop.unique_users_id', 'test', 'unique', attrs={'test': 'unique'}))
+    if where:
+        test.attrs['where'] = where
+    users = graph.node_for_relation('raw.users')
+    assert users is not None
+    graph.add_edge(test.id, f'{users.id}#id', 'tests')
+    assert (f'{users.id}#id' in entity_keys(graph)) is (where is None)
+    sensitive = {c.label for c in sensitivity(graph, Settings()).columns}
+    assert ('out.s' in sensitive) is (where is not None), sensitive
 
 
 def test_a_larger_k_keeps_an_aggregate_sensitive(shop: Project) -> None:
@@ -1066,24 +1089,6 @@ def test_a_term_the_base_does_not_have_fails_closed(tmp_path: Path, monkeypatch:
     ]
 
 
-def test_the_base_tree_is_the_commit_as_it_holds_it(tmp_path: Path) -> None:
-    """Every regular file of the commit, whatever .gitattributes says, and no link: a link could
-    lead outside the tree."""
-    (tmp_path / 'dir').mkdir()
-    (tmp_path / 'dir' / 'kept.sql').write_text('select 1')
-    (tmp_path / 'stamp.txt').write_text('$Format:%H$')
-    (tmp_path / '.gitattributes').write_text('dir/** export-ignore\nstamp.txt export-subst\n')
-    (tmp_path / 'link').symlink_to('/etc/hostname')
-    _repository(tmp_path)
-    tree = tmp_path / 'konstruct-out' / 'tree'
-    analysis._write_tree(tmp_path, 'HEAD', Path(), tree)
-    assert (tree / 'dir' / 'kept.sql').read_text() == 'select 1'
-    assert (tree / 'stamp.txt').read_text() == '$Format:%H$'
-    assert not (tree / 'link').exists() and not (tree / 'link').is_symlink()
-    with pytest.raises(DiffError):
-        analysis._write_tree(tmp_path, 'no-such-ref', Path(), tmp_path / 'konstruct-out' / 'other')
-
-
 def test_the_base_graph_is_kept_by_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     project = _vanishing(tmp_path, HIDE)
     cache = tmp_path / 'cache'
@@ -1147,7 +1152,6 @@ def test_a_cache_others_can_write_is_not_read(tmp_path: Path, monkeypatch: pytes
         os.chown(kept, 4242, -1)  # another user's file
         analysis.base_graph(project.root, 'main', cache)
         assert len(builds) == 4
-    assert not analysis._private(tmp_path / 'missing')
 
 
 def test_the_base_cache_is_the_users_own(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1182,7 +1186,7 @@ def test_a_graph_of_the_base_the_change_commits_is_not_read(
     term = next(n for n in forged.nodes.values() if n.kind == 'term' and n.name == 'Pay')
     del term.attrs['sensitivity']
     located = analysis._located(tmp_path, 'main')
-    assert located is not None
+    assert located is not None and located[3] is not None
     name = located[3]
     planted = tmp_path / out / 'base' / name
     forged.write(planted)
@@ -1501,6 +1505,28 @@ def test_why_masks_each_share_of_a_sensitive_source(tmp_path: Path) -> None:
     assert all(r.values.get('amount') == '<masked: personal>' for c in result.contributions for r in c.rows)
 
 
+def test_erasure_finds_the_joins_of_every_statement_that_writes_a_relation(tmp_path: Path) -> None:
+    """A relation a CREATE and an INSERT write has the joins of both: each finds the person's rows
+    in the relation it joins, though neither copies the key."""
+    sql = (
+        'create table stg.people as select p.id as person_id, p.email from raw.people p;\n'
+        'create table mart.activity as select o.amount from raw.orders o '
+        'join stg.people s on o.buyer = s.person_id;\n'
+        'insert into mart.activity select r.amount from raw.refunds r '
+        'join stg.people s on r.claimant = s.person_id;\n'
+    )
+    defs = 'version: 1\nterms:\n  - name: Contact\n    definition: c.\n    sensitivity: personal\n    columns: [raw.people.email]\n'
+    project = build(tmp_path, {'models.sql': sql, 'definitions.yml': defs})
+    activity = project.graph.nodes['table.mart.activity']
+    assert sum(' JOIN ON: ' in f' {c}' for c in activity.attrs['conditions']) == 2
+    hows = {
+        h.relation: [(k.column, k.how) for k in h.keys]
+        for h in project.erasure('stg.people.person_id').holdings
+    }
+    assert hows['orders'] == [('orders.buyer', 'foreign key')]
+    assert hows['refunds'] == [('refunds.claimant', 'foreign key')]
+
+
 def test_erasure_finds_cast_keys_copies_without_the_key_and_joins(tmp_path: Path) -> None:
     sql = (
         'create table stg.people as select cast(p.id as varchar) as person_id, p.email from raw.people p;\n'
@@ -1524,3 +1550,17 @@ def test_erasure_finds_cast_keys_copies_without_the_key_and_joins(tmp_path: Path
     assert hows['mart.orders'] == [('mart.orders.person_id', 'copy')]
     assert 'counted' not in hows
     assert {h.relation: h.action for h in result.holdings}['raw.people'] == 'delete'
+
+
+def test_a_reading_of_a_relation_reads_its_columns() -> None:
+    """A query that reads a relation twice names each reading (``"orders#2"``): a count over one
+    reading of a key counts that key."""
+    import sqlglot
+    from sqlglot import exp
+
+    from konstruct.analysis.sensitivity import _reads
+
+    column = sqlglot.parse_one('main."orders#1/2".id')
+    assert isinstance(column, exp.Column)
+    assert _reads(column, 'db.main.orders', 'id')
+    assert not _reads(column, 'db.main.order_lines', 'id')

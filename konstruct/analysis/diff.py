@@ -28,12 +28,14 @@ from typing import TYPE_CHECKING, Any
 from konstruct.analysis.query import Walk, impact
 from konstruct.analysis.verify import defining_sql_file
 from konstruct.core.graph import RELATION_KINDS, Graph, Node
-from konstruct.core.sql import StatementLineage, analyse, strip_templating
 from konstruct.inputs import airflow, dbt
-from konstruct.inputs.jinja import Renderer, render_model
 from konstruct.semantics.definitions import FILE_NAMES as DEFINITION_FILES
 
+# The SQL parser and Jinja are imported where versions are compared, not here: the hook and the
+# laws read the base commit through this module's git functions alone.
 if TYPE_CHECKING:
+    from konstruct.core.sql import StatementLineage
+    from konstruct.inputs.jinja import Renderer
     from konstruct.interfaces.layout import Style
 
 
@@ -350,6 +352,8 @@ class YamlChange:
     """Source tables only at the base."""
     exposures: list[str] = field(default_factory=list)
     """Exposures added, removed or changed."""
+    note: str | None = None
+    """Why the file could not be compared, when one of its versions cannot be read."""
 
     @property
     def changed(self) -> bool:
@@ -366,6 +370,7 @@ class YamlChange:
 
     def lines(self) -> list[str]:
         return [
+            *([self.note] if self.note else []),
             *(f'test removed: {t}' for t in self.tests_removed),
             *(f'test added: {t}' for t in self.tests_added),
             *(f'source table removed: {s}' for s in self.sources_removed),
@@ -375,60 +380,34 @@ class YamlChange:
         ]
 
 
-def _test_names(entries: Any) -> set[str]:
-    names = set()
-    for entry in entries or []:
-        if isinstance(entry, str):
-            names.add(entry)
-        elif isinstance(entry, dict) and entry:
-            key = next(iter(entry))
-            value = entry[key]
-            label = str(entry.get('test_name') or entry.get('name') or key)
-            if isinstance(value, dict) and value.get('name'):
-                label = f'{key} ({value["name"]})'
-            names.add(label)
-    return names
-
-
 def _yaml_facts(text: str | None) -> dict[str, Any]:
-    """Tests, descriptions, source tables and exposures declared in a dbt YAML file."""
-    import yaml
+    """Tests, descriptions, source tables and exposures declared in a dbt YAML file, none for a
+    file that is not there. Raises :class:`yaml.YAMLError` for one that cannot be read."""
+    from konstruct.core import yamlio
 
     facts: dict[str, Any] = {'tests': set(), 'descriptions': {}, 'sources': set(), 'exposures': {}}
-    try:
-        data = yaml.safe_load(text or '') or {}
-    except (yaml.YAMLError, RecursionError):
-        return facts
+    data = yamlio.load(text or '') or {}
     if not isinstance(data, dict):
         return facts
+    for test in dbt.yaml_tests(data):
+        where = f'{test.owner}.{test.column}' if test.column else test.owner
+        # A source's tests are named apart from a model's: source.table is not model.column.
+        facts['tests'].add(f'{"source " if test.resource == "source" else ""}{where}: {test.label}')
     for kind in ('models', 'seeds', 'snapshots'):
         for model in data.get(kind) or []:
             if not isinstance(model, dict) or not model.get('name'):
                 continue
             name = str(model['name'])
-            facts['descriptions'][name] = (model.get('description') or '').strip()
-            for test in _test_names(model.get('data_tests') or model.get('tests')):
-                facts['tests'].add(f'{name}: {test}')
+            facts['descriptions'][name] = str(model.get('description') or '').strip()
             for column in model.get('columns') or []:
-                if not isinstance(column, dict) or not column.get('name'):
-                    continue
-                label = f'{name}.{column["name"]}'
-                facts['descriptions'][label] = (column.get('description') or '').strip()
-                for test in _test_names(column.get('data_tests') or column.get('tests')):
-                    facts['tests'].add(f'{label}: {test}')
+                if isinstance(column, dict) and column.get('name'):
+                    label = f'{name}.{column["name"]}'
+                    facts['descriptions'][label] = str(column.get('description') or '').strip()
     for source in data.get('sources') or []:
         if isinstance(source, dict):
             for table in source.get('tables') or []:
                 if isinstance(table, dict) and table.get('name'):
-                    name = f'{source.get("name")}.{table["name"]}'
-                    facts['sources'].add(name)
-                    # A source's tests are named apart from a model's: source.table is not model.column.
-                    for test in _test_names(table.get('data_tests') or table.get('tests')):
-                        facts['tests'].add(f'source {name}: {test}')
-                    for column in table.get('columns') or []:
-                        if isinstance(column, dict) and column.get('name'):
-                            for test in _test_names(column.get('data_tests') or column.get('tests')):
-                                facts['tests'].add(f'source {name}.{column["name"]}: {test}')
+                    facts['sources'].add(f'{source.get("name")}.{table["name"]}')
     for exposure in data.get('exposures') or []:
         if isinstance(exposure, dict) and exposure.get('name'):
             facts['exposures'][str(exposure['name'])] = sorted(map(str, exposure.get('depends_on') or []))
@@ -436,8 +415,22 @@ def _yaml_facts(text: str | None) -> dict[str, Any]:
 
 
 def compare_yaml(path: str, before: str | None, after: str | None) -> YamlChange:
-    old, new = _yaml_facts(before), _yaml_facts(after)
+    """What changed in a dbt YAML file. When a version cannot be read nothing is compared, so
+    that its tests are not counted as removed or added, and the change says why."""
+    import yaml
+
     change = YamlChange(path)
+    facts = []
+    for side, text in (('before', before), ('after', after)):
+        try:
+            facts.append(_yaml_facts(text))
+        except yaml.YAMLError as error:
+            mark = getattr(error, 'problem_mark', None)
+            where = f' (line {mark.line + 1})' if mark is not None else ''
+            problem = getattr(error, 'problem', None) or ' '.join(str(error).split())
+            change.note = f'could not compare the {side} version, which is not valid YAML: {problem}{where}'
+            return change
+    old, new = facts
     change.tests_added = sorted(new['tests'] - old['tests'])
     change.tests_removed = sorted(old['tests'] - new['tests'])
     change.sources_added = sorted(new['sources'] - old['sources'])
@@ -603,6 +596,12 @@ class Diff:
             parts.append(f'{c["exposures"]} exposure{"s" if c["exposures"] != 1 else ""} affected')
         if c['terms']:
             parts.append(f'{c["terms"]} business term{"s" if c["terms"] != 1 else ""} changed')
+        uncompared = sum(1 for y in self.yaml if y.note)
+        if uncompared:
+            parts.append(f'{uncompared} YAML file{"s" if uncompared != 1 else ""} could not be compared')
+        if not parts:
+            # Only descriptions changed, which the details list.
+            return 'No change to models, SQL or DAGs.'
         text = ', '.join(parts)
         return text[:1].upper() + text[1:] + '.'
 
@@ -635,7 +634,7 @@ class Diff:
             'relations': [relation(r) for r in self.relations if r.changed or r.note],
             'dags': [d.__dict__ for d in self.dags],
             'other': self.other,
-            'yaml': [y.__dict__ for y in self.yaml if y.changed],
+            'yaml': [y.__dict__ for y in self.yaml if y.changed or y.note],
             'definitions': [d.__dict__ for d in self.definitions],
             'dbt': self.selection.to_dict(),
         }
@@ -734,6 +733,8 @@ class Context:
     each dbt model's manifest entry and Jinja renderer."""
 
     def __init__(self, graph: Graph, root: Path) -> None:
+        from konstruct.inputs.jinja import Renderer
+
         self.graph = graph
         self.root = root
         self.dialect = graph.meta.get('dialect')
@@ -770,6 +771,8 @@ class Context:
         return schema
 
     def model_sql(self, node: Node, text: str) -> tuple[str, str | None, str | None]:
+        from konstruct.inputs.jinja import render_model
+
         item = self.items.get(node.id, {})
         manifest = self.manifests.get(node.id, {'nodes': {}, 'sources': {}})
         sql = render_model(text, self.renderers.get(node.id), lambda raw: dbt.render_refs(raw, manifest))
@@ -778,6 +781,8 @@ class Context:
     def lineage(
         self, sql: str, catalog: str | None, schema: str | None, target: str | None
     ) -> list[StatementLineage]:
+        from konstruct.core.sql import analyse
+
         return analyse(
             sql,
             dialect=self.dialect,
@@ -835,7 +840,7 @@ def diff(graph: Graph, root: Path, *, base: str | None = None, head: str | None 
                 result.definitions.append(definitions_change)
         elif in_project.endswith(('.yml', '.yaml')) and (before or after):
             yaml_change = compare_yaml(in_project, before, after)
-            if yaml_change.changed:
+            if yaml_change.changed or yaml_change.note:
                 result.yaml.append(yaml_change)
         elif in_project.endswith('.py') and (
             'DAG' in (before or '') + (after or '') or '@dag' in (before or '') + (after or '')
@@ -1038,6 +1043,8 @@ def compare_sql_file(
     context: Context, path: str, before: str | None, after: str | None
 ) -> list[RelationChange]:
     """How each relation a SQL file builds changed between two versions of the file."""
+    from konstruct.core.sql import strip_templating
+
     sides: dict[str, dict[str, StatementLineage]] = {'before': {}, 'after': {}}
     for side, text in (('before', before), ('after', after)):
         if text is None:
@@ -1092,8 +1099,15 @@ def _compare_statements(
                 entry.impact = _walk(graph, node, column)
             change.columns.append(entry)
     if old is not None and new is not None:
-        change.conditions_added = sorted(set(new.conditions) - set(old.conditions))
-        change.conditions_removed = sorted(set(old.conditions) - set(new.conditions))
+        # Compared in one form however each is written: ``a = b`` is ``b = a``.
+        from konstruct.core.sql import canonical_condition
+
+        dialect = graph.meta.get('dialect')
+        dialect = dialect if isinstance(dialect, str) else None
+        was = {canonical_condition(c, dialect): c for c in old.conditions}
+        now = {canonical_condition(c, dialect): c for c in new.conditions}
+        change.conditions_added = sorted(now[k] for k in set(now) - set(was))
+        change.conditions_removed = sorted(was[k] for k in set(was) - set(now))
         if (change.conditions_added or change.conditions_removed) and node is not None:
             change.rows_impact = impact(graph, node.id).to_dict()
     if change.status == 'removed' and node is not None:
@@ -1110,6 +1124,8 @@ def _walk(graph: Graph, node: Node, column: str) -> dict[str, Any] | None:
 
 def _still_read(context: Context, node: Node, column: str) -> list[str]:
     """Downstream models and SQL-built tables whose current SQL still reads ``node.column``."""
+    from konstruct.core.sql import strip_templating
+
     graph = context.graph
     readers = []
     consumers = {e.target for e in graph.out_edges(node.id, 'feeds')}

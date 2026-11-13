@@ -12,17 +12,17 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
-from sqlglot import exp
-from sqlglot.errors import SqlglotError
 
-from konstruct.core import jsonio
-from konstruct.core.files import identity
+from konstruct._core import Tree
+from konstruct._core import file_identity as identity
+from konstruct.core import jsonio, yamlio
 from konstruct.core.graph import Graph, Node, NodeKind, column_id, relation_key
-from konstruct.core.sql import dialect_for, strip_templating
-from konstruct.inputs.jinja import Renderer, render_model
+
+if TYPE_CHECKING:
+    from konstruct.inputs.jinja import Renderer
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,10 @@ class DbtProject:
     profile: str | None = None
     source_paths: list[Path] = field(default_factory=list)
     found: list[int] | None = None
-    """``dbt_project.yml`` as it was just before it was read (``konstruct.core.files.identity``)."""
+    """``dbt_project.yml`` as it was just before it was read (``konstruct._core.file_identity``)."""
+    paths: dict[str, list[Path]] = field(default_factory=dict)
+    """The paths of each kind of file, by its key in dbt_project.yml without ``-paths``
+    (``model``, ``seed``, ``snapshot``, ``macro``, ``test``)."""
 
     @property
     def manifest_path(self) -> Path:
@@ -86,32 +89,28 @@ class DbtLoad:
     """The nodes whose columns the catalog lists."""
 
 
-def walk_dirs(root: Path) -> Iterator[Path]:
-    for current, dirs, _ in os.walk(root):
-        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith('.'))
-        yield Path(current)
-
-
-def find_projects(root: Path) -> list[DbtProject]:
+def find_projects(root: Path, tree: Tree | None = None) -> list[DbtProject]:
+    """The dbt projects under ``root``, in the order the walk meets their folders; ``tree`` is a
+    walk of ``root`` already made."""
+    tree = tree or Tree(str(root), sorted(SKIP_DIRS))
     projects = []
-    for directory in walk_dirs(root):
-        if (directory / 'dbt_project.yml').is_file():
-            project = read_project(directory)
-            if project:
-                projects.append(project)
+    for name, _ in tree.files(patterns=['dbt_project.yml']):
+        project = read_project(Path(name).parent)
+        if project:
+            projects.append(project)
     return projects
 
 
 def read_project(root: Path) -> DbtProject | None:
     found = identity(root / 'dbt_project.yml')
     try:
-        config = yaml.safe_load((root / 'dbt_project.yml').read_text(encoding='utf-8')) or {}
-    except (OSError, yaml.YAMLError, RecursionError) as error:
+        config = yamlio.read(root / 'dbt_project.yml') or {}
+    except (OSError, yaml.YAMLError) as error:
         log.warning('cannot read %s: %s', root / 'dbt_project.yml', error)
         return None
     if not isinstance(config, dict):
         return None
-    paths: list[Path] = []
+    paths: dict[str, list[Path]] = {}
     for key, default in (
         ('model-paths', ['models']),
         ('seed-paths', ['seeds']),
@@ -119,15 +118,121 @@ def read_project(root: Path) -> DbtProject | None:
         ('macro-paths', ['macros']),
         ('test-paths', ['tests']),
     ):
-        paths.extend(root / p for p in config.get(key, default) if isinstance(p, str))
+        listed = config.get(key, default)
+        paths[key.removesuffix('-paths')] = (
+            [root / p for p in listed if isinstance(p, str)] if isinstance(listed, list) else []
+        )
     return DbtProject(
         root=root,
         name=str(config.get('name', root.name)),
         target_path=root / str(config.get('target-path', 'target')),
         profile=config.get('profile'),
-        source_paths=paths,
+        source_paths=[p for listed in paths.values() for p in listed],
         found=found,
+        paths=paths,
     )
+
+
+# Tests as dbt YAML declares them
+
+
+@dataclass
+class TestDeclaration:
+    """One generic test a dbt YAML file declares, on a model, seed, snapshot or source table, or on
+    one of its columns."""
+
+    __test__ = False  # not a pytest test class
+
+    resource: str
+    """``model``, ``seed``, ``snapshot`` or ``source``."""
+    owner: str
+    """The model's, seed's or snapshot's name, or for a source ``source.table``."""
+    column: str | None
+    """The column it tests, or None for a test of the whole relation."""
+    test: str
+    """The test as written, with any package (``dbt_utils.unique_combination_of_columns``)."""
+    custom_name: str | None = None
+    """The name a declaration gives the test (``name:``), if it gives one."""
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    """Its arguments, with dbt 1.10's ``arguments:`` read as the arguments themselves."""
+    config: dict[str, Any] = field(default_factory=dict)
+    """Its configuration, ``severity`` and ``where`` included wherever they are written."""
+
+    @property
+    def short(self) -> str:
+        """The test's name without its package (``unique_combination_of_columns``)."""
+        return self.test.rsplit('.', 1)[-1]
+
+    @property
+    def package(self) -> str | None:
+        return self.test.rsplit('.', 1)[0] if '.' in self.test else None
+
+    @property
+    def label(self) -> str:
+        """The test as a change names it: its name as written, then any name it is given
+        (``unique (order_key_is_unique)``)."""
+        return f'{self.test} ({self.custom_name})' if self.custom_name else self.test
+
+
+def yaml_tests(data: Any) -> list[TestDeclaration]:
+    """Every generic test one parsed dbt YAML file declares, in the order it declares them. An
+    entry that is not a test (a number, an empty mapping) is left out."""
+    found: list[TestDeclaration] = []
+    if not isinstance(data, dict):
+        return found
+
+    def add(resource: str, owner: str, column: str | None, entries: Any) -> None:
+        for entry in entries if isinstance(entries, list) else []:
+            declared = _test_declaration(resource, owner, column, entry)
+            if declared is not None:
+                found.append(declared)
+
+    def declared(entry: dict[str, Any]) -> Any:
+        return entry.get('data_tests') or entry.get('tests')
+
+    for kind in ('models', 'seeds', 'snapshots'):
+        for item in data.get(kind) or []:
+            if not isinstance(item, dict) or not item.get('name'):
+                continue
+            name = str(item['name'])
+            add(kind[:-1], name, None, declared(item))
+            for column in item.get('columns') or []:
+                if isinstance(column, dict) and column.get('name'):
+                    add(kind[:-1], name, str(column['name']), declared(column))
+    for source in data.get('sources') or []:
+        if not isinstance(source, dict):
+            continue
+        for table in source.get('tables') or []:
+            if isinstance(table, dict) and table.get('name'):
+                owner = f'{source.get("name")}.{table["name"]}'
+                add('source', owner, None, declared(table))
+                for column in table.get('columns') or []:
+                    if isinstance(column, dict) and column.get('name'):
+                        add('source', owner, str(column['name']), declared(column))
+    return found
+
+
+def _test_declaration(resource: str, owner: str, column: str | None, entry: Any) -> TestDeclaration | None:
+    if isinstance(entry, str):
+        return TestDeclaration(resource, owner, column, entry)
+    if not isinstance(entry, dict) or not entry:
+        return None
+    if 'test_name' in entry:
+        # The long form: the test's arguments beside its own name and test_name.
+        test, custom = str(entry['test_name']), entry.get('name')
+        args = {k: v for k, v in entry.items() if k not in ('test_name', 'name')}
+    else:
+        key, value = next(iter(entry.items()))
+        test = str(key)
+        args = dict(value) if isinstance(value, dict) else {}
+        custom = args.pop('name', None)
+    config = dict(args.pop('config', None) or {})
+    for key in ('severity', 'where'):
+        if key in args:
+            config[key] = args.pop(key)
+    arguments = args.pop('arguments', None)
+    kwargs = {**args, **(arguments if isinstance(arguments, dict) else {})}
+    return TestDeclaration(resource, owner, column, test, str(custom) if custom else None, kwargs, config)
 
 
 def _newest_source_mtime(project: DbtProject) -> float:
@@ -307,6 +412,9 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 def parse_relation_name(name: str | None, dialect: str | None) -> str | None:
     if not name:
         return None
+    from sqlglot import exp
+    from sqlglot.errors import SqlglotError
+
     try:
         table = exp.to_table(name, dialect=dialect)
     except (SqlglotError, ValueError):
@@ -412,6 +520,8 @@ _SOURCE = re.compile(r"\{\{\s*source\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+
 
 def render_refs(raw: str, manifest: dict[str, Any]) -> str:
     """Best-effort rendering of uncompiled dbt SQL: resolve ref() and source(), drop other Jinja."""
+    from konstruct.core.sql import strip_templating
+
     by_name: dict[str, str] = {}
     by_package: dict[tuple[str, str], str] = {}
     for node in manifest.get('nodes', {}).values():
@@ -445,6 +555,10 @@ def load(
 ) -> DbtLoad | None:
     """Add a dbt project's nodes, columns, tests and exposures to ``graph``. ``keep`` chooses
     which macro files may be read to render uncompiled models (by default, all)."""
+    # The SQL parser and Jinja, which finding a project and reading its configuration do not need.
+    from konstruct.core.sql import dialect_for
+    from konstruct.inputs.jinja import Renderer, render_model
+
     manifest = _read_json(project.manifest_path)
     if manifest is None:
         graph.warn(f'dbt: {project.name}: no readable manifest at {project.manifest_path}')
@@ -648,6 +762,12 @@ def _where_filters(value: Any) -> list[str]:
     ]
 
 
+def _threshold(value: Any) -> str | None:
+    """A test's ``error_if`` when it is not dbt's default (``!= 0``), which fails on any row."""
+    text = str(value).strip() if value is not None else ''
+    return text if text and text.replace(' ', '') not in ('!=0', '>0', '>=1') else None
+
+
 def _add_test(graph: Graph, item: dict[str, Any], path: str | None) -> None:
     meta = item.get('test_metadata') or {}
     config = item.get('config') or {}
@@ -664,6 +784,8 @@ def _add_test(graph: Graph, item: dict[str, Any], path: str | None) -> None:
                 for k, v in {
                     'test': meta.get('name') or 'singular',
                     'severity': config.get('severity'),
+                    # A threshold other than dbt's own lets some rows fail the test.
+                    'error_if': _threshold(config.get('error_if')),
                     'column': item.get('column_name'),
                     'where': config.get('where'),
                     'columns': (meta.get('kwargs') or {}).get('combination_of_columns'),
@@ -700,25 +822,102 @@ def select_nodes(graph: Graph, selectors: list[str], excludes: list[str]) -> lis
     ``package:``, ``config.materialized:``, wildcards, ``+`` graph operators and ``,``
     intersections. Unknown methods select nothing and are reported by the caller.
     """
-    nodes = [
-        n for n in graph.nodes.values() if 'dbt' in n.origins and n.kind in ('model', 'seed', 'snapshot')
-    ]
+    selectable = graph.indexed('dbt_selection', _Selectable, basis='relations')
     if not selectors:
-        chosen = {n.id for n in nodes}
+        chosen = set(selectable.ids)
     else:
         chosen = set()
         for selector in selectors:
-            chosen |= _select_one(selector, nodes, graph)
+            chosen |= _select_one(selector, selectable, graph)
     for exclude in excludes:
-        chosen -= _select_one(exclude, nodes, graph)
-    return [n for n in nodes if n.id in chosen]
+        chosen -= _select_one(exclude, selectable, graph)
+    return [n for n in selectable.nodes if n.id in chosen]
 
 
-def _select_one(selector: str, nodes: list[Node], graph: Graph) -> set[str]:
+class _Selectable:
+    """The dbt nodes a selector chooses from, in graph order, indexed by what a selector without
+    wildcards names: a tag, a name or the start of an fqn, a part of a path, a resource type, a
+    package or a materialisation. A selector is matched with :func:`_matches` against the nodes
+    the index gives it, or every node when it has wildcards. A build gives a node a path in place
+    where it had none (a SQL file that writes it), so a path selector is matched against the
+    nodes that had none too; it changes no other attribute a selector reads in place, and a
+    change through ``Graph.add_node`` makes the index again."""
+
+    def __init__(self, graph: Graph) -> None:
+        self.nodes = [
+            n for n in graph.nodes.values() if 'dbt' in n.origins and n.kind in ('model', 'seed', 'snapshot')
+        ]
+        self.ids = {n.id for n in self.nodes}
+        # fnmatch compares names as the file system does (os.path.normcase), so the keys do too.
+        self.index: dict[tuple[str, Any], dict[str, Node]] = {}
+        self.pathless: dict[str, Node] = {}
+        for node in self.nodes:
+            fqn = [None if part is None else os.path.normcase(part) for part in _parts(node.attrs.get('fqn'))]
+            if not node.path:
+                self.pathless[node.id] = node
+            path = (node.path or '').replace(os.sep, '/')
+            keys: set[tuple[str, Any]] = {
+                ('name', os.path.normcase(str(node.attrs.get('dbt_name') or node.name))),
+                ('resource_type', node.kind),
+                *(('tag', os.path.normcase(tag)) for tag in _texts(node.attrs.get('tags'))),
+                *(('part', os.path.normcase(part)) for part in path.split('/')),
+            }
+            # A manifest's value that is not text matches no selector's, so it has no key.
+            for method, attribute in (('package', 'package'), ('config.materialized', 'materialized')):
+                if isinstance(node.attrs.get(attribute), str):
+                    keys.add((method, node.attrs[attribute]))
+            for start in (0, 1):
+                for end in range(start + 1, len(fqn) + 1):
+                    if None in fqn[start:end]:
+                        break
+                    keys.add(('fqn', tuple(fqn[start:end])))
+            for key in keys:
+                self.index.setdefault(key, {})[node.id] = node
+        self.parts = sorted(str(key[1]) for key in self.index if key[0] == 'part')
+
+    def matching(self, method: str, value: str) -> set[str]:
+        """The ids of the nodes that ``method:value`` matches."""
+        return {n.id for n in self._candidates(method, value) if _matches(method, value, n)}
+
+    def _candidates(self, method: str, value: str) -> Iterable[Node]:
+        """Every node ``method:value`` can match, and perhaps others."""
+        if method in ('resource_type', 'package', 'config.materialized'):
+            return self.index.get((method, value), {}).values()
+        if any(character in value for character in '*?['):
+            return self.nodes
+        if method == 'default':
+            method = 'path' if '/' in value or value.endswith(('.sql', '.py', '.csv')) else 'fqn'
+        if method == 'tag':
+            return self.index.get(('tag', os.path.normcase(value)), {}).values()
+        if method == 'fqn':
+            parts = tuple(os.path.normcase(part) for part in value.split('.'))
+            return {
+                **self.index.get(('name', os.path.normcase(value)), {}),
+                **self.index.get(('fqn', parts), {}),
+            }.values()
+        if method == 'path':
+            # A path matches where a part of it, and what follows, starts with the value: that
+            # part is the value's first, or starts with it when the value is one part.
+            first, *rest = os.path.normcase(value.rstrip('/')).split(os.path.normcase('/'))
+            if rest:
+                return {**self.index.get(('part', first), {}), **self.pathless}.values()
+            return {
+                **{
+                    node.id: node
+                    for part in self.parts
+                    if part.startswith(first)
+                    for node in self.index[('part', part)].values()
+                },
+                **self.pathless,
+            }.values()
+        return []
+
+
+def _select_one(selector: str, selectable: _Selectable, graph: Graph) -> set[str]:
     parts = selector.split(',')
     result: set[str] | None = None
     for part in parts:
-        found = _select_atom(part, nodes, graph)
+        found = _select_atom(part, selectable, graph)
         result = found if result is None else result & found
     return result or set()
 
@@ -726,14 +925,14 @@ def _select_one(selector: str, nodes: list[Node], graph: Graph) -> set[str]:
 _GRAPH_OP = re.compile(r'^(@)?(\d*\+)?(.*?)(\+\d*)?$')
 
 
-def _select_atom(atom: str, nodes: list[Node], graph: Graph) -> set[str]:
+def _select_atom(atom: str, selectable: _Selectable, graph: Graph) -> set[str]:
     match = _GRAPH_OP.match(atom.strip())
     if not match:
         return set()
     at, up, body, down = match.groups()
     method, _, value = body.rpartition(':')
     method = method or 'default'
-    seeds = {n.id for n in nodes if _matches(method, value, n)}
+    seeds = selectable.matching(method, value)
     result = set(seeds)
     if up or at:
         depth = int(up[:-1]) if up and up[:-1] else None
@@ -744,8 +943,7 @@ def _select_atom(atom: str, nodes: list[Node], graph: Graph) -> set[str]:
         result |= downstream
         if at:
             result |= _relatives(graph, downstream, None, upstream=True)
-    valid = {n.id for n in nodes}
-    return result & valid
+    return result & selectable.ids
 
 
 def downstream_of(graph: Graph, start: set[str]) -> set[str]:
@@ -771,8 +969,25 @@ def _relatives(graph: Graph, start: set[str], depth: int | None, *, upstream: bo
     return found
 
 
+def _texts(value: Any) -> list[str]:
+    """The names a node's attribute holds (its tags), leaving out what is not text: a manifest
+    can hold ``null`` or a number there."""
+    return [part for part in _parts(value) if part is not None]
+
+
+def _parts(value: Any) -> list[str | None]:
+    """The parts of a node's attribute in order (its fqn), each None that is not text, which
+    a selector's part never matches."""
+    if not value:
+        return []
+    try:
+        return [part if isinstance(part, str) else None for part in value]
+    except TypeError:
+        return []
+
+
 def _matches(method: str, value: str, node: Node) -> bool:
-    fqn: list[str] = list(node.attrs.get('fqn') or [])
+    fqn = _parts(node.attrs.get('fqn'))
     name = str(node.attrs.get('dbt_name') or node.name)
     if method == 'default':
         if '/' in value or value.endswith(('.sql', '.py', '.csv')):
@@ -782,7 +997,7 @@ def _matches(method: str, value: str, node: Node) -> bool:
     if method == 'fqn':
         return _fqn_match(value, fqn, name)
     if method == 'tag':
-        return any(fnmatch(tag, value) for tag in node.attrs.get('tags', []))
+        return any(fnmatch(tag, value) for tag in _texts(node.attrs.get('tags')))
     if method == 'path':
         path = (node.path or '').replace(os.sep, '/')
         value = value.rstrip('/')
@@ -799,12 +1014,14 @@ def _matches(method: str, value: str, node: Node) -> bool:
     return False
 
 
-def _fqn_match(value: str, fqn: list[str], name: str) -> bool:
+def _fqn_match(value: str, fqn: list[str | None], name: str) -> bool:
     if fnmatch(name, value):
         return True
     parts = value.split('.')
     for start in (0, 1):
         window = fqn[start : start + len(parts)]
-        if len(window) == len(parts) and all(fnmatch(f, p) for f, p in zip(window, parts, strict=True)):
+        if len(window) == len(parts) and all(
+            f is not None and fnmatch(f, p) for f, p in zip(window, parts, strict=True)
+        ):
             return True
     return False

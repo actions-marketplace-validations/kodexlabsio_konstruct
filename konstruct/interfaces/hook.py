@@ -8,10 +8,11 @@ when the gate passes, and the findings, as a ``block`` decision, when it fails.
 
 The update never runs dbt and connects to no warehouse: a hook runs after every edit, unasked, so
 it reads files only, and Konstruct never imports or runs the project's own code. It builds into
-``.hook`` inside the output directory, starting from the build cache and without graph.html, so
-the graph the user built (with its warehouse metadata) is left as it is. Hooks for edits made in
-parallel take turns on ``.hook``, and one that finds the files as the last run left them gives
-that run's answer again rather than building once more.
+``.hook`` inside the output directory, starting from the build cache and writing there the
+graph, the cache, its own records and a ``.gitignore`` (no graph.html, REPORT.md or ontology.yml,
+which no one reads there), so the graph the user built (with its warehouse metadata) is left as
+it is. Hooks for edits made in parallel take turns on ``.hook``, and one that finds the files as
+the last run left them gives that run's answer again rather than building once more.
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ import time
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import IO, Any
+
+from konstruct.interfaces.untrusted import UNTRUSTED_CONTENT
 
 # Directories of build output, packages and environments: an edit there is not a change to the
 # data stack.
@@ -101,10 +104,12 @@ def _in_resource_paths(path: Path, root: Path) -> bool:
     """Whether ``path`` is under a resource path of the nearest dbt project that holds it."""
     import yaml
 
+    from konstruct.core import yamlio
+
     for project in path.parents:
         if (project / 'dbt_project.yml').is_file():
             try:
-                data = yaml.safe_load((project / 'dbt_project.yml').read_text(encoding='utf-8')) or {}
+                data = yamlio.read(project / 'dbt_project.yml') or {}
             except (yaml.YAMLError, OSError):
                 data = {}
             if not isinstance(data, dict):
@@ -198,8 +203,6 @@ def _context(text: str) -> dict[str, Any]:
 def _marked(answer: dict[str, Any]) -> dict[str, Any]:
     """``answer`` ending with the notice the MCP server gives: it quotes the repository's own
     text (names, SQL, paths, messages), which anyone who can commit to it writes."""
-    from konstruct.interfaces.mcp_server import UNTRUSTED_CONTENT
-
     if 'reason' in answer:
         answer['reason'] += f'\n\n{UNTRUSTED_CONTENT}'
     else:
@@ -207,10 +210,11 @@ def _marked(answer: dict[str, Any]) -> dict[str, Any]:
     return answer
 
 
-def fingerprint(root: Path, also: Iterable[Path] = ()) -> str | None:
+def fingerprint(root: Path, also: Iterable[Path] = (), facts: Iterable[str] = ()) -> str | None:
     """What the files the hook builds from hold: the commit and the diff's base, the content of
     every changed or untracked file in the repository, every dbt project's manifest at its
-    target-path, and the files in ``also`` that the gate reads besides (laws.json). None outside
+    target-path, and the files in ``also`` that the gate reads besides (laws.json); with
+    ``facts``, what else decides the answer (the Konstruct version and the plugins). None outside
     git. Content rather than size and time, so two edits of the same size in the same second
     still differ."""
     from konstruct.analysis.diff import default_base
@@ -241,6 +245,8 @@ def fingerprint(root: Path, also: Iterable[Path] = ()) -> str | None:
         digest.update(str(project.manifest_path).encode() + b'\0' + _content(project.manifest_path))
     for path in also:
         digest.update(str(path).encode() + b'\0' + _content(path))
+    for fact in facts:
+        digest.update(b'fact\0' + fact.encode() + b'\0')
     return digest.hexdigest()
 
 
@@ -265,10 +271,12 @@ def _unreadable(path: Path, notes: list[str]) -> list[str]:
     the diff could not compare (its notes for the file)."""
     import yaml
 
+    from konstruct.core import yamlio
+
     problems = list(notes)
     if path.suffix in ('.yml', '.yaml') and path.is_file():
         try:
-            yaml.safe_load(path.read_text(encoding='utf-8'))
+            yamlio.read(path)
         except yaml.YAMLError as error:
             problems.append(f'{path.name} is not valid YAML: {" ".join(str(error).split())}')
     return problems
@@ -315,15 +323,14 @@ def post_edit(event: dict[str, Any], *, remind: bool = False) -> dict[str, Any] 
 
 
 def _gate(root: Path, out_dir: Path, path: Path, shown: str) -> dict[str, Any]:
+    # Only what finding the files as the last run left them needs; the gate's modules, and the SQL
+    # parser and Jinja with them, are imported once it has to run.
+    from konstruct import __version__
     from konstruct.analysis.diff import DiffError
-    from konstruct.analysis.gate import gate, plugins_at
-    from konstruct.analysis.laws import FILE_NAME as LAWS_FILE
-    from konstruct.analysis.laws import recorded
-    from konstruct.analysis.lock import FILE_NAME as LOCK_FILE
     from konstruct.analysis.query import QueryError
-    from konstruct.core.jsonio import write_text
-    from konstruct.engine.config import ConfigError, load_config
-    from konstruct.interfaces.project import Project
+    from konstruct.core.files import LAWS as LAWS_FILE
+    from konstruct.core.files import LOCK as LOCK_FILE
+    from konstruct.engine.config import ConfigError, load_config, plugins_at
     from konstruct.plugins.registry import Plugins
 
     scratch = out_dir / '.hook'
@@ -342,10 +349,19 @@ def _gate(root: Path, out_dir: Path, path: Path, shown: str) -> dict[str, Any]:
                 )
             started = time.monotonic()
             config = load_config(root, scratch)
+            # As in `konstruct gate`, the plugins main enables run too, so an edit that takes one
+            # out of konstruct.toml is still judged by it.
+            config.plugins = list(dict.fromkeys([*config.plugins, *plugins_at(root, None)]))
+            plugins = Plugins.for_config(config)
             # Taken before the build, so an edit made while it runs is never mistaken for checked.
-            # The recorded laws and the consumers' lockfiles are read by the gate too.
+            # The recorded laws and the consumers' lockfiles are read by the gate too, and another
+            # Konstruct or another set of plugins may judge the same files otherwise.
             locks = [repository / LOCK_FILE for repository in config.repositories]
-            stamp = fingerprint(root, [out_dir / LAWS_FILE, *locks])
+            stamp = fingerprint(
+                root,
+                [out_dir / LAWS_FILE, *locks],
+                [__version__, *(f'{p.label} {"on" if p.enabled else "off"}' for p in plugins.plugins)],
+            )
             last = _last(scratch)
             if stamp is not None and last.get('fingerprint') == stamp and (scratch / 'graph.json').is_file():
                 return _answer(
@@ -356,17 +372,18 @@ def _gate(root: Path, out_dir: Path, path: Path, shown: str) -> dict[str, Any]:
                     last.get('notes', {}),
                     last.get('unlawful'),
                 )
+            from konstruct.analysis.gate import gate
+            from konstruct.analysis.laws import recorded
+            from konstruct.core.jsonio import write_text
+            from konstruct.interfaces.project import Project
+
             if (out_dir / 'cache.json').is_file() and not (scratch / 'cache.json').is_file():
                 shutil.copy2(out_dir / 'cache.json', scratch / 'cache.json')
             config.override(run_dbt=False, warehouses=False)
-            config.html = False
+            config.html = config.report = False
             # The copy reads no warehouse: it keeps the tags and masking policies the project's
             # own graph holds, as the last full build read them, and none it has since dropped.
             config.governance_from = out_dir / 'graph.json'
-
-            # As in `konstruct gate`, the plugins main enables run too, so an edit that takes one
-            # out of konstruct.toml is still judged by it.
-            config.plugins = list(dict.fromkeys([*config.plugins, *plugins_at(root, None)]))
             checker = Project(root, out_dir=scratch)
             # Progress the build prints must not reach standard output, which carries the JSON.
             with contextlib.redirect_stdout(sys.stderr):
@@ -374,9 +391,7 @@ def _gate(root: Path, out_dir: Path, path: Path, shown: str) -> dict[str, Any]:
                 diff = checker.diff()
                 laws, laws_from = recorded(root, out_dir)
                 unlawful = laws_from if laws is None else None
-                result = gate(
-                    checker.graph, diff, plugins=Plugins.for_config(config), laws=laws, laws_from=laws_from
-                )
+                result = gate(checker.graph, diff, plugins=plugins, laws=laws, laws_from=laws_from)
             notes: dict[str, list[str]] = {}
             for relation in diff.relations:
                 if relation.note:

@@ -70,15 +70,16 @@ from konstruct.analysis.verify import (
     read_only_query,
     rewrite,
 )
-from konstruct.core import formats, jsonio
+from konstruct.core import files, formats, jsonio
 from konstruct.core.formats import FIELD, FormatError, document
 from konstruct.core.graph import Graph, Node
-from konstruct.core.sql import PARSE_ERRORS, build_schema, case_insensitive, table_key
+from konstruct.core.sql import PARSE_ERRORS, build_schema, case_insensitive, table_key, without_readings
+from konstruct.semantics.ontology import enforced_key, fails_on_any_row
 
 if TYPE_CHECKING:
     from konstruct.interfaces.layout import Style
 
-FILE_NAME = 'laws.json'
+FILE_NAME = files.LAWS
 """The file in the output directory that holds the laws."""
 FORMAT = 1
 """The version of the ``laws.json`` format, raised when a reader of an older one would misread it.
@@ -111,8 +112,6 @@ _EXACT_CASTS = frozenset({exp.DataType.Type.DOUBLE, exp.DataType.Type.BIGDECIMAL
 # Dialects where DECIMAL with no precision keeps any number exactly. Elsewhere it has a default
 # scale (DuckDB's DECIMAL(18, 3), Spark's DECIMAL(10, 0), Snowflake's NUMBER(38, 0)) and rounds.
 _EXACT_DECIMAL = frozenset({'postgres'})
-# Warehouses where a primary key is informational: declared, never checked.
-_INFORMATIONAL_KEYS = frozenset({'snowflake', 'bigquery', 'redshift', 'databricks', 'spark'})
 # Projections that return several rows for each input row.
 _SET_RETURNING = (
     exp.Explode,
@@ -797,8 +796,8 @@ class _Tests:
     ``unique_combination_of_columns`` test, or a primary key the warehouse enforces. A test with a
     ``where`` holds only on the rows it selects, so it proves nothing about the whole relation: its
     key is kept apart, to name in a reason, and its other tests are left out. A dbt constraint is
-    enforced only under an enforced contract, and Snowflake, BigQuery, Redshift and Databricks
-    never enforce a primary key.
+    enforced only under an enforced contract, and the warehouses of
+    :data:`konstruct.semantics.ontology.INFORMATIONAL_KEYS` never enforce a primary key.
     """
 
     def __init__(self, graph: Graph, without: Collection[str] = ()) -> None:
@@ -806,15 +805,14 @@ class _Tests:
         self.filtered: dict[str, list[tuple[frozenset[str], str]]] = defaultdict(list)
         self.not_null: dict[tuple[str, str], str] = {}
         self.relationships: dict[tuple[str, str], dict[tuple[str, str], str]] = defaultdict(dict)
-        enforcing = str(graph.meta.get('dialect') or 'duckdb') not in _INFORMATIONAL_KEYS
         for node in graph.nodes.values():
             if node.kind != 'test':
-                primary = [str(c).lower() for c in node.attrs.get('primary_key') or []]
-                enforced = 'dbt' not in node.origins or node.attrs.get('primary_key_enforced')
-                if primary and enforcing and enforced:
+                primary = enforced_key(graph, node)
+                if primary:
                     self.keys[node.id].append((frozenset(primary), f'{node.id}:primary_key'))
                 continue
-            if node.id in without:
+            # A test whose failures do not fail it guarantees nothing.
+            if node.id in without or not fails_on_any_row(node):
                 continue
             where = bool(node.attrs.get('where'))
             keys = self.filtered if where else self.keys
@@ -1134,6 +1132,8 @@ class _Analyser:
             head, _, body = condition.partition(': ')
             if not head.endswith('JOIN ON'):
                 continue
+            # A self-join's readings are each the relation, whose keys are the same.
+            body = without_readings(body, self.dialect)
             equalities = [part.split(' = ') for part in body.split(' AND ')]
             if any(len(e) != 2 or not all(_PHYSICAL.match(side) for side in e) for e in equalities):
                 continue
